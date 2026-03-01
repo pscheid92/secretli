@@ -1,66 +1,150 @@
 package httpserver
 
 import (
-	"context"
+	"io/fs"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
-	"github.com/go-chi/chi/v5/middleware"
+	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v4/middleware"
+	"golang.org/x/time/rate"
+
+	"github.com/pscheid92/secretli/internal/platform/correlation"
+	apperrors "github.com/pscheid92/secretli/internal/platform/errors"
 )
 
-// requestIDResponseHeader copies chi's request ID from context to the X-Request-Id response header.
-func requestIDResponseHeader(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if id := middleware.GetReqID(r.Context()); id != "" {
-			w.Header().Set("X-Request-Id", id)
-		}
-		next.ServeHTTP(w, r)
-	})
+func httpErrorHandler(err error, c echo.Context) {
+	if c.Response().Committed {
+		return
+	}
+
+	appErr := apperrors.AsAppError(err)
+
+	if appErr.Type == apperrors.Internal {
+		slog.ErrorContext(c.Request().Context(), appErr.Message, "error", appErr.Cause)
+	}
+
+	_ = c.JSON(appErr.HTTPStatus(), appErr.ToResponse())
 }
 
-// slogLogger implements chi's middleware.LogFormatter to emit structured slog entries.
-type slogLogger struct{}
+func parseOrigins(origins string) []string {
+	if origins == "" {
+		return nil
+	}
 
-func (l *slogLogger) NewLogEntry(r *http.Request) middleware.LogEntry {
-	return &slogEntry{
-		ctx:    r.Context(),
-		method: r.Method,
-		path:   r.URL.Path,
-		start:  time.Now(),
+	var result []string
+	for _, o := range strings.Split(origins, ",") {
+		o = strings.TrimSpace(o)
+		if o != "" {
+			result = append(result, o)
+		}
+	}
+
+	return result
+}
+
+func correlationMiddleware() echo.MiddlewareFunc {
+	return func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c echo.Context) error {
+			id := c.Response().Header().Get(echo.HeaderXRequestID)
+			if id != "" {
+				ctx := correlation.WithRequestID(c.Request().Context(), id)
+				c.SetRequest(c.Request().WithContext(ctx))
+			}
+			return next(c)
+		}
 	}
 }
 
-type slogEntry struct {
-	ctx    context.Context
-	method string
-	path   string
-	start  time.Time
-}
-
-func (e *slogEntry) Write(status, _ int, _ http.Header, _ time.Duration, _ interface{}) {
-	slog.InfoContext(e.ctx, "request",
-		"method", e.method,
-		"path", e.path,
-		"status", status,
-		"duration_ms", time.Since(e.start).Milliseconds(),
-	)
-}
-
-func (e *slogEntry) Panic(v interface{}, _ []byte) {
-	slog.ErrorContext(e.ctx, "panic recovered",
-		"error", v,
-		"method", e.method,
-		"path", e.path,
-	)
-}
-
-func securityHeadersMiddleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("X-Content-Type-Options", "nosniff")
-		w.Header().Set("X-Frame-Options", "DENY")
-		w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:")
-		w.Header().Set("Referrer-Policy", "no-referrer")
-		next.ServeHTTP(w, r)
+func requestLogger() echo.MiddlewareFunc {
+	return middleware.RequestLoggerWithConfig(middleware.RequestLoggerConfig{
+		LogMethod:   true,
+		LogURIPath:  true,
+		LogStatus:   true,
+		LogLatency:  true,
+		LogError:    true,
+		HandleError: true,
+		LogValuesFunc: func(c echo.Context, v middleware.RequestLoggerValues) error {
+			if v.Error != nil {
+				slog.ErrorContext(c.Request().Context(), "request",
+					"method", v.Method,
+					"path", v.URIPath,
+					"status", v.Status,
+					"duration_ms", v.Latency.Milliseconds(),
+					"error", v.Error,
+				)
+			} else {
+				slog.InfoContext(c.Request().Context(), "request",
+					"method", v.Method,
+					"path", v.URIPath,
+					"status", v.Status,
+					"duration_ms", v.Latency.Milliseconds(),
+				)
+			}
+			return nil
+		},
 	})
+}
+
+func securityHeaders() echo.MiddlewareFunc {
+	return middleware.SecureWithConfig(middleware.SecureConfig{
+		XSSProtection:         "",
+		ContentTypeNosniff:    "nosniff",
+		XFrameOptions:         "DENY",
+		ContentSecurityPolicy: "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:",
+		ReferrerPolicy:        "no-referrer",
+	})
+}
+
+func corsMiddleware(origins []string) echo.MiddlewareFunc {
+	return middleware.CORSWithConfig(middleware.CORSConfig{
+		AllowOrigins:     origins,
+		AllowMethods:     []string{http.MethodGet, http.MethodPost, http.MethodDelete, http.MethodOptions},
+		AllowHeaders:     []string{"Content-Type", HeaderRetrievalToken, HeaderDeletionToken},
+		AllowCredentials: true,
+		MaxAge:           86400,
+	})
+}
+
+func rateLimiter(limit int, window time.Duration) echo.MiddlewareFunc {
+	return middleware.RateLimiterWithConfig(middleware.RateLimiterConfig{
+		Store: middleware.NewRateLimiterMemoryStoreWithConfig(
+			middleware.RateLimiterMemoryStoreConfig{
+				Rate:      rate.Limit(float64(limit) / window.Seconds()),
+				Burst:     limit,
+				ExpiresIn: 3 * time.Minute,
+			},
+		),
+		IdentifierExtractor: func(c echo.Context) (string, error) {
+			return c.RealIP(), nil
+		},
+		DenyHandler: func(c echo.Context, identifier string, err error) error {
+			c.Response().Header().Set("Retry-After", "60")
+			return c.JSON(http.StatusTooManyRequests, map[string]string{"error": "rate limit exceeded"})
+		},
+	})
+}
+
+func spaHandler(fsys fs.FS) echo.HandlerFunc {
+	fileServer := http.FileServer(http.FS(fsys))
+
+	return func(c echo.Context) error {
+		path := strings.TrimPrefix(c.Request().URL.Path, "/")
+		if path == "" {
+			path = "."
+		}
+
+		f, err := fsys.Open(path)
+		if err != nil {
+			c.Request().URL.Path = "/"
+			fileServer.ServeHTTP(c.Response(), c.Request())
+			return nil
+		}
+		_ = f.Close()
+
+		fileServer.ServeHTTP(c.Response(), c.Request())
+		return nil
+	}
 }

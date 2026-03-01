@@ -12,5 +12,8 @@ CREATE TABLE secrets (
 
 CREATE INDEX idx_secrets_expires_at ON secrets (expires_at) WHERE retrieved_at IS NULL;
 
+CREATE INDEX idx_secrets_burn_retrieved ON secrets (retrieved_at)
+WHERE burn_after_read = true AND retrieved_at IS NOT NULL;
+
 ---- create above / drop below ----
 DROP TABLE IF EXISTS secrets;

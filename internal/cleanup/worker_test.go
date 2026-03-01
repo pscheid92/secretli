@@ -8,13 +8,18 @@ import (
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/pscheid92/secretli/internal/adapter/metrics"
 	"github.com/pscheid92/secretli/internal/domain"
 )
+
+func testMetrics() *metrics.SecretMetrics {
+	return metrics.NewSecretMetrics(prometheus.NewRegistry())
+}
 
 // --- Mock implementations ---
 
 type mockSecretRepo struct {
-	deleteExpiredCount  int64
 	deleteExpiredKeys   []string
 	deleteExpiredErr    error
 	deleteExpiredCalled atomic.Int32
@@ -24,14 +29,21 @@ func (m *mockSecretRepo) Create(_ context.Context, _ *domain.Secret) error { ret
 func (m *mockSecretRepo) GetByPublicID(_ context.Context, _ string) (*domain.Secret, error) {
 	return nil, nil
 }
-func (m *mockSecretRepo) GetAndDeleteByPublicID(_ context.Context, _ string) (*domain.Secret, error) {
-	return nil, nil
-}
 func (m *mockSecretRepo) SetRetrievedAt(_ context.Context, _ string) error { return nil }
 func (m *mockSecretRepo) Delete(_ context.Context, _ string) error        { return nil }
-func (m *mockSecretRepo) DeleteExpired(_ context.Context) (int64, []string, error) {
+func (m *mockSecretRepo) DeleteExpired(_ context.Context, beforeDelete func(string) error) (int64, error) {
 	m.deleteExpiredCalled.Add(1)
-	return m.deleteExpiredCount, m.deleteExpiredKeys, m.deleteExpiredErr
+	if m.deleteExpiredErr != nil {
+		return 0, m.deleteExpiredErr
+	}
+	var deleted int64
+	for _, id := range m.deleteExpiredKeys {
+		if err := beforeDelete(id); err != nil {
+			continue
+		}
+		deleted++
+	}
+	return deleted, nil
 }
 
 type mockFileStore struct {
@@ -52,12 +64,11 @@ func (m *mockFileStore) Delete(_ context.Context, key string) error {
 
 func TestRunCycle_Success(t *testing.T) {
 	secretRepo := &mockSecretRepo{
-		deleteExpiredCount: 3,
-		deleteExpiredKeys:  []string{"pub1", "pub2", "pub3"},
+		deleteExpiredKeys: []string{"pub1", "pub2", "pub3"},
 	}
 	fileStore := &mockFileStore{}
 
-	w := NewWorker(time.Minute, secretRepo, fileStore, nil)
+	w := NewWorker(time.Minute, secretRepo, fileStore, testMetrics())
 	w.runCycle(context.Background())
 
 	if secretRepo.deleteExpiredCalled.Load() != 1 {
@@ -82,7 +93,7 @@ func TestRunCycle_RepoErrors(t *testing.T) {
 	}
 	fileStore := &mockFileStore{}
 
-	w := NewWorker(time.Minute, secretRepo, fileStore, nil)
+	w := NewWorker(time.Minute, secretRepo, fileStore, testMetrics())
 
 	// Should not panic despite repo errors.
 	w.runCycle(context.Background())
@@ -93,13 +104,10 @@ func TestRunCycle_RepoErrors(t *testing.T) {
 }
 
 func TestRunCycle_NoExpiredSecrets(t *testing.T) {
-	secretRepo := &mockSecretRepo{
-		deleteExpiredCount: 0,
-		deleteExpiredKeys:  nil,
-	}
+	secretRepo := &mockSecretRepo{}
 	fileStore := &mockFileStore{}
 
-	w := NewWorker(time.Minute, secretRepo, fileStore, nil)
+	w := NewWorker(time.Minute, secretRepo, fileStore, testMetrics())
 	w.runCycle(context.Background())
 
 	if fileStore.deleteCalled.Load() != 0 {
@@ -111,7 +119,7 @@ func TestRun_ContextCancellation(t *testing.T) {
 	secretRepo := &mockSecretRepo{}
 	fileStore := &mockFileStore{}
 
-	w := NewWorker(10*time.Millisecond, secretRepo, fileStore, nil)
+	w := NewWorker(10*time.Millisecond, secretRepo, fileStore, testMetrics())
 
 	ctx, cancel := context.WithCancel(context.Background())
 

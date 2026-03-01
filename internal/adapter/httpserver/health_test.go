@@ -7,13 +7,19 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/labstack/echo/v4"
 )
 
 func TestLiveness(t *testing.T) {
+	e := echo.New()
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/health/live", nil)
 	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
 
-	Liveness(rec, req)
+	if err := Liveness(c); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
 	if rec.Code != http.StatusOK {
 		t.Errorf("status = %d, want %d", rec.Code, http.StatusOK)
@@ -28,8 +34,8 @@ func TestLiveness(t *testing.T) {
 	}
 
 	ct := rec.Header().Get("Content-Type")
-	if ct != "application/json" {
-		t.Errorf("Content-Type = %q, want %q", ct, "application/json")
+	if ct != "application/json; charset=UTF-8" && ct != "application/json" {
+		t.Errorf("Content-Type = %q, want application/json", ct)
 	}
 }
 
@@ -42,11 +48,15 @@ func (m *mockPinger) Ping(_ context.Context) error {
 }
 
 func TestReadinessWithDB_Healthy(t *testing.T) {
+	e := echo.New()
 	handler := ReadinessWithDB(&mockPinger{err: nil})
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/health/ready", nil)
 	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
 
-	handler(rec, req)
+	if err := handler(c); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
 	if rec.Code != http.StatusOK {
 		t.Errorf("status = %d, want %d", rec.Code, http.StatusOK)
@@ -62,11 +72,15 @@ func TestReadinessWithDB_Healthy(t *testing.T) {
 }
 
 func TestReadinessWithDB_Unhealthy(t *testing.T) {
+	e := echo.New()
 	handler := ReadinessWithDB(&mockPinger{err: errors.New("connection refused")})
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/health/ready", nil)
 	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
 
-	handler(rec, req)
+	if err := handler(c); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
 	if rec.Code != http.StatusServiceUnavailable {
 		t.Errorf("status = %d, want %d", rec.Code, http.StatusServiceUnavailable)

@@ -5,8 +5,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/go-chi/chi/v5"
-	"github.com/go-chi/chi/v5/middleware"
+	"github.com/labstack/echo/v4"
 	"github.com/prometheus/client_golang/prometheus"
 )
 
@@ -47,38 +46,40 @@ func NewHTTPMetrics(reg *prometheus.Registry) *HTTPMetrics {
 	return m
 }
 
-func (m *HTTPMetrics) Middleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Don't record metrics for the metrics endpoint itself.
-		if r.URL.Path == "/metrics" {
-			next.ServeHTTP(w, r)
-			return
+func (m *HTTPMetrics) Middleware() echo.MiddlewareFunc {
+	return func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c echo.Context) error {
+			// Don't record metrics for the metrics endpoint itself.
+			if c.Request().URL.Path == "/metrics" {
+				return next(c)
+			}
+
+			start := time.Now()
+			m.InFlightGauge.Inc()
+
+			err := next(c)
+
+			m.InFlightGauge.Dec()
+
+			route := c.Path()
+			if route == "" {
+				route = "/*"
+			}
+
+			status := c.Response().Status
+			if status == 0 {
+				status = http.StatusOK
+			}
+
+			labels := prometheus.Labels{
+				"method":      c.Request().Method,
+				"route":       route,
+				"status_code": strconv.Itoa(status),
+			}
+			m.RequestDuration.With(labels).Observe(time.Since(start).Seconds())
+			m.RequestsTotal.With(labels).Inc()
+
+			return err
 		}
-
-		start := time.Now()
-		m.InFlightGauge.Inc()
-		ww := middleware.NewWrapResponseWriter(w, r.ProtoMajor)
-
-		next.ServeHTTP(ww, r)
-
-		m.InFlightGauge.Dec()
-
-		route := "/*"
-		if rctx := chi.RouteContext(r.Context()); rctx != nil && rctx.RoutePattern() != "" {
-			route = rctx.RoutePattern()
-		}
-
-		status := ww.Status()
-		if status == 0 {
-			status = http.StatusOK
-		}
-
-		labels := prometheus.Labels{
-			"method":      r.Method,
-			"route":       route,
-			"status_code": strconv.Itoa(status),
-		}
-		m.RequestDuration.With(labels).Observe(time.Since(start).Seconds())
-		m.RequestsTotal.With(labels).Inc()
-	})
+	}
 }

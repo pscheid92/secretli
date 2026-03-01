@@ -3,9 +3,22 @@ package correlation
 import (
 	"context"
 	"log/slog"
-
-	"github.com/go-chi/chi/v5/middleware"
 )
+
+type ctxKey struct{}
+
+// WithRequestID stores a request ID in the context.
+func WithRequestID(ctx context.Context, id string) context.Context {
+	return context.WithValue(ctx, ctxKey{}, id)
+}
+
+// RequestID retrieves the request ID from the context.
+func RequestID(ctx context.Context) string {
+	if id, ok := ctx.Value(ctxKey{}).(string); ok {
+		return id
+	}
+	return ""
+}
 
 type Handler struct {
 	inner slog.Handler
@@ -20,7 +33,7 @@ func (h *Handler) Enabled(ctx context.Context, level slog.Level) bool {
 }
 
 func (h *Handler) Handle(ctx context.Context, record slog.Record) error {
-	if id := middleware.GetReqID(ctx); id != "" {
+	if id := RequestID(ctx); id != "" {
 		record.AddAttrs(slog.String("request_id", id))
 	}
 	return h.inner.Handle(ctx, record)

@@ -15,12 +15,12 @@ type Secret struct {
 }
 
 type CreateSecretRequest struct {
-	PublicID       string `json:"public_id" validate:"required"`
-	RetrievalToken string `json:"retrieval_token" validate:"required"`
-	DeletionToken  string `json:"deletion_token" validate:"required"`
-	EncryptedMeta  string `json:"encrypted_meta" validate:"required"`
-	Expiration     string `json:"expiration" validate:"required,expiration"`
-	BurnAfterRead  bool   `json:"burn_after_read"`
+	PublicID       string `json:"public_id" form:"public_id" validate:"required"`
+	RetrievalToken string `json:"retrieval_token" form:"retrieval_token" validate:"required"`
+	DeletionToken  string `json:"deletion_token" form:"deletion_token" validate:"required"`
+	EncryptedMeta  string `json:"encrypted_meta" form:"encrypted_meta" validate:"required"`
+	Expiration     string `json:"expiration" form:"expiration" validate:"required,expiration"`
+	BurnAfterRead  bool   `json:"burn_after_read" form:"burn_after_read"`
 }
 
 type SecretMetadataResponse struct {

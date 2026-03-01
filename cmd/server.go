@@ -84,8 +84,8 @@ func runGracefulShutdown(app *httpserver.App, worker *cleanup.Worker) error {
 	g, ctx := errgroup.WithContext(ctx)
 
 	g.Go(func() error {
-		slog.Info("server starting", "port", app.HTTPServer.Addr)
-		if err := app.HTTPServer.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
+		slog.Info("server starting")
+		if err := app.Start(); !errors.Is(err, http.ErrServerClosed) {
 			return err
 		}
 		return nil
@@ -96,7 +96,7 @@ func runGracefulShutdown(app *httpserver.App, worker *cleanup.Worker) error {
 		slog.Info("shutting down server")
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
-		return app.HTTPServer.Shutdown(shutdownCtx)
+		return app.Shutdown(shutdownCtx)
 	})
 
 	g.Go(func() error {

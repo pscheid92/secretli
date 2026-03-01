@@ -42,31 +42,6 @@ func (q *Queries) CreateSecret(ctx context.Context, arg CreateSecretParams) erro
 	return err
 }
 
-const deleteExpiredSecrets = `-- name: DeleteExpiredSecrets :many
-DELETE FROM secrets WHERE expires_at < NOW()
-RETURNING public_id
-`
-
-func (q *Queries) DeleteExpiredSecrets(ctx context.Context) ([]string, error) {
-	rows, err := q.db.Query(ctx, deleteExpiredSecrets)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []string{}
-	for rows.Next() {
-		var public_id string
-		if err := rows.Scan(&public_id); err != nil {
-			return nil, err
-		}
-		items = append(items, public_id)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const deleteSecret = `-- name: DeleteSecret :execrows
 DELETE FROM secrets WHERE public_id = $1
 `
@@ -77,32 +52,6 @@ func (q *Queries) DeleteSecret(ctx context.Context, publicID string) (int64, err
 		return 0, err
 	}
 	return result.RowsAffected(), nil
-}
-
-const getAndDeleteSecretByPublicID = `-- name: GetAndDeleteSecretByPublicID :one
-DELETE FROM secrets
-WHERE public_id = $1 AND expires_at > NOW()
-RETURNING public_id, retrieval_token, deletion_token,
-    encrypted_meta, blob_size,
-    burn_after_read,
-    expires_at, created_at, retrieved_at
-`
-
-func (q *Queries) GetAndDeleteSecretByPublicID(ctx context.Context, publicID string) (Secret, error) {
-	row := q.db.QueryRow(ctx, getAndDeleteSecretByPublicID, publicID)
-	var i Secret
-	err := row.Scan(
-		&i.PublicID,
-		&i.RetrievalToken,
-		&i.DeletionToken,
-		&i.EncryptedMeta,
-		&i.BlobSize,
-		&i.BurnAfterRead,
-		&i.ExpiresAt,
-		&i.CreatedAt,
-		&i.RetrievedAt,
-	)
-	return i, err
 }
 
 const getSecretByPublicID = `-- name: GetSecretByPublicID :one
@@ -129,6 +78,33 @@ func (q *Queries) GetSecretByPublicID(ctx context.Context, publicID string) (Sec
 		&i.RetrievedAt,
 	)
 	return i, err
+}
+
+const selectExpiredForCleanup = `-- name: SelectExpiredForCleanup :many
+SELECT public_id FROM secrets
+WHERE expires_at < NOW()
+   OR (burn_after_read = true AND retrieved_at IS NOT NULL)
+FOR UPDATE SKIP LOCKED
+`
+
+func (q *Queries) SelectExpiredForCleanup(ctx context.Context) ([]string, error) {
+	rows, err := q.db.Query(ctx, selectExpiredForCleanup)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []string{}
+	for rows.Next() {
+		var public_id string
+		if err := rows.Scan(&public_id); err != nil {
+			return nil, err
+		}
+		items = append(items, public_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const setSecretRetrievedAt = `-- name: SetSecretRetrievedAt :exec

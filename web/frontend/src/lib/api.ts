@@ -46,7 +46,12 @@ export function createSecret(
   blob: Blob,
 ): Promise<CreateSecretResponse> {
   const form = new FormData();
-  form.append("metadata", JSON.stringify(params));
+  form.append("public_id", params.public_id);
+  form.append("retrieval_token", params.retrieval_token);
+  form.append("deletion_token", params.deletion_token);
+  form.append("encrypted_meta", params.encrypted_meta);
+  form.append("expiration", params.expiration);
+  form.append("burn_after_read", String(params.burn_after_read));
   form.append("file", blob);
 
   return request("/api/v1/secrets", {

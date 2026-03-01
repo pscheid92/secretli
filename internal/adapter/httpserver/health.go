@@ -3,6 +3,8 @@ package httpserver
 import (
 	"context"
 	"net/http"
+
+	"github.com/labstack/echo/v4"
 )
 
 type healthResponse struct {
@@ -13,16 +15,16 @@ type Pinger interface {
 	Ping(ctx context.Context) error
 }
 
-func Liveness(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, healthResponse{Status: "ok"})
+func Liveness(c echo.Context) error {
+	return c.JSON(http.StatusOK, healthResponse{Status: "ok"})
 }
 
-func ReadinessWithDB(pinger Pinger) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		if err := pinger.Ping(r.Context()); err != nil {
-			writeJSON(w, http.StatusServiceUnavailable, healthResponse{Status: "unavailable"})
-			return
+func ReadinessWithDB(pinger Pinger) echo.HandlerFunc {
+	return func(c echo.Context) error {
+		ctx := c.Request().Context()
+		if err := pinger.Ping(ctx); err != nil {
+			return c.JSON(http.StatusServiceUnavailable, healthResponse{Status: "unavailable"})
 		}
-		writeJSON(w, http.StatusOK, healthResponse{Status: "ok"})
+		return c.JSON(http.StatusOK, healthResponse{Status: "ok"})
 	}
 }

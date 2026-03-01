@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -55,17 +56,6 @@ func (r *SecretRepo) GetByPublicID(ctx context.Context, publicID string) (*domai
 	return secretFromRow(row), nil
 }
 
-func (r *SecretRepo) GetAndDeleteByPublicID(ctx context.Context, publicID string) (*domain.Secret, error) {
-	row, err := r.q.GetAndDeleteSecretByPublicID(ctx, publicID)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, domain.ErrNotFound
-	}
-	if err != nil {
-		return nil, fmt.Errorf("delete and return secret: %w", err)
-	}
-	return secretFromRow(row), nil
-}
-
 func (r *SecretRepo) SetRetrievedAt(ctx context.Context, publicID string) error {
 	if err := r.q.SetSecretRetrievedAt(ctx, publicID); err != nil {
 		return fmt.Errorf("set retrieved_at: %w", err)
@@ -84,12 +74,37 @@ func (r *SecretRepo) Delete(ctx context.Context, publicID string) error {
 	return nil
 }
 
-func (r *SecretRepo) DeleteExpired(ctx context.Context) (int64, []string, error) {
-	publicIDs, err := r.q.DeleteExpiredSecrets(ctx)
+func (r *SecretRepo) DeleteExpired(ctx context.Context, beforeDelete func(publicID string) error) (int64, error) {
+	tx, err := r.pool.Begin(ctx)
 	if err != nil {
-		return 0, nil, fmt.Errorf("delete expired secrets: %w", err)
+		return 0, fmt.Errorf("begin tx: %w", err)
 	}
-	return int64(len(publicIDs)), publicIDs, nil
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	qtx := r.q.WithTx(tx)
+
+	publicIDs, err := qtx.SelectExpiredForCleanup(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("select expired: %w", err)
+	}
+
+	var deleted int64
+	for _, id := range publicIDs {
+		if err := beforeDelete(id); err != nil {
+			slog.ErrorContext(ctx, "cleanup: beforeDelete failed, skipping", "public_id", id, "error", err)
+			continue
+		}
+		if _, err := qtx.DeleteSecret(ctx, id); err != nil {
+			slog.ErrorContext(ctx, "cleanup: delete row failed", "public_id", id, "error", err)
+			continue
+		}
+		deleted++
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return 0, fmt.Errorf("commit tx: %w", err)
+	}
+	return deleted, nil
 }
 
 func secretFromRow(row dbsqlc.Secret) *domain.Secret {

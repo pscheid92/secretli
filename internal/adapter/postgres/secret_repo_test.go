@@ -2,6 +2,7 @@ package postgres_test
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -86,35 +87,6 @@ func TestSecretRepo_GetExpired(t *testing.T) {
 	}
 }
 
-func TestSecretRepo_GetAndDelete(t *testing.T) {
-	pool := setupTestDB(t)
-	repo := pgadapter.NewSecretRepo(pool)
-	ctx := context.Background()
-
-	secret := newTestSecret("burn-001", time.Now().Add(1*time.Hour))
-	secret.BurnAfterRead = true
-	if err := repo.Create(ctx, secret); err != nil {
-		t.Fatalf("create: %v", err)
-	}
-
-	got, err := repo.GetAndDeleteByPublicID(ctx, "burn-001")
-	if err != nil {
-		t.Fatalf("get and delete: %v", err)
-	}
-	if got.PublicID != "burn-001" {
-		t.Errorf("public_id = %q, want %q", got.PublicID, "burn-001")
-	}
-	if !got.BurnAfterRead {
-		t.Error("expected burn_after_read to be true")
-	}
-
-	// Should be gone now
-	_, err = repo.GetByPublicID(ctx, "burn-001")
-	if err != domain.ErrNotFound {
-		t.Fatalf("expected ErrNotFound after burn, got %v", err)
-	}
-}
-
 func TestSecretRepo_SetRetrievedAt(t *testing.T) {
 	pool := setupTestDB(t)
 	repo := pgadapter.NewSecretRepo(pool)
@@ -176,7 +148,8 @@ func TestSecretRepo_DeleteExpired(t *testing.T) {
 		}
 	}
 
-	count, publicIDs, err := repo.DeleteExpired(ctx)
+	noop := func(string) error { return nil }
+	count, err := repo.DeleteExpired(ctx, noop)
 	if err != nil {
 		t.Fatalf("delete expired: %v", err)
 	}
@@ -185,13 +158,105 @@ func TestSecretRepo_DeleteExpired(t *testing.T) {
 		t.Errorf("deleted count = %d, want 2", count)
 	}
 
-	if len(publicIDs) != 2 {
-		t.Errorf("public IDs count = %d, want 2", len(publicIDs))
-	}
-
 	// Valid secret should still exist
 	_, err = repo.GetByPublicID(ctx, "exp-del-003")
 	if err != nil {
 		t.Fatalf("valid secret should still exist: %v", err)
+	}
+}
+
+func TestSecretRepo_DeleteExpired_BurnAfterRead(t *testing.T) {
+	pool := setupTestDB(t)
+	repo := pgadapter.NewSecretRepo(pool)
+	ctx := context.Background()
+
+	// 1. Retrieved burn-after-read secret — should be deleted
+	burnRetrieved := newTestSecret("burn-retr-001", time.Now().Add(1*time.Hour))
+	burnRetrieved.BurnAfterRead = true
+	if err := repo.Create(ctx, burnRetrieved); err != nil {
+		t.Fatalf("create burn-retrieved: %v", err)
+	}
+	if err := repo.SetRetrievedAt(ctx, "burn-retr-001"); err != nil {
+		t.Fatalf("set retrieved_at: %v", err)
+	}
+
+	// 2. Retrieved regular secret — should NOT be deleted
+	regularRetrieved := newTestSecret("reg-retr-001", time.Now().Add(1*time.Hour))
+	if err := repo.Create(ctx, regularRetrieved); err != nil {
+		t.Fatalf("create regular-retrieved: %v", err)
+	}
+	if err := repo.SetRetrievedAt(ctx, "reg-retr-001"); err != nil {
+		t.Fatalf("set retrieved_at: %v", err)
+	}
+
+	// 3. Unretrieved burn-after-read secret — should NOT be deleted
+	burnUnretrieved := newTestSecret("burn-unretr-001", time.Now().Add(1*time.Hour))
+	burnUnretrieved.BurnAfterRead = true
+	if err := repo.Create(ctx, burnUnretrieved); err != nil {
+		t.Fatalf("create burn-unretrieved: %v", err)
+	}
+
+	noop := func(string) error { return nil }
+	count, err := repo.DeleteExpired(ctx, noop)
+	if err != nil {
+		t.Fatalf("delete expired: %v", err)
+	}
+
+	if count != 1 {
+		t.Errorf("deleted count = %d, want 1", count)
+	}
+
+	// Regular retrieved secret should still exist
+	if _, err := repo.GetByPublicID(ctx, "reg-retr-001"); err != nil {
+		t.Fatalf("regular retrieved secret should still exist: %v", err)
+	}
+
+	// Unretrieved burn secret should still exist
+	if _, err := repo.GetByPublicID(ctx, "burn-unretr-001"); err != nil {
+		t.Fatalf("unretrieved burn secret should still exist: %v", err)
+	}
+}
+
+func TestSecretRepo_DeleteExpired_HookError(t *testing.T) {
+	pool := setupTestDB(t)
+	repo := pgadapter.NewSecretRepo(pool)
+	ctx := context.Background()
+
+	expired1 := newTestSecret("hook-err-001", time.Now().Add(-1*time.Hour))
+	expired2 := newTestSecret("hook-err-002", time.Now().Add(-2*time.Hour))
+
+	for _, s := range []*domain.Secret{expired1, expired2} {
+		if err := repo.Create(ctx, s); err != nil {
+			t.Fatalf("create %s: %v", s.PublicID, err)
+		}
+	}
+
+	// Hook fails for hook-err-001, succeeds for hook-err-002
+	failOne := func(id string) error {
+		if id == "hook-err-001" {
+			return errors.New("S3 delete failed")
+		}
+		return nil
+	}
+
+	count, err := repo.DeleteExpired(ctx, failOne)
+	if err != nil {
+		t.Fatalf("delete expired: %v", err)
+	}
+
+	if count != 1 {
+		t.Errorf("deleted count = %d, want 1", count)
+	}
+
+	// hook-err-001 should still exist (hook failed, row kept)
+	// We can't use GetByPublicID because it filters by expires_at > NOW().
+	// Instead, call DeleteExpired again with a noop — if it finds a row, it was kept.
+	noop := func(string) error { return nil }
+	count2, err := repo.DeleteExpired(ctx, noop)
+	if err != nil {
+		t.Fatalf("second delete expired: %v", err)
+	}
+	if count2 != 1 {
+		t.Errorf("second pass count = %d, want 1 (the skipped row)", count2)
 	}
 }

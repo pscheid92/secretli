@@ -1,7 +1,6 @@
 package httpserver
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -10,7 +9,8 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/go-chi/chi/v5"
+	"github.com/go-playground/validator/v10"
+	"github.com/labstack/echo/v4"
 
 	"github.com/pscheid92/secretli/internal/adapter/metrics"
 	"github.com/pscheid92/secretli/internal/domain"
@@ -18,38 +18,43 @@ import (
 	apperrors "github.com/pscheid92/secretli/internal/platform/errors"
 )
 
+const (
+	HeaderRetrievalToken = "X-Retrieval-Token"
+	HeaderDeletionToken  = "X-Deletion-Token"
+	HeaderBurnAfterRead  = "X-Burn-After-Read"
+)
+
 type SecretHandler struct {
 	repo        domain.SecretRepo
 	fileStore   domain.FileStore
 	maxFileSize int64
 	metrics     *metrics.SecretMetrics
+	validate    *validator.Validate
 }
 
 func NewSecretHandler(repo domain.SecretRepo, fileStore domain.FileStore, maxFileSize int64, m *metrics.SecretMetrics) *SecretHandler {
-	return &SecretHandler{repo: repo, fileStore: fileStore, maxFileSize: maxFileSize, metrics: m}
+	return &SecretHandler{repo: repo, fileStore: fileStore, maxFileSize: maxFileSize, metrics: m, validate: newValidator()}
 }
 
-func (h *SecretHandler) CreateSecret(w http.ResponseWriter, r *http.Request) error {
-	r.Body = http.MaxBytesReader(w, r.Body, h.maxFileSize+1<<20)
+func (h *SecretHandler) CreateSecret(c echo.Context) error {
+	r := c.Request()
+	ctx := r.Context()
+	r.Body = http.MaxBytesReader(c.Response(), r.Body, h.maxFileSize+1<<20)
 
-	if err := r.ParseMultipartForm(1 << 20); err != nil {
-		if _, ok := errors.AsType[*http.MaxBytesError](err); ok {
-			return apperrors.BadRequestError("request exceeds maximum size limit")
-		}
+	err := r.ParseMultipartForm(1 << 20)
+	if _, ok := errors.AsType[*http.MaxBytesError](err); ok {
+		return apperrors.BadRequestError("request exceeds maximum size limit")
+	}
+	if err != nil {
 		return apperrors.BadRequestError("invalid multipart form")
 	}
 
-	metadataStr := r.FormValue("metadata")
-	if metadataStr == "" {
-		return apperrors.BadRequestError("missing metadata part")
-	}
-
 	var meta domain.CreateSecretRequest
-	if err := json.Unmarshal([]byte(metadataStr), &meta); err != nil {
-		return apperrors.BadRequestError("invalid metadata JSON")
+	if err := c.Bind(&meta); err != nil {
+		return apperrors.BadRequestError("invalid form data")
 	}
 
-	if details := validateRequest(&meta); details != nil {
+	if details := h.validateRequest(&meta); details != nil {
 		return validationError(details)
 	}
 
@@ -74,169 +79,141 @@ func (h *SecretHandler) CreateSecret(w http.ResponseWriter, r *http.Request) err
 		ExpiresAt:      time.Now().Add(duration),
 	}
 
-	storageKey := storageKey(meta.PublicID)
-	if err := h.fileStore.Put(r.Context(), storageKey, file, header.Size); err != nil {
+	sk := storageKey(meta.PublicID)
+	if err := h.fileStore.Put(ctx, sk, file, header.Size); err != nil {
 		return apperrors.InternalError("failed to upload blob to S3", err)
 	}
 
-	if err := h.repo.Create(r.Context(), secret); err != nil {
-		_ = h.fileStore.Delete(r.Context(), storageKey)
+	if err := h.repo.Create(ctx, secret); err != nil {
+		_ = h.fileStore.Delete(ctx, sk)
 		if errors.Is(err, domain.ErrDuplicate) {
 			return apperrors.ConflictError("secret with this public_id already exists")
 		}
 		return apperrors.InternalError("failed to create secret", err)
 	}
 
-	if h.metrics != nil {
-		h.metrics.SecretsCreated.Inc()
-	}
+	h.metrics.SecretsCreated.Inc()
 
-	writeJSON(w, http.StatusCreated, map[string]string{
+	response := map[string]string{
 		"expires_at": secret.ExpiresAt.UTC().Format(time.RFC3339),
-	})
-	return nil
+	}
+	return c.JSON(http.StatusCreated, response)
 }
 
-func (h *SecretHandler) RetrieveSecret(w http.ResponseWriter, r *http.Request) error {
-	publicID := chi.URLParam(r, "publicID")
-	if publicID == "" {
-		return apperrors.BadRequestError("missing public_id")
-	}
-
-	token := r.Header.Get("X-Retrieval-Token")
-	if token == "" {
-		return apperrors.BadRequestError("missing X-Retrieval-Token header")
-	}
-
-	secret, err := h.repo.GetByPublicID(r.Context(), publicID)
-	if errors.Is(err, domain.ErrNotFound) {
-		return apperrors.NotFoundError("secret not found")
-	}
+func (h *SecretHandler) RetrieveSecret(c echo.Context) error {
+	secret, err := h.authenticateSecret(c)
 	if err != nil {
-		return apperrors.InternalError("failed to get secret", err)
+		return err
 	}
 
-	if !crypto.TokensEqual(token, secret.RetrievalToken) {
-		return apperrors.ForbiddenError("invalid retrieval token")
-	}
+	ctx := c.Request().Context()
+	publicID := c.Param("publicID")
+	sk := storageKey(publicID)
 
-	obj, err := h.fileStore.Get(r.Context(), storageKey(publicID))
+	obj, err := h.fileStore.Get(ctx, sk)
 	if err != nil {
 		return apperrors.InternalError("failed to get blob from S3", err)
 	}
 	defer func() { _ = obj.Close() }()
 
-	w.Header().Set("Content-Type", "application/octet-stream")
-	w.Header().Set("Content-Length", strconv.FormatInt(secret.BlobSize, 10))
-	w.Header().Set("X-Burn-After-Read", fmt.Sprintf("%t", secret.BurnAfterRead))
+	resp := c.Response()
+	resp.Header().Set("Content-Type", "application/octet-stream")
+	resp.Header().Set("Content-Length", strconv.FormatInt(secret.BlobSize, 10))
+	resp.Header().Set(HeaderBurnAfterRead, fmt.Sprintf("%t", secret.BurnAfterRead))
+	resp.WriteHeader(http.StatusOK)
 
-	if _, err := io.Copy(w, obj); err != nil {
-		slog.ErrorContext(r.Context(), "failed to stream blob to client", "error", err)
+	if _, err := io.Copy(resp, obj); err != nil {
+		slog.ErrorContext(ctx, "failed to stream blob to client", "error", err)
 		return nil
 	}
 
-	if h.metrics != nil {
-		h.metrics.SecretsRetrieved.Inc()
-	}
+	h.metrics.SecretsRetrieved.Inc()
 
-	if secret.BurnAfterRead {
-		if err := h.repo.Delete(r.Context(), publicID); err != nil {
-			slog.ErrorContext(r.Context(), "failed to delete burned secret", "error", err)
-		}
-		if err := h.fileStore.Delete(r.Context(), storageKey(publicID)); err != nil {
-			slog.ErrorContext(r.Context(), "failed to delete burned S3 object", "error", err)
-		}
-		if h.metrics != nil {
-			h.metrics.SecretsDeleted.WithLabelValues("burn").Inc()
-		}
-	} else {
-		if secret.RetrievedAt == nil {
-			_ = h.repo.SetRetrievedAt(r.Context(), publicID)
+	if secret.RetrievedAt == nil {
+		if err := h.repo.SetRetrievedAt(ctx, publicID); err != nil {
+			slog.ErrorContext(ctx, "failed to set retrieved_at", "error", err)
 		}
 	}
 
 	return nil
 }
 
-func (h *SecretHandler) SecretMetadata(w http.ResponseWriter, r *http.Request) error {
-	publicID := chi.URLParam(r, "publicID")
-	if publicID == "" {
-		return apperrors.BadRequestError("missing public_id")
-	}
-
-	token := r.Header.Get("X-Retrieval-Token")
-	if token == "" {
-		return apperrors.BadRequestError("missing X-Retrieval-Token header")
-	}
-
-	secret, err := h.repo.GetByPublicID(r.Context(), publicID)
-	if errors.Is(err, domain.ErrNotFound) {
-		return apperrors.NotFoundError("secret not found")
-	}
+func (h *SecretHandler) SecretMetadata(c echo.Context) error {
+	secret, err := h.authenticateSecret(c)
 	if err != nil {
-		return apperrors.InternalError("failed to get secret", err)
+		return err
 	}
 
-	if !crypto.TokensEqual(token, secret.RetrievalToken) {
-		return apperrors.ForbiddenError("invalid retrieval token")
-	}
-
-	writeJSON(w, http.StatusOK, domain.SecretMetadataResponse{
+	return c.JSON(http.StatusOK, domain.SecretMetadataResponse{
 		EncryptedMeta: secret.EncryptedMeta,
 		BlobSize:      secret.BlobSize,
 		BurnAfterRead: secret.BurnAfterRead,
 		ExpiresAt:     secret.ExpiresAt.UTC().Format(time.RFC3339),
 		CreatedAt:     secret.CreatedAt.UTC().Format(time.RFC3339),
 	})
-	return nil
 }
 
-func (h *SecretHandler) DeleteSecret(w http.ResponseWriter, r *http.Request) error {
-	publicID := chi.URLParam(r, "publicID")
-	if publicID == "" {
-		return apperrors.BadRequestError("missing public_id")
-	}
-
-	retrievalToken := r.Header.Get("X-Retrieval-Token")
-	if retrievalToken == "" {
-		return apperrors.BadRequestError("missing X-Retrieval-Token header")
-	}
-
-	deletionToken := r.Header.Get("X-Deletion-Token")
-	if deletionToken == "" {
-		return apperrors.BadRequestError("missing X-Deletion-Token header")
-	}
-
-	secret, err := h.repo.GetByPublicID(r.Context(), publicID)
-	if errors.Is(err, domain.ErrNotFound) {
-		return apperrors.NotFoundError("secret not found")
-	}
+func (h *SecretHandler) DeleteSecret(c echo.Context) error {
+	secret, err := h.authenticateSecret(c)
 	if err != nil {
-		return apperrors.InternalError("failed to get secret", err)
+		return err
 	}
 
-	if !crypto.TokensEqual(retrievalToken, secret.RetrievalToken) {
-		return apperrors.ForbiddenError("invalid retrieval token")
+	r := c.Request()
+	ctx := r.Context()
+
+	deletionToken := r.Header.Get(HeaderDeletionToken)
+	if deletionToken == "" {
+		return apperrors.BadRequestError("missing " + HeaderDeletionToken + " header")
 	}
 
 	if !crypto.TokensEqual(deletionToken, secret.DeletionToken) {
 		return apperrors.ForbiddenError("invalid deletion token")
 	}
 
-	if err := h.fileStore.Delete(r.Context(), storageKey(publicID)); err != nil {
-		_ = err
-	}
+	publicID := c.Param("publicID")
 
-	if err := h.repo.Delete(r.Context(), publicID); err != nil {
+	sk := storageKey(publicID)
+	_ = h.fileStore.Delete(ctx, sk)
+
+	if err := h.repo.Delete(ctx, publicID); err != nil {
 		return apperrors.InternalError("failed to delete secret", err)
 	}
 
-	if h.metrics != nil {
-		h.metrics.SecretsDeleted.WithLabelValues("api").Inc()
+	h.metrics.SecretsDeleted.WithLabelValues("api").Inc()
+
+	return c.NoContent(http.StatusNoContent)
+}
+
+func (h *SecretHandler) authenticateSecret(c echo.Context) (*domain.Secret, error) {
+	publicID := c.Param("publicID")
+	if publicID == "" {
+		return nil, apperrors.BadRequestError("missing public_id")
 	}
 
-	w.WriteHeader(http.StatusNoContent)
-	return nil
+	r := c.Request()
+	token := r.Header.Get(HeaderRetrievalToken)
+	if token == "" {
+		return nil, apperrors.BadRequestError("missing " + HeaderRetrievalToken + " header")
+	}
+
+	secret, err := h.repo.GetByPublicID(r.Context(), publicID)
+	if errors.Is(err, domain.ErrNotFound) {
+		return nil, apperrors.NotFoundError("secret not found")
+	}
+	if err != nil {
+		return nil, apperrors.InternalError("failed to get secret", err)
+	}
+
+	if !crypto.TokensEqual(token, secret.RetrievalToken) {
+		return nil, apperrors.ForbiddenError("invalid retrieval token")
+	}
+
+	if secret.BurnAfterRead && secret.RetrievedAt != nil {
+		return nil, apperrors.NotFoundError("secret not found")
+	}
+
+	return secret, nil
 }
 
 var expirationDurations = map[string]time.Duration{

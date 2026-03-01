@@ -13,14 +13,6 @@ SELECT public_id, retrieval_token, deletion_token,
 FROM secrets
 WHERE public_id = $1 AND expires_at > NOW();
 
--- name: GetAndDeleteSecretByPublicID :one
-DELETE FROM secrets
-WHERE public_id = $1 AND expires_at > NOW()
-RETURNING public_id, retrieval_token, deletion_token,
-    encrypted_meta, blob_size,
-    burn_after_read,
-    expires_at, created_at, retrieved_at;
-
 -- name: SetSecretRetrievedAt :exec
 UPDATE secrets SET retrieved_at = NOW()
 WHERE public_id = $1 AND retrieved_at IS NULL;
@@ -28,6 +20,8 @@ WHERE public_id = $1 AND retrieved_at IS NULL;
 -- name: DeleteSecret :execrows
 DELETE FROM secrets WHERE public_id = $1;
 
--- name: DeleteExpiredSecrets :many
-DELETE FROM secrets WHERE expires_at < NOW()
-RETURNING public_id;
+-- name: SelectExpiredForCleanup :many
+SELECT public_id FROM secrets
+WHERE expires_at < NOW()
+   OR (burn_after_read = true AND retrieved_at IS NOT NULL)
+FOR UPDATE SKIP LOCKED;
