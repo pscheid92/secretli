@@ -66,8 +66,7 @@ func (m *mockSecretRepo) GetAndDeleteByPublicID(_ context.Context, publicID stri
 
 func (m *mockSecretRepo) SetRetrievedAt(_ context.Context, publicID string) error {
 	if s, ok := m.secrets[publicID]; ok {
-		now := time.Now()
-		s.RetrievedAt = &now
+		s.RetrievedAt = new(time.Now())
 	}
 	return nil
 }
@@ -162,10 +161,10 @@ func createMultipartRequest(t *testing.T, metadata map[string]any, fileContent [
 
 func validCreateMetadata() map[string]any {
 	return map[string]any{
-		"public_id":          "test-public-id",
-		"retrieval_token":    "dGVzdHJldHJpZXZhbHRva2Vu",
-		"deletion_token":     "dGVzdGRlbGV0aW9udG9rZW4",
-		"encrypted_meta":     "v1$bm9uY2U$Y2lwaGVydGV4dA",
+		"public_id":       "test-public-id",
+		"retrieval_token": "dGVzdHJldHJpZXZhbHRva2Vu",
+		"deletion_token":  "dGVzdGRlbGV0aW9udG9rZW4",
+		"encrypted_meta":  "v1$bm9uY2U$Y2lwaGVydGV4dA",
 		"expiration":      "7d",
 		"burn_after_read": false,
 	}
@@ -174,13 +173,13 @@ func validCreateMetadata() map[string]any {
 func seedSecret(repo *mockSecretRepo, fs *mockFileStore, publicID, retrievalToken, deletionToken string, burnAfterRead bool) {
 	blobData := []byte("v1$datanonce$encryptedcontent")
 	secret := &domain.Secret{
-		PublicID:          publicID,
-		RetrievalToken:    retrievalToken,
-		DeletionToken:     deletionToken,
-		EncryptedMeta:     "v1$bm9uY2U$Y2lwaGVydGV4dA",
-		BlobSize:          int64(len(blobData)),
-		BurnAfterRead: burnAfterRead,
-		ExpiresAt:     time.Now().Add(time.Hour),
+		PublicID:       publicID,
+		RetrievalToken: retrievalToken,
+		DeletionToken:  deletionToken,
+		EncryptedMeta:  "v1$bm9uY2U$Y2lwaGVydGV4dA",
+		BlobSize:       int64(len(blobData)),
+		BurnAfterRead:  burnAfterRead,
+		ExpiresAt:      time.Now().Add(time.Hour),
 	}
 	fs.objects[storageKey(publicID)] = blobData
 	repo.secrets[publicID] = secret

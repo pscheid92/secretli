@@ -7,13 +7,10 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 )
 
-// Handler is an slog.Handler that auto-injects request_id from chi's middleware
-// into every log record.
 type Handler struct {
 	inner slog.Handler
 }
 
-// NewHandler wraps an existing slog.Handler with automatic request_id injection.
 func NewHandler(inner slog.Handler) *Handler {
 	return &Handler{inner: inner}
 }

@@ -25,20 +25,20 @@ func NewSecretRepo(pool *pgxpool.Pool) *SecretRepo {
 }
 
 func (r *SecretRepo) Create(ctx context.Context, secret *domain.Secret) error {
-	err := r.q.CreateSecret(ctx, dbsqlc.CreateSecretParams{
-		PublicID:          secret.PublicID,
-		RetrievalToken:    secret.RetrievalToken,
-		DeletionToken:     secret.DeletionToken,
-		EncryptedMeta:     secret.EncryptedMeta,
-		BlobSize:          secret.BlobSize,
-		BurnAfterRead:     secret.BurnAfterRead,
-
-		ExpiresAt:         pgtype.Timestamptz{Time: secret.ExpiresAt, Valid: true},
-	})
+	params := dbsqlc.CreateSecretParams{
+		PublicID:       secret.PublicID,
+		RetrievalToken: secret.RetrievalToken,
+		DeletionToken:  secret.DeletionToken,
+		EncryptedMeta:  secret.EncryptedMeta,
+		BlobSize:       secret.BlobSize,
+		BurnAfterRead:  secret.BurnAfterRead,
+		ExpiresAt:      pgtype.Timestamptz{Time: secret.ExpiresAt, Valid: true},
+	}
+	err := r.q.CreateSecret(ctx, params)
+	if err != nil && isDuplicateKeyError(err) {
+		return domain.ErrDuplicate
+	}
 	if err != nil {
-		if isDuplicateKeyError(err) {
-			return domain.ErrDuplicate
-		}
 		return fmt.Errorf("insert secret: %w", err)
 	}
 	return nil
@@ -94,20 +94,19 @@ func (r *SecretRepo) DeleteExpired(ctx context.Context) (int64, []string, error)
 
 func secretFromRow(row dbsqlc.Secret) *domain.Secret {
 	return &domain.Secret{
-		PublicID:          row.PublicID,
-		RetrievalToken:    row.RetrievalToken,
-		DeletionToken:     row.DeletionToken,
-		EncryptedMeta:     row.EncryptedMeta,
-		BlobSize:          row.BlobSize,
-		BurnAfterRead:     row.BurnAfterRead,
-
-		ExpiresAt:         row.ExpiresAt.Time,
-		CreatedAt:         row.CreatedAt.Time,
-		RetrievedAt:       ptrFromTimestamptz(row.RetrievedAt),
+		PublicID:       row.PublicID,
+		RetrievalToken: row.RetrievalToken,
+		DeletionToken:  row.DeletionToken,
+		EncryptedMeta:  row.EncryptedMeta,
+		BlobSize:       row.BlobSize,
+		BurnAfterRead:  row.BurnAfterRead,
+		ExpiresAt:      row.ExpiresAt.Time,
+		CreatedAt:      row.CreatedAt.Time,
+		RetrievedAt:    pointerFromTimestamp(row.RetrievedAt),
 	}
 }
 
-func ptrFromTimestamptz(t pgtype.Timestamptz) *time.Time {
+func pointerFromTimestamp(t pgtype.Timestamptz) *time.Time {
 	if !t.Valid {
 		return nil
 	}
@@ -115,6 +114,8 @@ func ptrFromTimestamptz(t pgtype.Timestamptz) *time.Time {
 }
 
 func isDuplicateKeyError(err error) bool {
-	var pgErr *pgconn.PgError
-	return errors.As(err, &pgErr) && pgErr.Code == "23505"
+	if err, ok := errors.AsType[*pgconn.PgError](err); ok {
+		return err.Code == "23505"
+	}
+	return false
 }

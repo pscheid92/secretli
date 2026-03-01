@@ -16,11 +16,12 @@ type Client struct {
 }
 
 func NewClient(cfg config.S3Config) (*Client, error) {
-	client, err := minio.New(cfg.Endpoint, &minio.Options{
+	params := minio.Options{
 		Creds:  credentials.NewStaticV4(cfg.AccessKey, cfg.SecretKey, ""),
 		Secure: cfg.UseSSL,
 		Region: cfg.Region,
-	})
+	}
+	client, err := minio.New(cfg.Endpoint, &params)
 	if err != nil {
 		return nil, fmt.Errorf("create minio client: %w", err)
 	}

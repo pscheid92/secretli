@@ -1,11 +1,11 @@
 package errors
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 )
 
-// ErrorType classifies application errors for HTTP status mapping.
 type ErrorType string
 
 const (
@@ -16,7 +16,6 @@ const (
 	Internal   ErrorType = "internal"
 )
 
-// Error is a structured application error that maps to an HTTP response.
 type Error struct {
 	Type    ErrorType
 	Message string
@@ -35,7 +34,6 @@ func (e *Error) Unwrap() error {
 	return e.Cause
 }
 
-// HTTPStatus returns the HTTP status code for this error type.
 func (e *Error) HTTPStatus() int {
 	switch e.Type {
 	case BadRequest:
@@ -51,21 +49,14 @@ func (e *Error) HTTPStatus() int {
 	}
 }
 
-// ErrorResponse is the JSON structure returned to clients.
 type ErrorResponse struct {
 	Error   string         `json:"error"`
 	Details map[string]any `json:"details,omitempty"`
 }
 
-// ToResponse converts the error to an HTTP-safe JSON response body.
 func (e *Error) ToResponse() ErrorResponse {
-	return ErrorResponse{
-		Error:   e.Message,
-		Details: e.Context,
-	}
+	return ErrorResponse{Error: e.Message, Details: e.Context}
 }
-
-// --- Constructors ---
 
 func BadRequestError(msg string) *Error {
 	return &Error{Type: BadRequest, Message: msg}
@@ -87,10 +78,9 @@ func InternalError(msg string, cause error) *Error {
 	return &Error{Type: Internal, Message: msg, Cause: cause}
 }
 
-// AsAppError converts any error to an *Error, wrapping unknown errors as Internal.
 func AsAppError(err error) *Error {
-	if appErr, ok := err.(*Error); ok {
-		return appErr
+	if err, ok := errors.AsType[*Error](err); ok {
+		return err
 	}
 	return InternalError("internal server error", err)
 }

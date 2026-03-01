@@ -33,8 +33,7 @@ func (h *SecretHandler) CreateSecret(w http.ResponseWriter, r *http.Request) err
 	r.Body = http.MaxBytesReader(w, r.Body, h.maxFileSize+1<<20)
 
 	if err := r.ParseMultipartForm(1 << 20); err != nil {
-		var maxBytesErr *http.MaxBytesError
-		if errors.As(err, &maxBytesErr) {
+		if _, ok := errors.AsType[*http.MaxBytesError](err); ok {
 			return apperrors.BadRequestError("request exceeds maximum size limit")
 		}
 		return apperrors.BadRequestError("invalid multipart form")
@@ -66,13 +65,13 @@ func (h *SecretHandler) CreateSecret(w http.ResponseWriter, r *http.Request) err
 	defer func() { _ = file.Close() }()
 
 	secret := &domain.Secret{
-		PublicID:          meta.PublicID,
-		RetrievalToken:    meta.RetrievalToken,
-		DeletionToken:     meta.DeletionToken,
-		EncryptedMeta:     meta.EncryptedMeta,
-		BlobSize:          header.Size,
-		BurnAfterRead: meta.BurnAfterRead,
-		ExpiresAt:     time.Now().Add(duration),
+		PublicID:       meta.PublicID,
+		RetrievalToken: meta.RetrievalToken,
+		DeletionToken:  meta.DeletionToken,
+		EncryptedMeta:  meta.EncryptedMeta,
+		BlobSize:       header.Size,
+		BurnAfterRead:  meta.BurnAfterRead,
+		ExpiresAt:      time.Now().Add(duration),
 	}
 
 	storageKey := storageKey(meta.PublicID)
