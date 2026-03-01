@@ -1,15 +1,15 @@
-import { toast } from 'sonner'
+import { toast } from "sonner";
 
 interface SecretResultProps {
-  url: string
-  expiresAt: string
-  burnAfterRead: boolean
+  url: string;
+  expiresAt: string;
+  burnAfterRead: boolean;
 }
 
 export default function SecretResult({ url, expiresAt, burnAfterRead }: SecretResultProps) {
   async function copyToClipboard() {
-    await navigator.clipboard.writeText(url)
-    toast.success('Link copied to clipboard')
+    await navigator.clipboard.writeText(url);
+    toast.success("Link copied to clipboard");
   }
 
   return (
@@ -17,9 +17,15 @@ export default function SecretResult({ url, expiresAt, burnAfterRead }: SecretRe
       <h2 className="text-lg font-semibold text-green-800 dark:text-green-300">Secret created!</h2>
 
       <div>
-        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Share this link</label>
+        <label
+          htmlFor="share-url"
+          className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1"
+        >
+          Share this link
+        </label>
         <div className="flex gap-2">
           <input
+            id="share-url"
             type="text"
             readOnly
             value={url}
@@ -44,5 +50,5 @@ export default function SecretResult({ url, expiresAt, burnAfterRead }: SecretRe
         )}
       </div>
     </div>
-  )
+  );
 }

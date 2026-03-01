@@ -387,6 +387,181 @@ func TestDeleteSecret_FileSecretCleansS3(t *testing.T) {
 	}
 }
 
+func TestUploadFile_S3PutError(t *testing.T) {
+	repo := newMockRepo()
+	fs := newMockFileStore()
+	fs.putErr = fmt.Errorf("S3 connection refused")
+	h := NewFileHandler(repo, fs, 100*1024*1024, nil)
+
+	fileData := []byte("encrypted-file-content")
+	req, _ := createMultipartRequest(t, validFileMetadata(), fileData)
+	rec := httptest.NewRecorder()
+
+	h.UploadFile(rec, req)
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Errorf("status = %d, want %d", rec.Code, http.StatusInternalServerError)
+	}
+}
+
+func TestUploadFile_InvalidMetadataJSON(t *testing.T) {
+	repo := newMockRepo()
+	fs := newMockFileStore()
+	h := NewFileHandler(repo, fs, 100*1024*1024, nil)
+
+	var buf bytes.Buffer
+	writer := multipart.NewWriter(&buf)
+	writer.WriteField("metadata", "{invalid json!!!")
+	part, _ := writer.CreateFormFile("file", "test.bin")
+	part.Write([]byte("data"))
+	writer.Close()
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/secrets/file", &buf)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	rec := httptest.NewRecorder()
+
+	h.UploadFile(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want %d", rec.Code, http.StatusBadRequest)
+	}
+}
+
+func TestUploadFile_MissingRequiredMetadataFields(t *testing.T) {
+	repo := newMockRepo()
+	fs := newMockFileStore()
+	h := NewFileHandler(repo, fs, 100*1024*1024, nil)
+
+	meta := map[string]any{"public_id": "only-one-field"}
+	req, _ := createMultipartRequest(t, meta, []byte("data"))
+	rec := httptest.NewRecorder()
+
+	h.UploadFile(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want %d", rec.Code, http.StatusBadRequest)
+	}
+}
+
+func TestUploadFile_InvalidExpiration(t *testing.T) {
+	repo := newMockRepo()
+	fs := newMockFileStore()
+	h := NewFileHandler(repo, fs, 100*1024*1024, nil)
+
+	meta := validFileMetadata()
+	meta["expiration"] = "99d"
+	req, _ := createMultipartRequest(t, meta, []byte("data"))
+	rec := httptest.NewRecorder()
+
+	h.UploadFile(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want %d", rec.Code, http.StatusBadRequest)
+	}
+}
+
+func TestUploadFile_DBErrorCleansUpS3(t *testing.T) {
+	repo := newMockRepo()
+	repo.createErr = fmt.Errorf("database timeout")
+	fs := newMockFileStore()
+	h := NewFileHandler(repo, fs, 100*1024*1024, nil)
+
+	fileData := []byte("encrypted-file-content")
+	req, _ := createMultipartRequest(t, validFileMetadata(), fileData)
+	rec := httptest.NewRecorder()
+
+	h.UploadFile(rec, req)
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Errorf("status = %d, want %d", rec.Code, http.StatusInternalServerError)
+	}
+
+	// Verify S3 object was cleaned up
+	if _, ok := fs.objects["secrets/file-pub-id"]; ok {
+		t.Error("S3 object should have been cleaned up after DB error")
+	}
+}
+
+func TestDownloadFile_MissingToken(t *testing.T) {
+	repo := newMockRepo()
+	fs := newMockFileStore()
+	h := NewFileHandler(repo, fs, 100*1024*1024, nil)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/secrets/file1/file", nil)
+	req.SetPathValue("publicID", "file1")
+	rec := httptest.NewRecorder()
+
+	h.DownloadFile(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want %d", rec.Code, http.StatusBadRequest)
+	}
+}
+
+func TestDownloadFile_MissingPublicID(t *testing.T) {
+	repo := newMockRepo()
+	fs := newMockFileStore()
+	h := NewFileHandler(repo, fs, 100*1024*1024, nil)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/secrets//file", nil)
+	req.Header.Set("X-Retrieval-Token", "tok")
+	rec := httptest.NewRecorder()
+
+	h.DownloadFile(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want %d", rec.Code, http.StatusBadRequest)
+	}
+}
+
+func TestDownloadFile_MissingStorageKey(t *testing.T) {
+	repo := newMockRepo()
+	fs := newMockFileStore()
+	h := NewFileHandler(repo, fs, 100*1024*1024, nil)
+
+	// Create a file secret with nil StorageKey
+	repo.secrets["no-key"] = &model.Secret{
+		PublicID:           "no-key",
+		RetrievalTokenHash: crypto.HashToken("ret-tok"),
+		DeletionTokenHash:  crypto.HashToken("del-tok"),
+		Nonce:              "nonce",
+		SecretType:         "file",
+		StorageKey:         nil, // missing!
+		BurnAfterRead:      false,
+		ExpiresAt:          time.Now().Add(time.Hour),
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/secrets/no-key/file", nil)
+	req.SetPathValue("publicID", "no-key")
+	req.Header.Set("X-Retrieval-Token", "ret-tok")
+	rec := httptest.NewRecorder()
+
+	h.DownloadFile(rec, req)
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Errorf("status = %d, want %d", rec.Code, http.StatusInternalServerError)
+	}
+}
+
+func TestDownloadFile_S3GetError(t *testing.T) {
+	repo := newMockRepo()
+	fs := newMockFileStore()
+	fs.getErr = fmt.Errorf("S3 not reachable")
+	h := NewFileHandler(repo, fs, 100*1024*1024, nil)
+	seedFileSecret(repo, fs, "s3-err", "ret-tok", "del-tok", false)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/secrets/s3-err/file", nil)
+	req.SetPathValue("publicID", "s3-err")
+	req.Header.Set("X-Retrieval-Token", "ret-tok")
+	rec := httptest.NewRecorder()
+
+	h.DownloadFile(rec, req)
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Errorf("status = %d, want %d", rec.Code, http.StatusInternalServerError)
+	}
+}
+
 func TestDeleteSecret_TextSecretSkipsS3(t *testing.T) {
 	repo := newMockRepo()
 	fs := newMockFileStore()

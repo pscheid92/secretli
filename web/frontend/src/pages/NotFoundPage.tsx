@@ -1,4 +1,4 @@
-import { Link } from 'react-router'
+import { Link } from "react-router";
 
 export default function NotFoundPage() {
   return (
@@ -9,5 +9,5 @@ export default function NotFoundPage() {
         Go back home
       </Link>
     </div>
-  )
+  );
 }

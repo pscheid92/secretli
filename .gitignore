@@ -1,10 +1,12 @@
 # Go
 bin/
 tmp/
+coverage.out
 
 # Node
 node_modules/
 web/frontend/dist/
+web/frontend/coverage/
 
 # Environment
 .env

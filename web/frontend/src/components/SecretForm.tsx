@@ -1,51 +1,57 @@
-import { useState } from 'react'
-import ExpirationPicker from './ExpirationPicker'
-import Spinner from './Spinner'
+import { useState } from "react";
+import ExpirationPicker from "./ExpirationPicker";
+import Spinner from "./Spinner";
 
 export interface SecretFormData {
-  text: string
-  expiration: string
-  burnAfterRead: boolean
-  password: string
+  text: string;
+  expiration: string;
+  burnAfterRead: boolean;
+  password: string;
 }
 
 interface SecretFormProps {
-  onSubmit: (data: SecretFormData) => void
-  loading: boolean
+  onSubmit: (data: SecretFormData) => void;
+  loading: boolean;
 }
 
 export default function SecretForm({ onSubmit, loading }: SecretFormProps) {
-  const [text, setText] = useState('')
-  const [expiration, setExpiration] = useState('1d')
-  const [burnAfterRead, setBurnAfterRead] = useState(false)
-  const [password, setPassword] = useState('')
-  const [showPassword, setShowPassword] = useState(false)
-  const [error, setError] = useState('')
+  const [text, setText] = useState("");
+  const [expiration, setExpiration] = useState("1d");
+  const [burnAfterRead, setBurnAfterRead] = useState(false);
+  const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [error, setError] = useState("");
 
   function handleSubmit(e: React.FormEvent) {
-    e.preventDefault()
+    e.preventDefault();
     if (!text.trim()) {
-      setError('Please enter a secret to share.')
-      return
+      setError("Please enter a secret to share.");
+      return;
     }
     if (showPassword && !password) {
-      setError('Please enter a password or disable password protection.')
-      return
+      setError("Please enter a password or disable password protection.");
+      return;
     }
-    setError('')
-    onSubmit({ text, expiration, burnAfterRead, password })
+    setError("");
+    onSubmit({ text, expiration, burnAfterRead, password });
   }
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
       <div>
-        <label htmlFor="secret-text" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+        <label
+          htmlFor="secret-text"
+          className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1"
+        >
           Secret
         </label>
         <textarea
           id="secret-text"
           value={text}
-          onChange={(e) => { setText(e.target.value); setError('') }}
+          onChange={(e) => {
+            setText(e.target.value);
+            setError("");
+          }}
           placeholder="Enter your secret text..."
           rows={6}
           className="w-full rounded-md border border-gray-300 dark:border-gray-600 dark:bg-gray-800 dark:text-white px-3 py-2 text-sm shadow-sm placeholder:text-gray-400 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
@@ -55,7 +61,10 @@ export default function SecretForm({ onSubmit, loading }: SecretFormProps) {
 
       <div className="flex flex-wrap items-center gap-4">
         <div>
-          <label htmlFor="expiration" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+          <label
+            htmlFor="expiration"
+            className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1"
+          >
             Expires in
           </label>
           <ExpirationPicker value={expiration} onChange={setExpiration} />
@@ -78,7 +87,7 @@ export default function SecretForm({ onSubmit, loading }: SecretFormProps) {
           onClick={() => setShowPassword(!showPassword)}
           className="text-sm text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300"
         >
-          {showPassword ? 'Remove password protection' : 'Add password protection'}
+          {showPassword ? "Remove password protection" : "Add password protection"}
         </button>
         {showPassword && (
           <input
@@ -97,8 +106,8 @@ export default function SecretForm({ onSubmit, loading }: SecretFormProps) {
         className="flex w-full items-center justify-center gap-2 rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
       >
         {loading && <Spinner size="sm" />}
-        {loading ? 'Encrypting...' : 'Share Secret'}
+        {loading ? "Encrypting..." : "Share Secret"}
       </button>
     </form>
-  )
+  );
 }

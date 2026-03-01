@@ -148,7 +148,7 @@ func RateLimit(rl *IPRateLimiter, requestsPerMinute float64) func(http.HandlerFu
 				w.Header().Set("Retry-After", "60")
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusTooManyRequests)
-				json.NewEncoder(w).Encode(map[string]string{"error": "rate limit exceeded"})
+				_ = json.NewEncoder(w).Encode(map[string]string{"error": "rate limit exceeded"})
 				return
 			}
 			next(w, r)

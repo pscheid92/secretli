@@ -1,4 +1,4 @@
-.PHONY: dev dev-api dev-frontend build build-frontend build-go test clean
+.PHONY: dev dev-api dev-frontend build build-frontend build-go test test-short test-coverage clean lint lint-go lint-frontend
 
 # Run both backend and frontend in development mode
 dev:
@@ -23,10 +23,31 @@ build-frontend:
 build-go:
 	CGO_ENABLED=0 go build -o bin/secretli .
 
-# Run all tests
+# Fast unit tests only (no containers)
+test-short:
+	go test -short -cover ./...
+	cd web/frontend && npm test -- --run
+
+# Full test suite including integration tests
 test:
-	go test ./...
-	cd web/frontend && npm test
+	go test -cover ./...
+	cd web/frontend && npm test -- --run
+
+# Generate coverage reports
+test-coverage:
+	go test -coverprofile=coverage.out ./... && go tool cover -func=coverage.out
+	cd web/frontend && npm run test:coverage
+
+# Lint all
+lint: lint-go lint-frontend
+
+# Lint Go
+lint-go:
+	golangci-lint run ./...
+
+# Lint frontend
+lint-frontend:
+	cd web/frontend && npx biome check .
 
 # Clean build artifacts
 clean:

@@ -22,16 +22,19 @@ jobs:
           cache: npm
           cache-dependency-path: web/frontend/package-lock.json
 
-      - name: Go vet
-        run: |
-          mkdir -p web/frontend/dist && touch web/frontend/dist/.gitkeep
-          go vet ./...
+      - name: Create frontend dist stub
+        run: mkdir -p web/frontend/dist && touch web/frontend/dist/.gitkeep
+
+      - name: Go lint
+        uses: golangci/golangci-lint-action@v6
+        with:
+          args: ./...
 
       - name: Frontend lint
         working-directory: web/frontend
         run: |
           npm ci
-          npx eslint .
+          npx biome check .
 
   test:
     runs-on: ubuntu-latest
@@ -51,13 +54,13 @@ jobs:
       - name: Go tests
         run: |
           mkdir -p web/frontend/dist && touch web/frontend/dist/.gitkeep
-          go test ./...
+          go test -cover ./...
 
       - name: Frontend tests
         working-directory: web/frontend
         run: |
           npm ci
-          npm test -- --run
+          npm run test:coverage
 
   build:
     runs-on: ubuntu-latest

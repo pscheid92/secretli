@@ -3,7 +3,6 @@ package store
 import (
 	"context"
 	"database/sql"
-	"embed"
 	"fmt"
 	"io/fs"
 
@@ -11,12 +10,12 @@ import (
 	"github.com/pressly/goose/v3"
 )
 
-func RunMigrations(ctx context.Context, dbURL string, migrationsFS embed.FS) error {
+func RunMigrations(ctx context.Context, dbURL string, migrationsFS fs.FS) error {
 	db, err := sql.Open("pgx", dbURL)
 	if err != nil {
 		return fmt.Errorf("open database for migrations: %w", err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	// Find the migrations subdirectory in the embedded FS
 	dirEntries, _ := fs.ReadDir(migrationsFS, "migrations")

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -439,6 +440,145 @@ func TestCreateSecret_LinksToAuthenticatedUser(t *testing.T) {
 	}
 	if usr.linked[0].userID != 42 {
 		t.Errorf("linked userID = %d, want 42", usr.linked[0].userID)
+	}
+}
+
+func TestCreateSecret_InvalidJSON(t *testing.T) {
+	repo := newMockRepo()
+	h := NewSecretHandler(repo, nil, nil)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/secrets", bytes.NewReader([]byte("{invalid json")))
+	rec := httptest.NewRecorder()
+
+	h.CreateSecret(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want %d", rec.Code, http.StatusBadRequest)
+	}
+}
+
+func TestCreateSecret_EncryptedDataTooLarge(t *testing.T) {
+	repo := newMockRepo()
+	h := NewSecretHandler(repo, nil, nil)
+
+	b := validCreateBody()
+	// Create encrypted_data that exceeds 1MB
+	largeData := make([]byte, (1<<20)+1)
+	for i := range largeData {
+		largeData[i] = 'A'
+	}
+	b["encrypted_data"] = string(largeData)
+	body, _ := json.Marshal(b)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/secrets", bytes.NewReader(body))
+	rec := httptest.NewRecorder()
+
+	h.CreateSecret(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want %d", rec.Code, http.StatusBadRequest)
+	}
+}
+
+func TestCreateSecret_RepoError(t *testing.T) {
+	repo := newMockRepo()
+	repo.createErr = errors.New("database connection lost")
+	h := NewSecretHandler(repo, nil, nil)
+
+	body, _ := json.Marshal(validCreateBody())
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/secrets", bytes.NewReader(body))
+	rec := httptest.NewRecorder()
+
+	h.CreateSecret(rec, req)
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Errorf("status = %d, want %d", rec.Code, http.StatusInternalServerError)
+	}
+}
+
+func TestRetrieveSecret_MissingPublicID(t *testing.T) {
+	repo := newMockRepo()
+	h := NewSecretHandler(repo, nil, nil)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/secrets/", nil)
+	// No path value set
+	req.Header.Set("X-Retrieval-Token", "tok")
+	rec := httptest.NewRecorder()
+
+	h.RetrieveSecret(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want %d", rec.Code, http.StatusBadRequest)
+	}
+}
+
+func TestDeleteSecret_MissingRetrievalToken(t *testing.T) {
+	repo := newMockRepo()
+	h := NewSecretHandler(repo, nil, nil)
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/v1/secrets/del1", nil)
+	req.SetPathValue("publicID", "del1")
+	req.Header.Set("X-Deletion-Token", "tok")
+	rec := httptest.NewRecorder()
+
+	h.DeleteSecret(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want %d", rec.Code, http.StatusBadRequest)
+	}
+}
+
+func TestDeleteSecret_MissingPublicID(t *testing.T) {
+	repo := newMockRepo()
+	h := NewSecretHandler(repo, nil, nil)
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/v1/secrets/", nil)
+	req.Header.Set("X-Retrieval-Token", "tok")
+	req.Header.Set("X-Deletion-Token", "tok")
+	rec := httptest.NewRecorder()
+
+	h.DeleteSecret(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want %d", rec.Code, http.StatusBadRequest)
+	}
+}
+
+func TestDeleteSecret_InvalidRetrievalToken(t *testing.T) {
+	repo := newMockRepo()
+	h := NewSecretHandler(repo, nil, nil)
+	seedSecret(repo, "del2", "retrieval-tok", "deletion-tok", false)
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/v1/secrets/del2", nil)
+	req.SetPathValue("publicID", "del2")
+	req.Header.Set("X-Retrieval-Token", "wrong-retrieval")
+	req.Header.Set("X-Deletion-Token", "deletion-tok")
+	rec := httptest.NewRecorder()
+
+	h.DeleteSecret(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Errorf("status = %d, want %d", rec.Code, http.StatusForbidden)
+	}
+}
+
+func TestDeleteSecret_S3DeleteError(t *testing.T) {
+	repo := newMockRepo()
+	fs := newMockFileStore()
+	fs.deleteErr = errors.New("S3 connection failed")
+	h := NewSecretHandler(repo, fs, nil)
+	seedFileSecret(repo, fs, "del-s3-err", "ret-tok", "del-tok", false)
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/v1/secrets/del-s3-err", nil)
+	req.SetPathValue("publicID", "del-s3-err")
+	req.Header.Set("X-Retrieval-Token", "ret-tok")
+	req.Header.Set("X-Deletion-Token", "del-tok")
+	rec := httptest.NewRecorder()
+
+	h.DeleteSecret(rec, req)
+
+	// Should still succeed - S3 error is logged but doesn't block deletion
+	if rec.Code != http.StatusNoContent {
+		t.Errorf("status = %d, want %d", rec.Code, http.StatusNoContent)
 	}
 }
 

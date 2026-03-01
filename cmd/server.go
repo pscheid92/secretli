@@ -2,9 +2,9 @@ package cmd
 
 import (
 	"context"
-	"embed"
 	"errors"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"net/http"
 	"os"
@@ -19,7 +19,7 @@ import (
 	"github.com/pscheid92/secretli/internal/store"
 )
 
-func Run(migrationsFS embed.FS) error {
+func Run(migrationsFS fs.FS) error {
 	cfg := config.Load()
 
 	// Handle migrate subcommand

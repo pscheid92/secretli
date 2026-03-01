@@ -84,7 +84,7 @@ func (h *FileHandler) UploadFile(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "missing file part")
 		return
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	// Stream file to S3
 	storageKey := fmt.Sprintf("secrets/%s", meta.PublicID)
@@ -186,7 +186,7 @@ func (h *FileHandler) DownloadFile(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "internal server error")
 		return
 	}
-	defer obj.Close()
+	defer func() { _ = obj.Close() }()
 
 	w.Header().Set("Content-Type", "application/octet-stream")
 	if secret.EncryptedFilename != nil {

@@ -293,6 +293,60 @@ func TestMe_Authenticated(t *testing.T) {
 	}
 }
 
+func TestRegister_InvalidJSON(t *testing.T) {
+	ah, _, _ := newTestAuthHandler()
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/register", bytes.NewReader([]byte("{bad json")))
+	rec := httptest.NewRecorder()
+
+	ah.Register(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want %d", rec.Code, http.StatusBadRequest)
+	}
+}
+
+func TestLogin_InvalidJSON(t *testing.T) {
+	ah, _, _ := newTestAuthHandler()
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", bytes.NewReader([]byte("{bad json")))
+	rec := httptest.NewRecorder()
+
+	ah.Login(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want %d", rec.Code, http.StatusBadRequest)
+	}
+}
+
+func TestLogin_MissingFields(t *testing.T) {
+	ah, _, _ := newTestAuthHandler()
+
+	body, _ := json.Marshal(map[string]string{"email": "test@example.com"})
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", bytes.NewReader(body))
+	rec := httptest.NewRecorder()
+
+	ah.Login(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want %d", rec.Code, http.StatusBadRequest)
+	}
+}
+
+func TestLogout_NoCookie(t *testing.T) {
+	ah, _, _ := newTestAuthHandler()
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/logout", nil)
+	rec := httptest.NewRecorder()
+
+	ah.Logout(rec, req)
+
+	// Should still succeed gracefully
+	if rec.Code != http.StatusNoContent {
+		t.Errorf("status = %d, want %d", rec.Code, http.StatusNoContent)
+	}
+}
+
 func TestMe_Unauthenticated(t *testing.T) {
 	ah, _, _ := newTestAuthHandler()
 
