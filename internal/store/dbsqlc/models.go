@@ -5,11 +5,11 @@
 package dbsqlc
 
 import (
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
 type Secret struct {
-	ID                 int64
 	PublicID           string
 	RetrievalTokenHash string
 	DeletionTokenHash  string
@@ -24,4 +24,5 @@ type Secret struct {
 	ExpiresAt          pgtype.Timestamptz
 	CreatedAt          pgtype.Timestamptz
 	RetrievedAt        pgtype.Timestamptz
+	ID                 uuid.UUID
 }

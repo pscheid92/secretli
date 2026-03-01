@@ -1,9 +1,13 @@
 package model
 
-import "time"
+import (
+	"time"
+
+	"github.com/google/uuid"
+)
 
 type Secret struct {
-	ID                 int64      `json:"-"`
+	ID                 uuid.UUID  `json:"-"`
 	PublicID           string     `json:"public_id"`
 	RetrievalTokenHash string     `json:"-"`
 	DeletionTokenHash  string     `json:"-"`

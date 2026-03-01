@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/pscheid92/secretli/internal/model"
 	"github.com/pscheid92/secretli/internal/store"
 )
@@ -51,8 +52,8 @@ func TestSecretRepo_CreateAndGet(t *testing.T) {
 	if got.EncryptedData == nil || *got.EncryptedData != "encrypted-data" {
 		t.Errorf("encrypted_data = %v, want %q", got.EncryptedData, "encrypted-data")
 	}
-	if got.ID == 0 {
-		t.Error("expected non-zero ID")
+	if got.ID == uuid.Nil {
+		t.Error("expected non-nil UUID ID")
 	}
 	if got.CreatedAt.IsZero() {
 		t.Error("expected non-zero created_at")

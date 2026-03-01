@@ -8,6 +8,7 @@ package dbsqlc
 import (
 	"context"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
@@ -36,7 +37,7 @@ type CreateSecretParams struct {
 	ExpiresAt          pgtype.Timestamptz
 }
 
-func (q *Queries) CreateSecret(ctx context.Context, arg CreateSecretParams) (int64, error) {
+func (q *Queries) CreateSecret(ctx context.Context, arg CreateSecretParams) (uuid.UUID, error) {
 	row := q.db.QueryRow(ctx, createSecret,
 		arg.PublicID,
 		arg.RetrievalTokenHash,
@@ -51,7 +52,7 @@ func (q *Queries) CreateSecret(ctx context.Context, arg CreateSecretParams) (int
 		arg.PasswordProtected,
 		arg.ExpiresAt,
 	)
-	var id int64
+	var id uuid.UUID
 	err := row.Scan(&id)
 	return id, err
 }
@@ -103,9 +104,27 @@ RETURNING id, public_id, retrieval_token_hash, deletion_token_hash,
     expires_at, created_at, retrieved_at
 `
 
-func (q *Queries) GetAndDeleteSecretByPublicID(ctx context.Context, publicID string) (Secret, error) {
+type GetAndDeleteSecretByPublicIDRow struct {
+	ID                 uuid.UUID
+	PublicID           string
+	RetrievalTokenHash string
+	DeletionTokenHash  string
+	EncryptedData      pgtype.Text
+	Nonce              string
+	SecretType         string
+	StorageKey         pgtype.Text
+	EncryptedFilename  pgtype.Text
+	EncryptedSize      pgtype.Int8
+	BurnAfterRead      bool
+	PasswordProtected  bool
+	ExpiresAt          pgtype.Timestamptz
+	CreatedAt          pgtype.Timestamptz
+	RetrievedAt        pgtype.Timestamptz
+}
+
+func (q *Queries) GetAndDeleteSecretByPublicID(ctx context.Context, publicID string) (GetAndDeleteSecretByPublicIDRow, error) {
 	row := q.db.QueryRow(ctx, getAndDeleteSecretByPublicID, publicID)
-	var i Secret
+	var i GetAndDeleteSecretByPublicIDRow
 	err := row.Scan(
 		&i.ID,
 		&i.PublicID,
@@ -136,9 +155,27 @@ FROM secrets
 WHERE public_id = $1 AND expires_at > NOW()
 `
 
-func (q *Queries) GetSecretByPublicID(ctx context.Context, publicID string) (Secret, error) {
+type GetSecretByPublicIDRow struct {
+	ID                 uuid.UUID
+	PublicID           string
+	RetrievalTokenHash string
+	DeletionTokenHash  string
+	EncryptedData      pgtype.Text
+	Nonce              string
+	SecretType         string
+	StorageKey         pgtype.Text
+	EncryptedFilename  pgtype.Text
+	EncryptedSize      pgtype.Int8
+	BurnAfterRead      bool
+	PasswordProtected  bool
+	ExpiresAt          pgtype.Timestamptz
+	CreatedAt          pgtype.Timestamptz
+	RetrievedAt        pgtype.Timestamptz
+}
+
+func (q *Queries) GetSecretByPublicID(ctx context.Context, publicID string) (GetSecretByPublicIDRow, error) {
 	row := q.db.QueryRow(ctx, getSecretByPublicID, publicID)
-	var i Secret
+	var i GetSecretByPublicIDRow
 	err := row.Scan(
 		&i.ID,
 		&i.PublicID,

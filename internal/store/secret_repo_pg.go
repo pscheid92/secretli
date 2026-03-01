@@ -58,7 +58,7 @@ func (r *PostgresSecretRepo) GetByPublicID(ctx context.Context, publicID string)
 	if err != nil {
 		return nil, fmt.Errorf("query secret: %w", err)
 	}
-	return secretFromRow(row), nil
+	return secretFromGetRow(row), nil
 }
 
 func (r *PostgresSecretRepo) GetAndDeleteByPublicID(ctx context.Context, publicID string) (*model.Secret, error) {
@@ -69,7 +69,7 @@ func (r *PostgresSecretRepo) GetAndDeleteByPublicID(ctx context.Context, publicI
 	if err != nil {
 		return nil, fmt.Errorf("delete and return secret: %w", err)
 	}
-	return secretFromRow(row), nil
+	return secretFromDeleteRow(row), nil
 }
 
 func (r *PostgresSecretRepo) SetRetrievedAt(ctx context.Context, publicID string) error {
@@ -104,7 +104,27 @@ func (r *PostgresSecretRepo) DeleteExpired(ctx context.Context) (int64, []string
 	return int64(len(keys)), storageKeys, nil
 }
 
-func secretFromRow(row dbsqlc.Secret) *model.Secret {
+func secretFromGetRow(row dbsqlc.GetSecretByPublicIDRow) *model.Secret {
+	return &model.Secret{
+		ID:                 row.ID,
+		PublicID:           row.PublicID,
+		RetrievalTokenHash: row.RetrievalTokenHash,
+		DeletionTokenHash:  row.DeletionTokenHash,
+		EncryptedData:      ptrFromText(row.EncryptedData),
+		Nonce:              row.Nonce,
+		SecretType:         row.SecretType,
+		StorageKey:         ptrFromText(row.StorageKey),
+		EncryptedFilename:  ptrFromText(row.EncryptedFilename),
+		EncryptedSize:      ptrFromInt8(row.EncryptedSize),
+		BurnAfterRead:      row.BurnAfterRead,
+		PasswordProtected:  row.PasswordProtected,
+		ExpiresAt:          row.ExpiresAt.Time,
+		CreatedAt:          row.CreatedAt.Time,
+		RetrievedAt:        ptrFromTimestamptz(row.RetrievedAt),
+	}
+}
+
+func secretFromDeleteRow(row dbsqlc.GetAndDeleteSecretByPublicIDRow) *model.Secret {
 	return &model.Secret{
 		ID:                 row.ID,
 		PublicID:           row.PublicID,
