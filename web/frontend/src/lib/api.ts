@@ -26,91 +26,49 @@ async function request<T>(url: string, init: RequestInit): Promise<T> {
   return res.json();
 }
 
+// --- Create ---
+
 export interface CreateSecretParams {
   public_id: string;
   retrieval_token: string;
   deletion_token: string;
-  nonce: string;
-  encrypted_data: string;
+  encrypted_meta: string;
   expiration: string;
   burn_after_read: boolean;
-  password_protected: boolean;
 }
 
 export interface CreateSecretResponse {
   expires_at: string;
 }
 
-export interface RetrieveSecretResponse {
-  nonce: string;
-  encrypted_data: string;
-  secret_type: string;
-  burn_after_read: boolean;
-  password_protected: boolean;
-}
-
-export function createSecret(params: CreateSecretParams): Promise<CreateSecretResponse> {
-  return request("/api/v1/secrets", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(params),
-  });
-}
-
-export function retrieveSecret(
-  publicID: string,
-  retrievalToken: string,
-): Promise<RetrieveSecretResponse> {
-  return request(`/api/v1/secrets/${publicID}`, {
-    method: "POST",
-    headers: { "X-Retrieval-Token": retrievalToken },
-  });
-}
-
-export interface UploadFileMetadata {
-  public_id: string;
-  retrieval_token: string;
-  deletion_token: string;
-  nonce: string;
-  expiration: string;
-  burn_after_read: boolean;
-  password_protected: boolean;
-  encrypted_filename: string;
-}
-
-export interface UploadFileResponse {
-  expires_at: string;
-}
-
-export async function uploadFile(
-  metadata: UploadFileMetadata,
-  encryptedBlob: Blob,
-): Promise<UploadFileResponse> {
+export function createSecret(
+  params: CreateSecretParams,
+  blob: Blob,
+): Promise<CreateSecretResponse> {
   const form = new FormData();
-  form.append("metadata", JSON.stringify(metadata));
-  form.append("file", encryptedBlob);
+  form.append("metadata", JSON.stringify(params));
+  form.append("file", blob);
 
-  return request("/api/v1/secrets/file", {
+  return request("/api/v1/secrets", {
     method: "POST",
     body: form,
   });
 }
 
-export interface DownloadFileResponse {
+// --- Retrieve (streams blob) ---
+
+export interface RetrieveSecretResponse {
   blob: Blob;
-  encryptedFilename: string;
-  nonce: string;
   burnAfterRead: boolean;
-  passwordProtected: boolean;
 }
 
-export async function downloadFile(
+export async function retrieveSecret(
   publicID: string,
   retrievalToken: string,
-): Promise<DownloadFileResponse> {
+): Promise<RetrieveSecretResponse> {
   let res: Response;
   try {
-    res = await fetch(`/api/v1/secrets/${publicID}/file`, {
+    res = await fetch(`/api/v1/secrets/${publicID}`, {
       method: "POST",
       credentials: "same-origin",
       headers: { "X-Retrieval-Token": retrievalToken },
@@ -128,22 +86,18 @@ export async function downloadFile(
   const blob = await res.blob();
   return {
     blob,
-    encryptedFilename: res.headers.get("X-Encrypted-Filename") ?? "",
-    nonce: res.headers.get("X-Nonce") ?? "",
     burnAfterRead: res.headers.get("X-Burn-After-Read") === "true",
-    passwordProtected: res.headers.get("X-Password-Protected") === "true",
   };
 }
 
 // --- Metadata ---
 
 export interface SecretMetadataResponse {
-  secret_type: string;
+  encrypted_meta: string;
+  blob_size: number;
   burn_after_read: boolean;
-  password_protected: boolean;
   expires_at: string;
   created_at: string;
-  file_size?: number;
 }
 
 export function getSecretMetadata(
@@ -155,6 +109,8 @@ export function getSecretMetadata(
     headers: { "X-Retrieval-Token": retrievalToken },
   });
 }
+
+// --- Delete ---
 
 export function deleteSecret(
   publicID: string,

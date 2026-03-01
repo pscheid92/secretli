@@ -7,7 +7,7 @@ import FileUpload from "../components/FileUpload";
 import SecretResult from "../components/SecretResult";
 import Spinner from "../components/Spinner";
 import Toggle from "../components/Toggle";
-import { ApiError, uploadFile } from "../lib/api";
+import { ApiError, createSecret } from "../lib/api";
 import { KeySet } from "../lib/encryption";
 
 interface FileFormData {
@@ -92,23 +92,25 @@ export default function FilePage() {
       }
 
       const fileBytes = new Uint8Array(await fileToUpload.arrayBuffer());
-      const { nonce, encryptedBlob } = await encryptKeySet.encryptFile(fileBytes);
-      const encryptedFilename = await encryptKeySet.encryptFilename(fileToUpload.name);
+      const blob = await encryptKeySet.encryptBlob(fileBytes);
+      const encryptedMeta = await keySet.encryptMeta({
+        type: "file",
+        password_protected: hasPassword,
+        filename: fileToUpload.name,
+      });
 
       const encoded = keySet.getEncoded();
 
-      const response = await uploadFile(
+      const response = await createSecret(
         {
           public_id: encoded.publicID,
           retrieval_token: encoded.retrievalToken,
           deletion_token: encoded.deletionToken,
-          nonce,
+          encrypted_meta: encryptedMeta,
           expiration: data.expiration,
           burn_after_read: data.burnAfterRead,
-          password_protected: hasPassword,
-          encrypted_filename: encryptedFilename,
         },
-        encryptedBlob,
+        blob,
       );
 
       setResult({

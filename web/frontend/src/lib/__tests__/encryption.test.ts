@@ -18,49 +18,68 @@ describe("KeySet", () => {
     });
   });
 
-  describe("text encrypt/decrypt", () => {
-    it("round-trips plaintext", async () => {
+  describe("encryptBlob/decryptBlob", () => {
+    it("round-trips text as bytes", async () => {
       const ks = await KeySet.generateRandom();
       const plaintext = "Hello, secret world!";
-      const { nonce, encrypted_data } = await ks.encrypt(plaintext);
-      const decrypted = await ks.decrypt(nonce, encrypted_data);
-      expect(decrypted).toBe(plaintext);
+      const data = new TextEncoder().encode(plaintext);
+      const blob = await ks.encryptBlob(data);
+      const decrypted = await ks.decryptBlob(blob);
+      expect(new TextDecoder().decode(decrypted)).toBe(plaintext);
     });
 
-    it("round-trips empty string", async () => {
+    it("round-trips empty data", async () => {
       const ks = await KeySet.generateRandom();
-      const { nonce, encrypted_data } = await ks.encrypt("");
-      const decrypted = await ks.decrypt(nonce, encrypted_data);
-      expect(decrypted).toBe("");
+      const blob = await ks.encryptBlob(new Uint8Array(0));
+      const decrypted = await ks.decryptBlob(blob);
+      expect(decrypted.length).toBe(0);
     });
 
-    it("round-trips unicode", async () => {
-      const ks = await KeySet.generateRandom();
-      const plaintext = "emoji: \u{1F512}\u{1F511} and CJK: \u4F60\u597D";
-      const { nonce, encrypted_data } = await ks.encrypt(plaintext);
-      const decrypted = await ks.decrypt(nonce, encrypted_data);
-      expect(decrypted).toBe(plaintext);
-    });
-  });
-
-  describe("file encrypt/decrypt", () => {
     it("round-trips binary data", async () => {
       const ks = await KeySet.generateRandom();
       const data = crypto.getRandomValues(new Uint8Array(1024));
-      const { nonce, encryptedBlob } = await ks.encryptFile(data);
-      const decrypted = await ks.decryptFile(nonce, encryptedBlob);
+      const blob = await ks.encryptBlob(data);
+      const decrypted = await ks.decryptBlob(blob);
       expect(decrypted).toEqual(data);
+    });
+
+    it("produces blob larger than input (nonce + auth tag)", async () => {
+      const ks = await KeySet.generateRandom();
+      const data = new Uint8Array(100);
+      const blob = await ks.encryptBlob(data);
+      // 12 byte nonce + 100 byte data + 16 byte GCM auth tag = 128
+      expect(blob.size).toBe(128);
     });
   });
 
-  describe("filename encrypt/decrypt", () => {
-    it("round-trips a filename", async () => {
+  describe("encryptMeta/decryptMeta", () => {
+    it("round-trips text metadata", async () => {
       const ks = await KeySet.generateRandom();
-      const filename = "my-secret-doc.pdf";
-      const encrypted = await ks.encryptFilename(filename);
-      expect(encrypted).toContain(":");
-      const decrypted = await ks.decryptFilename(encrypted);
-      expect(decrypted).toBe(filename);
+      const meta = { type: "text" as const, password_protected: false };
+      const envelope = await ks.encryptMeta(meta);
+      const decrypted = await ks.decryptMeta(envelope);
+      expect(decrypted).toEqual(meta);
+    });
+
+    it("round-trips file metadata with filename", async () => {
+      const ks = await KeySet.generateRandom();
+      const meta = { type: "file" as const, password_protected: true, filename: "report.pdf" };
+      const envelope = await ks.encryptMeta(meta);
+      const decrypted = await ks.decryptMeta(envelope);
+      expect(decrypted).toEqual(meta);
+    });
+
+    it("produces v1$nonce$ciphertext format", async () => {
+      const ks = await KeySet.generateRandom();
+      const envelope = await ks.encryptMeta({ type: "text", password_protected: false });
+      const parts = envelope.split("$");
+      expect(parts).toHaveLength(3);
+      expect(parts[0]).toBe("v1");
+    });
+
+    it("rejects invalid envelope format", async () => {
+      const ks = await KeySet.generateRandom();
+      await expect(ks.decryptMeta("bad-format")).rejects.toThrow("invalid metadata envelope format");
     });
   });
 
@@ -76,14 +95,25 @@ describe("KeySet", () => {
       expect(restoredEncoded.retrievalToken).toBe(encoded.retrievalToken);
     });
 
-    it("can decrypt data encrypted by the original keyset", async () => {
+    it("can decrypt blob encrypted by the original keyset", async () => {
       const original = await KeySet.generateRandom();
       const plaintext = "secret message";
-      const { nonce, encrypted_data } = await original.encrypt(plaintext);
+      const data = new TextEncoder().encode(plaintext);
+      const blob = await original.encryptBlob(data);
 
       const restored = await KeySet.fromShareSecret(original.getEncoded().shareSecret);
-      const decrypted = await restored.decrypt(nonce, encrypted_data);
-      expect(decrypted).toBe(plaintext);
+      const decrypted = await restored.decryptBlob(blob);
+      expect(new TextDecoder().decode(decrypted)).toBe(plaintext);
+    });
+
+    it("can decrypt metadata encrypted by the original keyset", async () => {
+      const original = await KeySet.generateRandom();
+      const meta = { type: "file" as const, password_protected: false, filename: "test.txt" };
+      const envelope = await original.encryptMeta(meta);
+
+      const restored = await KeySet.fromShareSecret(original.getEncoded().shareSecret);
+      const decrypted = await restored.decryptMeta(envelope);
+      expect(decrypted).toEqual(meta);
     });
   });
 
@@ -93,12 +123,12 @@ describe("KeySet", () => {
       const shareSecret = original.getEncoded().shareSecret;
 
       const withPw = await KeySet.fromShareSecret(shareSecret, "my-password");
-      const plaintext = "password-protected secret";
-      const { nonce, encrypted_data } = await withPw.encrypt(plaintext);
+      const data = new TextEncoder().encode("password-protected secret");
+      const blob = await withPw.encryptBlob(data);
 
       const restored = await KeySet.fromShareSecret(shareSecret, "my-password");
-      const decrypted = await restored.decrypt(nonce, encrypted_data);
-      expect(decrypted).toBe(plaintext);
+      const decrypted = await restored.decryptBlob(blob);
+      expect(new TextDecoder().decode(decrypted)).toBe("password-protected secret");
     });
 
     it("derives different keys with different passwords", async () => {
@@ -126,10 +156,38 @@ describe("KeySet", () => {
       const shareSecret = original.getEncoded().shareSecret;
 
       const withPw = await KeySet.fromShareSecret(shareSecret, "correct-password");
-      const { nonce, encrypted_data } = await withPw.encrypt("secret");
+      const blob = await withPw.encryptBlob(new TextEncoder().encode("secret"));
 
       const wrongPw = await KeySet.fromShareSecret(shareSecret, "wrong-password");
-      await expect(wrongPw.decrypt(nonce, encrypted_data)).rejects.toThrow();
+      await expect(wrongPw.decryptBlob(blob)).rejects.toThrow();
+    });
+  });
+
+  describe("password-protected workflow", () => {
+    it("metadata encrypted with base key, data with password key", async () => {
+      // This simulates the actual create/retrieve workflow
+      const keySet = await KeySet.generateRandom();
+      const shareSecret = keySet.getEncoded().shareSecret;
+
+      // Create: metadata with base key, data with password key
+      const meta = { type: "text" as const, password_protected: true };
+      const encryptedMeta = await keySet.encryptMeta(meta);
+      const passwordKeySet = await KeySet.fromShareSecret(shareSecret, "the-password");
+      const blob = await passwordKeySet.encryptBlob(new TextEncoder().encode("secret data"));
+
+      // Retrieve: decrypt metadata with base key (no password needed)
+      const restored = await KeySet.fromShareSecret(shareSecret);
+      const decryptedMeta = await restored.decryptMeta(encryptedMeta);
+      expect(decryptedMeta.password_protected).toBe(true);
+
+      // Decrypt data with password key
+      const restoredPw = await KeySet.fromShareSecret(shareSecret, "the-password");
+      const decryptedData = await restoredPw.decryptBlob(blob);
+      expect(new TextDecoder().decode(decryptedData)).toBe("secret data");
+
+      // Wrong password fails
+      const wrongPw = await KeySet.fromShareSecret(shareSecret, "wrong");
+      await expect(wrongPw.decryptBlob(blob)).rejects.toThrow();
     });
   });
 });

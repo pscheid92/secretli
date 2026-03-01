@@ -53,7 +53,7 @@ func (m *mockFileStore) Delete(_ context.Context, key string) error {
 func TestRunCycle_Success(t *testing.T) {
 	secretRepo := &mockSecretRepo{
 		deleteExpiredCount: 3,
-		deleteExpiredKeys:  []string{"key1", "key2", "key3"},
+		deleteExpiredKeys:  []string{"pub1", "pub2", "pub3"},
 	}
 	fileStore := &mockFileStore{}
 
@@ -69,7 +69,7 @@ func TestRunCycle_Success(t *testing.T) {
 	if len(fileStore.deletedKeys) != 3 {
 		t.Fatalf("expected 3 deleted keys, got %d", len(fileStore.deletedKeys))
 	}
-	for i, expected := range []string{"key1", "key2", "key3"} {
+	for i, expected := range []string{"secrets/pub1", "secrets/pub2", "secrets/pub3"} {
 		if fileStore.deletedKeys[i] != expected {
 			t.Errorf("deletedKeys[%d] = %q, want %q", i, fileStore.deletedKeys[i], expected)
 		}
@@ -80,8 +80,9 @@ func TestRunCycle_RepoErrors(t *testing.T) {
 	secretRepo := &mockSecretRepo{
 		deleteExpiredErr: errors.New("db connection lost"),
 	}
+	fileStore := &mockFileStore{}
 
-	w := NewWorker(time.Minute, secretRepo, nil, nil)
+	w := NewWorker(time.Minute, secretRepo, fileStore, nil)
 
 	// Should not panic despite repo errors.
 	w.runCycle(context.Background())
@@ -91,25 +92,26 @@ func TestRunCycle_RepoErrors(t *testing.T) {
 	}
 }
 
-func TestRunCycle_NilFileStore(t *testing.T) {
+func TestRunCycle_NoExpiredSecrets(t *testing.T) {
 	secretRepo := &mockSecretRepo{
-		deleteExpiredCount: 2,
-		deleteExpiredKeys:  []string{"key1", "key2"},
+		deleteExpiredCount: 0,
+		deleteExpiredKeys:  nil,
 	}
+	fileStore := &mockFileStore{}
 
-	// fileStore is nil — should not panic when storageKeys are returned.
-	w := NewWorker(time.Minute, secretRepo, nil, nil)
+	w := NewWorker(time.Minute, secretRepo, fileStore, nil)
 	w.runCycle(context.Background())
 
-	if secretRepo.deleteExpiredCalled.Load() != 1 {
-		t.Errorf("expected DeleteExpired called once, got %d", secretRepo.deleteExpiredCalled.Load())
+	if fileStore.deleteCalled.Load() != 0 {
+		t.Errorf("expected no S3 deletions, got %d", fileStore.deleteCalled.Load())
 	}
 }
 
 func TestRun_ContextCancellation(t *testing.T) {
 	secretRepo := &mockSecretRepo{}
+	fileStore := &mockFileStore{}
 
-	w := NewWorker(10*time.Millisecond, secretRepo, nil, nil)
+	w := NewWorker(10*time.Millisecond, secretRepo, fileStore, nil)
 
 	ctx, cancel := context.WithCancel(context.Background())
 

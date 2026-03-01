@@ -46,19 +46,26 @@ export default function SharePage() {
         encryptKeySet = await KeySet.fromShareSecret(encoded.shareSecret, data.password);
       }
 
-      const encrypted = await encryptKeySet.encrypt(data.text);
-      const encoded = keySet.getEncoded();
-
-      const response = await createSecret({
-        public_id: encoded.publicID,
-        retrieval_token: encoded.retrievalToken,
-        deletion_token: encoded.deletionToken,
-        nonce: encrypted.nonce,
-        encrypted_data: encrypted.encrypted_data,
-        expiration: data.expiration,
-        burn_after_read: data.burnAfterRead,
+      const textBytes = new TextEncoder().encode(data.text);
+      const blob = await encryptKeySet.encryptBlob(textBytes);
+      const encryptedMeta = await keySet.encryptMeta({
+        type: "text",
         password_protected: hasPassword,
       });
+
+      const encoded = keySet.getEncoded();
+
+      const response = await createSecret(
+        {
+          public_id: encoded.publicID,
+          retrieval_token: encoded.retrievalToken,
+          deletion_token: encoded.deletionToken,
+          encrypted_meta: encryptedMeta,
+          expiration: data.expiration,
+          burn_after_read: data.burnAfterRead,
+        },
+        blob,
+      );
 
       setResult({
         url: `${window.location.origin}/s#${encoded.shareSecret}`,

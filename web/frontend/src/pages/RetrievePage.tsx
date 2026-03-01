@@ -7,18 +7,22 @@ import {
   ApiError,
   type SecretMetadataResponse,
   deleteSecret,
-  downloadFile,
   getSecretMetadata,
   retrieveSecret,
 } from "../lib/api";
-import { KeySet } from "../lib/encryption";
+import { KeySet, type SecretMeta } from "../lib/encryption";
 import { formatRelativeTime, formatSize } from "../lib/format";
+
+interface DecryptedMeta {
+  serverMeta: SecretMetadataResponse;
+  clientMeta: SecretMeta;
+}
 
 type State =
   | { stage: "prompt" }
   | { stage: "loading" }
-  | { stage: "confirm"; shareSecret: string; deletionToken: string; metadata: SecretMetadataResponse }
-  | { stage: "password"; shareSecret: string; deletionToken: string; secretType: string; nonce: string; encryptedData: string }
+  | { stage: "confirm"; shareSecret: string; deletionToken: string; meta: DecryptedMeta }
+  | { stage: "password"; shareSecret: string; deletionToken: string; meta: DecryptedMeta }
   | { stage: "decrypted"; text: string; shareSecret: string; deletionToken: string }
   | { stage: "downloading" }
   | { stage: "file-ready"; filename: string; shareSecret: string; deletionToken: string }
@@ -50,42 +54,6 @@ export default function RetrievePage() {
   const [revealing, setRevealing] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
-  const handleFileDownload = useCallback(async (
-    keySet: KeySet,
-    publicID: string,
-    retrievalToken: string,
-    shareSecret: string,
-    deletionToken: string,
-  ) => {
-    setState({ stage: "downloading" });
-
-    const fileResponse = await downloadFile(publicID, retrievalToken);
-
-    const decryptedBytes = await keySet.decryptFile(fileResponse.nonce, fileResponse.blob);
-    let filename = "download";
-    if (fileResponse.encryptedFilename) {
-      filename = await keySet.decryptFilename(fileResponse.encryptedFilename);
-    }
-
-    const url = URL.createObjectURL(
-      new Blob([
-        decryptedBytes.buffer.slice(
-          decryptedBytes.byteOffset,
-          decryptedBytes.byteOffset + decryptedBytes.byteLength,
-        ) as ArrayBuffer,
-      ]),
-    );
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-
-    setState({ stage: "file-ready", filename, shareSecret, deletionToken });
-  }, []);
-
   const fetchMetadata = useCallback(async () => {
     const hash = window.location.hash.slice(1);
     if (!hash) {
@@ -101,9 +69,17 @@ export default function RetrievePage() {
       const keySet = await KeySet.fromShareSecret(shareSecret);
       const encoded = keySet.getEncoded();
 
-      const metadata = await getSecretMetadata(encoded.publicID, encoded.retrievalToken);
+      const serverMeta = await getSecretMetadata(encoded.publicID, encoded.retrievalToken);
 
-      setState({ stage: "confirm", shareSecret, deletionToken, metadata });
+      // Decrypt the client-encrypted metadata
+      const clientMeta = await keySet.decryptMeta(serverMeta.encrypted_meta);
+
+      setState({
+        stage: "confirm",
+        shareSecret,
+        deletionToken,
+        meta: { serverMeta, clientMeta },
+      });
     } catch (err) {
       if (err instanceof ApiError) {
         if (err.status === 404) {
@@ -126,44 +102,19 @@ export default function RetrievePage() {
   async function handleReveal() {
     if (state.stage !== "confirm") return;
 
-    const { shareSecret, deletionToken } = state;
+    const { shareSecret, deletionToken, meta } = state;
     setRevealing(true);
 
     try {
+      if (meta.clientMeta.password_protected) {
+        setState({ stage: "password", shareSecret, deletionToken, meta });
+        return;
+      }
+
       const keySet = await KeySet.fromShareSecret(shareSecret);
-      const encoded = keySet.getEncoded();
-
-      const response = await retrieveSecret(encoded.publicID, encoded.retrievalToken);
-
-      if (response.password_protected) {
-        setState({
-          stage: "password",
-          shareSecret,
-          deletionToken,
-          secretType: response.secret_type,
-          nonce: response.nonce,
-          encryptedData: response.encrypted_data,
-        });
-        return;
-      }
-
-      if (response.secret_type === "file") {
-        await handleFileDownload(keySet, encoded.publicID, encoded.retrievalToken, shareSecret, deletionToken);
-        return;
-      }
-
-      const text = await keySet.decrypt(response.nonce, response.encrypted_data);
-      setState({ stage: "decrypted", text, shareSecret, deletionToken });
+      await revealWithKeySet(keySet, shareSecret, deletionToken, meta.clientMeta);
     } catch (err) {
-      if (err instanceof ApiError) {
-        if (err.status === 404) {
-          setState({ stage: "error", message: "This secret has expired or does not exist." });
-        } else {
-          setState({ stage: "error", message: err.message });
-        }
-      } else {
-        setState({ stage: "error", message: "An unexpected error occurred." });
-      }
+      handleRevealError(err);
     } finally {
       setRevealing(false);
     }
@@ -176,19 +127,62 @@ export default function RetrievePage() {
 
     try {
       const keySet = await KeySet.fromShareSecret(state.shareSecret, data.password);
-      const encoded = keySet.getEncoded();
-
-      if (state.secretType === "file") {
-        await handleFileDownload(keySet, encoded.publicID, encoded.retrievalToken, state.shareSecret, state.deletionToken);
-        return;
-      }
-
-      const text = await keySet.decrypt(state.nonce, state.encryptedData);
-      setState({ stage: "decrypted", text, shareSecret: state.shareSecret, deletionToken: state.deletionToken });
+      await revealWithKeySet(keySet, state.shareSecret, state.deletionToken, state.meta.clientMeta);
     } catch {
       setPasswordFormError("password", { message: "Wrong password. Please try again." });
     } finally {
       setPasswordLoading(false);
+    }
+  }
+
+  async function revealWithKeySet(
+    keySet: KeySet,
+    shareSecret: string,
+    deletionToken: string,
+    clientMeta: SecretMeta,
+  ) {
+    // Use base keyset for API auth (publicID/retrievalToken are always derived without password)
+    const baseKeySet = await KeySet.fromShareSecret(shareSecret);
+    const encoded = baseKeySet.getEncoded();
+
+    const response = await retrieveSecret(encoded.publicID, encoded.retrievalToken);
+    const decrypted = await keySet.decryptBlob(response.blob);
+
+    if (clientMeta.type === "file") {
+      const filename = clientMeta.filename ?? "download";
+
+      const url = URL.createObjectURL(
+        new Blob([
+          decrypted.buffer.slice(
+            decrypted.byteOffset,
+            decrypted.byteOffset + decrypted.byteLength,
+          ) as ArrayBuffer,
+        ]),
+      );
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+
+      setState({ stage: "file-ready", filename, shareSecret, deletionToken });
+    } else {
+      const text = new TextDecoder().decode(decrypted);
+      setState({ stage: "decrypted", text, shareSecret, deletionToken });
+    }
+  }
+
+  function handleRevealError(err: unknown) {
+    if (err instanceof ApiError) {
+      if (err.status === 404) {
+        setState({ stage: "error", message: "This secret has expired or does not exist." });
+      } else {
+        setState({ stage: "error", message: err.message });
+      }
+    } else {
+      setState({ stage: "error", message: "An unexpected error occurred." });
     }
   }
 
@@ -220,7 +214,7 @@ export default function RetrievePage() {
     toast.success("Copied to clipboard");
   }
 
-  // ── Prompt ────────────────────────────────────────────────────────────────
+  // -- Prompt --
 
   if (state.stage === "prompt") {
     function handleLinkSubmit(e: React.FormEvent) {
@@ -270,7 +264,7 @@ export default function RetrievePage() {
     );
   }
 
-  // ── Loading ───────────────────────────────────────────────────────────────
+  // -- Loading --
 
   if (state.stage === "loading") {
     return (
@@ -281,7 +275,7 @@ export default function RetrievePage() {
     );
   }
 
-  // ── Downloading ───────────────────────────────────────────────────────────
+  // -- Downloading --
 
   if (state.stage === "downloading") {
     return (
@@ -292,7 +286,7 @@ export default function RetrievePage() {
     );
   }
 
-  // ── Error ─────────────────────────────────────────────────────────────────
+  // -- Error --
 
   if (state.stage === "error") {
     return (
@@ -318,11 +312,11 @@ export default function RetrievePage() {
     );
   }
 
-  // ── Confirm ───────────────────────────────────────────────────────────────
+  // -- Confirm --
 
   if (state.stage === "confirm") {
-    const { metadata } = state;
-    const isFile = metadata.secret_type === "file";
+    const { serverMeta, clientMeta } = state.meta;
+    const isFile = clientMeta.type === "file";
 
     return (
       <div className="space-y-5">
@@ -338,7 +332,7 @@ export default function RetrievePage() {
         <div className="rounded-lg border border-zinc-200 dark:border-zinc-500/50 divide-y divide-zinc-200 dark:divide-zinc-500/50 overflow-hidden">
           <div className="flex items-center gap-2.5 px-4 py-3">
             <SecretTypeIcon
-              type={metadata.secret_type}
+              type={clientMeta.type}
               className="h-4 w-4 text-zinc-500 dark:text-zinc-100"
             />
             <span className="text-sm font-medium text-zinc-600 dark:text-zinc-100">
@@ -346,24 +340,24 @@ export default function RetrievePage() {
             </span>
           </div>
           <div className="px-4">
-            <MetaRow label="Created" value={formatRelativeTime(metadata.created_at)} />
+            <MetaRow label="Created" value={formatRelativeTime(serverMeta.created_at)} />
           </div>
           <div className="px-4">
-            <MetaRow label="Expires" value={formatRelativeTime(metadata.expires_at)} />
+            <MetaRow label="Expires" value={formatRelativeTime(serverMeta.expires_at)} />
           </div>
-          {isFile && metadata.file_size != null && (
+          {isFile && serverMeta.blob_size > 0 && (
             <div className="px-4">
-              <MetaRow label="Size" value={formatSize(metadata.file_size)} />
+              <MetaRow label="Size" value={formatSize(serverMeta.blob_size)} />
             </div>
           )}
-          {metadata.password_protected && (
+          {clientMeta.password_protected && (
             <div className="px-4">
               <MetaRow label="Password" value="Required" accent />
             </div>
           )}
         </div>
 
-        {metadata.burn_after_read && (
+        {serverMeta.burn_after_read && (
           <div className="flex items-start gap-3 rounded-lg border border-amber-200 dark:border-amber-900/40 bg-amber-50 dark:bg-amber-900/10 px-4 py-3">
             <svg className="h-4 w-4 text-amber-500 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
               <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
@@ -387,7 +381,7 @@ export default function RetrievePage() {
     );
   }
 
-  // ── Password ──────────────────────────────────────────────────────────────
+  // -- Password --
 
   if (state.stage === "password") {
     return (
@@ -424,7 +418,7 @@ export default function RetrievePage() {
     );
   }
 
-  // ── Deleted ───────────────────────────────────────────────────────────────
+  // -- Deleted --
 
   if (state.stage === "deleted") {
     return (
@@ -448,7 +442,7 @@ export default function RetrievePage() {
     );
   }
 
-  // ── File ready ────────────────────────────────────────────────────────────
+  // -- File ready --
 
   if (state.stage === "file-ready") {
     return (
@@ -480,7 +474,7 @@ export default function RetrievePage() {
     );
   }
 
-  // ── Decrypted ─────────────────────────────────────────────────────────────
+  // -- Decrypted text --
 
   return (
     <div className="space-y-5">

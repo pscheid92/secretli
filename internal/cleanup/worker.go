@@ -5,8 +5,8 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/pscheid92/secretli/internal/domain"
 	"github.com/pscheid92/secretli/internal/adapter/metrics"
+	"github.com/pscheid92/secretli/internal/domain"
 )
 
 // Worker periodically cleans up expired secrets.
@@ -50,34 +50,34 @@ func (w *Worker) Run(ctx context.Context) {
 }
 
 func (w *Worker) runCycle(ctx context.Context) {
-	// Clean expired secrets
-	count, storageKeys, err := w.secretRepo.DeleteExpired(ctx)
+	count, publicIDs, err := w.secretRepo.DeleteExpired(ctx)
 	if err != nil {
 		slog.ErrorContext(ctx, "cleanup: failed to delete expired secrets", "error", err)
 		if w.metrics != nil {
 			w.metrics.CleanupErrors.Inc()
 		}
-	} else if count > 0 {
+		return
+	}
+
+	if count > 0 {
 		slog.InfoContext(ctx, "cleanup: deleted expired secrets", "count", count)
 		if w.metrics != nil {
 			w.metrics.SecretsDeleted.WithLabelValues("cleanup").Add(float64(count))
 		}
 	}
 
-	// Delete S3 objects for file secrets
-	if w.fileStore != nil && len(storageKeys) > 0 {
-		var s3Errors int
-		for _, key := range storageKeys {
-			if err := w.fileStore.Delete(ctx, key); err != nil {
-				slog.ErrorContext(ctx, "cleanup: failed to delete S3 object", "key", key, "error", err)
-				s3Errors++
-			}
+	var s3Errors int
+	for _, id := range publicIDs {
+		key := "secrets/" + id
+		if err := w.fileStore.Delete(ctx, key); err != nil {
+			slog.ErrorContext(ctx, "cleanup: failed to delete S3 object", "key", key, "error", err)
+			s3Errors++
 		}
-		if s3Errors > 0 {
-			slog.WarnContext(ctx, "cleanup: some S3 deletions failed", "failed", s3Errors, "total", len(storageKeys))
-			if w.metrics != nil {
-				w.metrics.CleanupErrors.Add(float64(s3Errors))
-			}
+	}
+	if s3Errors > 0 {
+		slog.WarnContext(ctx, "cleanup: some S3 deletions failed", "failed", s3Errors, "total", len(publicIDs))
+		if w.metrics != nil {
+			w.metrics.CleanupErrors.Add(float64(s3Errors))
 		}
 	}
 }

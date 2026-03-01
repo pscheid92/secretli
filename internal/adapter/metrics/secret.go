@@ -3,7 +3,7 @@ package metrics
 import "github.com/prometheus/client_golang/prometheus"
 
 type SecretMetrics struct {
-	SecretsCreated   *prometheus.CounterVec
+	SecretsCreated   prometheus.Counter
 	SecretsRetrieved prometheus.Counter
 	SecretsDeleted   *prometheus.CounterVec
 	CleanupErrors    prometheus.Counter
@@ -11,13 +11,12 @@ type SecretMetrics struct {
 
 func NewSecretMetrics(reg *prometheus.Registry) *SecretMetrics {
 	m := &SecretMetrics{
-		SecretsCreated: prometheus.NewCounterVec(
+		SecretsCreated: prometheus.NewCounter(
 			prometheus.CounterOpts{
 				Namespace: namespace,
 				Name:      "secrets_created_total",
-				Help:      "Total number of secrets created, by type.",
+				Help:      "Total number of secrets created.",
 			},
-			[]string{"type"},
 		),
 		SecretsRetrieved: prometheus.NewCounter(
 			prometheus.CounterOpts{

@@ -7,10 +7,14 @@ export interface EncodedKeySet {
   readonly deletionToken: string;
 }
 
-export interface EncryptedData {
-  readonly nonce: string;
-  readonly encrypted_data: string;
+export interface SecretMeta {
+  readonly type: "text" | "file";
+  readonly password_protected: boolean;
+  readonly filename?: string;
 }
+
+const ENVELOPE_VERSION = "v1";
+const NONCE_LENGTH = 12;
 
 function toBuffer(bytes: Uint8Array): ArrayBuffer {
   return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
@@ -74,122 +78,73 @@ export class KeySet {
     return new KeySet(shareSecretBytes, encryptionKey, publicID, retrievalToken, deletionToken);
   }
 
-  async encrypt(plaintext: string): Promise<EncryptedData> {
-    const nonce = crypto.getRandomValues(new Uint8Array(12));
-    const encoded = new TextEncoder().encode(plaintext);
+  /**
+   * Encrypt a metadata object into the envelope format: v1$base64url(nonce)$base64url(ciphertext)
+   */
+  async encryptMeta(meta: SecretMeta): Promise<string> {
+    const nonce = crypto.getRandomValues(new Uint8Array(NONCE_LENGTH));
+    const plaintext = new TextEncoder().encode(JSON.stringify(meta));
 
-    const key = await crypto.subtle.importKey(
-      "raw",
-      toBuffer(this.encryptionKey),
-      "AES-GCM",
-      false,
-      ["encrypt"],
-    );
-    const ciphertext = await crypto.subtle.encrypt({ name: "AES-GCM", iv: nonce }, key, encoded);
+    const key = await this.importKey("encrypt");
+    const ciphertext = await crypto.subtle.encrypt({ name: "AES-GCM", iv: nonce }, key, plaintext);
 
-    return {
-      nonce: base64UrlEncode(nonce),
-      encrypted_data: base64UrlEncode(new Uint8Array(ciphertext)),
-    };
+    return `${ENVELOPE_VERSION}$${base64UrlEncode(nonce)}$${base64UrlEncode(new Uint8Array(ciphertext))}`;
   }
 
-  async decrypt(nonce: string, encryptedData: string): Promise<string> {
-    const nonceBytes = base64UrlDecode(nonce);
-    const cipherBytes = base64UrlDecode(encryptedData);
+  /**
+   * Decrypt an envelope string (v1$nonce$ciphertext) back to a metadata object.
+   */
+  async decryptMeta(envelope: string): Promise<SecretMeta> {
+    const parts = envelope.split("$");
+    if (parts.length !== 3 || parts[0] !== ENVELOPE_VERSION) {
+      throw new Error("invalid metadata envelope format");
+    }
 
-    const key = await crypto.subtle.importKey(
-      "raw",
-      toBuffer(this.encryptionKey),
-      "AES-GCM",
-      false,
-      ["decrypt"],
-    );
+    const nonce = base64UrlDecode(parts[1]);
+    const ciphertext = base64UrlDecode(parts[2]);
+
+    const key = await this.importKey("decrypt");
     const decrypted = await crypto.subtle.decrypt(
-      { name: "AES-GCM", iv: toBuffer(nonceBytes) },
+      { name: "AES-GCM", iv: toBuffer(nonce) },
       key,
-      toBuffer(cipherBytes),
+      toBuffer(ciphertext),
     );
 
-    return new TextDecoder().decode(decrypted);
+    return JSON.parse(new TextDecoder().decode(decrypted));
   }
 
-  async encryptFile(data: Uint8Array): Promise<{ nonce: string; encryptedBlob: Blob }> {
-    const nonce = crypto.getRandomValues(new Uint8Array(12));
+  /**
+   * Encrypt binary data into a Blob with the nonce prepended: [12-byte nonce][ciphertext]
+   */
+  async encryptBlob(data: Uint8Array): Promise<Blob> {
+    const nonce = crypto.getRandomValues(new Uint8Array(NONCE_LENGTH));
 
-    const key = await crypto.subtle.importKey(
-      "raw",
-      toBuffer(this.encryptionKey),
-      "AES-GCM",
-      false,
-      ["encrypt"],
-    );
+    const key = await this.importKey("encrypt");
     const ciphertext = await crypto.subtle.encrypt(
       { name: "AES-GCM", iv: nonce },
       key,
       toBuffer(data),
     );
 
-    return {
-      nonce: base64UrlEncode(nonce),
-      encryptedBlob: new Blob([ciphertext]),
-    };
+    return new Blob([nonce, ciphertext]);
   }
 
-  async decryptFile(nonce: string, encryptedBlob: Blob): Promise<Uint8Array> {
-    const nonceBytes = base64UrlDecode(nonce);
-    const cipherBytes = new Uint8Array(await encryptedBlob.arrayBuffer());
+  /**
+   * Decrypt a nonce-prefixed blob back to plaintext bytes.
+   */
+  async decryptBlob(blob: Blob): Promise<Uint8Array> {
+    const bytes = new Uint8Array(await blob.arrayBuffer());
+    const nonce = bytes.slice(0, NONCE_LENGTH);
+    const ciphertext = bytes.slice(NONCE_LENGTH);
 
-    const key = await crypto.subtle.importKey(
-      "raw",
-      toBuffer(this.encryptionKey),
-      "AES-GCM",
-      false,
-      ["decrypt"],
-    );
+    const key = await this.importKey("decrypt");
     const decrypted = await crypto.subtle.decrypt(
-      { name: "AES-GCM", iv: toBuffer(nonceBytes) },
+      { name: "AES-GCM", iv: toBuffer(nonce) },
       key,
-      toBuffer(cipherBytes),
+      toBuffer(ciphertext),
     );
 
     return new Uint8Array(decrypted);
-  }
-
-  async encryptFilename(filename: string): Promise<string> {
-    const nonce = crypto.getRandomValues(new Uint8Array(12));
-    const encoded = new TextEncoder().encode(filename);
-
-    const key = await crypto.subtle.importKey(
-      "raw",
-      toBuffer(this.encryptionKey),
-      "AES-GCM",
-      false,
-      ["encrypt"],
-    );
-    const ciphertext = await crypto.subtle.encrypt({ name: "AES-GCM", iv: nonce }, key, encoded);
-
-    return `${base64UrlEncode(nonce)}:${base64UrlEncode(new Uint8Array(ciphertext))}`;
-  }
-
-  async decryptFilename(encrypted: string): Promise<string> {
-    const [nonceStr, ciphertextStr] = encrypted.split(":");
-    const nonceBytes = base64UrlDecode(nonceStr);
-    const cipherBytes = base64UrlDecode(ciphertextStr);
-
-    const key = await crypto.subtle.importKey(
-      "raw",
-      toBuffer(this.encryptionKey),
-      "AES-GCM",
-      false,
-      ["decrypt"],
-    );
-    const decrypted = await crypto.subtle.decrypt(
-      { name: "AES-GCM", iv: toBuffer(nonceBytes) },
-      key,
-      toBuffer(cipherBytes),
-    );
-
-    return new TextDecoder().decode(decrypted);
   }
 
   getEncoded(): EncodedKeySet {
@@ -199,6 +154,16 @@ export class KeySet {
       retrievalToken: base64UrlEncode(this.retrievalToken),
       deletionToken: base64UrlEncode(this.deletionToken),
     };
+  }
+
+  private async importKey(usage: "encrypt" | "decrypt"): Promise<CryptoKey> {
+    return crypto.subtle.importKey(
+      "raw",
+      toBuffer(this.encryptionKey),
+      "AES-GCM",
+      false,
+      [usage],
+    );
   }
 }
 

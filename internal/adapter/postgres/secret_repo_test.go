@@ -5,23 +5,19 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/uuid"
 	pgadapter "github.com/pscheid92/secretli/internal/adapter/postgres"
 	"github.com/pscheid92/secretli/internal/domain"
 )
 
-func newTextSecret(publicID string, expiresAt time.Time) *domain.Secret {
-	data := "encrypted-data"
+func newTestSecret(publicID string, expiresAt time.Time) *domain.Secret {
 	return &domain.Secret{
-		PublicID:           publicID,
-		RetrievalToken: "retrieval-token-" + publicID,
-		DeletionToken:  "deletion-token-" + publicID,
-		EncryptedData:      &data,
-		Nonce:              "nonce-" + publicID,
-		SecretType:         "text",
-		BurnAfterRead:      false,
-		PasswordProtected:  false,
-		ExpiresAt:          expiresAt,
+		PublicID:          publicID,
+		RetrievalToken:    "retrieval-token-" + publicID,
+		DeletionToken:     "deletion-token-" + publicID,
+		EncryptedMeta:     "v1$nonce$meta-" + publicID,
+		BlobSize:          1024,
+		BurnAfterRead: false,
+		ExpiresAt:     expiresAt,
 	}
 }
 
@@ -30,7 +26,7 @@ func TestSecretRepo_CreateAndGet(t *testing.T) {
 	repo := pgadapter.NewSecretRepo(pool)
 	ctx := context.Background()
 
-	secret := newTextSecret("pub-001", time.Now().Add(1*time.Hour))
+	secret := newTestSecret("pub-001", time.Now().Add(1*time.Hour))
 	if err := repo.Create(ctx, secret); err != nil {
 		t.Fatalf("create secret: %v", err)
 	}
@@ -46,14 +42,11 @@ func TestSecretRepo_CreateAndGet(t *testing.T) {
 	if got.RetrievalToken != "retrieval-token-pub-001" {
 		t.Errorf("retrieval_token = %q, want %q", got.RetrievalToken, "retrieval-token-pub-001")
 	}
-	if got.SecretType != "text" {
-		t.Errorf("secret_type = %q, want %q", got.SecretType, "text")
+	if got.EncryptedMeta != "v1$nonce$meta-pub-001" {
+		t.Errorf("encrypted_meta = %q, want %q", got.EncryptedMeta, "v1$nonce$meta-pub-001")
 	}
-	if got.EncryptedData == nil || *got.EncryptedData != "encrypted-data" {
-		t.Errorf("encrypted_data = %v, want %q", got.EncryptedData, "encrypted-data")
-	}
-	if got.ID == uuid.Nil {
-		t.Error("expected non-nil UUID ID")
+	if got.BlobSize != 1024 {
+		t.Errorf("blob_size = %d, want %d", got.BlobSize, 1024)
 	}
 	if got.CreatedAt.IsZero() {
 		t.Error("expected non-zero created_at")
@@ -65,12 +58,12 @@ func TestSecretRepo_CreateDuplicate(t *testing.T) {
 	repo := pgadapter.NewSecretRepo(pool)
 	ctx := context.Background()
 
-	secret := newTextSecret("dup-001", time.Now().Add(1*time.Hour))
+	secret := newTestSecret("dup-001", time.Now().Add(1*time.Hour))
 	if err := repo.Create(ctx, secret); err != nil {
 		t.Fatalf("create first: %v", err)
 	}
 
-	secret2 := newTextSecret("dup-001", time.Now().Add(2*time.Hour))
+	secret2 := newTestSecret("dup-001", time.Now().Add(2*time.Hour))
 	err := repo.Create(ctx, secret2)
 	if err != domain.ErrDuplicate {
 		t.Fatalf("expected ErrDuplicate, got %v", err)
@@ -82,7 +75,7 @@ func TestSecretRepo_GetExpired(t *testing.T) {
 	repo := pgadapter.NewSecretRepo(pool)
 	ctx := context.Background()
 
-	secret := newTextSecret("expired-001", time.Now().Add(-1*time.Hour))
+	secret := newTestSecret("expired-001", time.Now().Add(-1*time.Hour))
 	if err := repo.Create(ctx, secret); err != nil {
 		t.Fatalf("create expired secret: %v", err)
 	}
@@ -98,7 +91,7 @@ func TestSecretRepo_GetAndDelete(t *testing.T) {
 	repo := pgadapter.NewSecretRepo(pool)
 	ctx := context.Background()
 
-	secret := newTextSecret("burn-001", time.Now().Add(1*time.Hour))
+	secret := newTestSecret("burn-001", time.Now().Add(1*time.Hour))
 	secret.BurnAfterRead = true
 	if err := repo.Create(ctx, secret); err != nil {
 		t.Fatalf("create: %v", err)
@@ -127,7 +120,7 @@ func TestSecretRepo_SetRetrievedAt(t *testing.T) {
 	repo := pgadapter.NewSecretRepo(pool)
 	ctx := context.Background()
 
-	secret := newTextSecret("retr-001", time.Now().Add(1*time.Hour))
+	secret := newTestSecret("retr-001", time.Now().Add(1*time.Hour))
 	if err := repo.Create(ctx, secret); err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -153,7 +146,7 @@ func TestSecretRepo_Delete(t *testing.T) {
 	repo := pgadapter.NewSecretRepo(pool)
 	ctx := context.Background()
 
-	secret := newTextSecret("del-001", time.Now().Add(1*time.Hour))
+	secret := newTestSecret("del-001", time.Now().Add(1*time.Hour))
 	if err := repo.Create(ctx, secret); err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -173,15 +166,9 @@ func TestSecretRepo_DeleteExpired(t *testing.T) {
 	repo := pgadapter.NewSecretRepo(pool)
 	ctx := context.Background()
 
-	// Create mix of expired and valid secrets
-	storageKey := "files/expired-key"
-	expired1 := newTextSecret("exp-del-001", time.Now().Add(-1*time.Hour))
-	expired1.StorageKey = &storageKey
-
-	expired2 := newTextSecret("exp-del-002", time.Now().Add(-2*time.Hour))
-	// expired2 has no storage key
-
-	valid := newTextSecret("exp-del-003", time.Now().Add(1*time.Hour))
+	expired1 := newTestSecret("exp-del-001", time.Now().Add(-1*time.Hour))
+	expired2 := newTestSecret("exp-del-002", time.Now().Add(-2*time.Hour))
+	valid := newTestSecret("exp-del-003", time.Now().Add(1*time.Hour))
 
 	for _, s := range []*domain.Secret{expired1, expired2, valid} {
 		if err := repo.Create(ctx, s); err != nil {
@@ -189,7 +176,7 @@ func TestSecretRepo_DeleteExpired(t *testing.T) {
 		}
 	}
 
-	count, keys, err := repo.DeleteExpired(ctx)
+	count, publicIDs, err := repo.DeleteExpired(ctx)
 	if err != nil {
 		t.Fatalf("delete expired: %v", err)
 	}
@@ -198,8 +185,8 @@ func TestSecretRepo_DeleteExpired(t *testing.T) {
 		t.Errorf("deleted count = %d, want 2", count)
 	}
 
-	if len(keys) != 1 || keys[0] != "files/expired-key" {
-		t.Errorf("storage keys = %v, want [files/expired-key]", keys)
+	if len(publicIDs) != 2 {
+		t.Errorf("public IDs count = %d, want 2", len(publicIDs))
 	}
 
 	// Valid secret should still exist

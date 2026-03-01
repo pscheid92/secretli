@@ -37,14 +37,12 @@ func registerRoutes(
 	r.Method("GET", "/api/v1/health/ready", ReadinessWithDB(pinger))
 
 	// Secrets
-	sh := NewSecretHandler(secretRepo, fileStore, secretMetrics)
+	sh := NewSecretHandler(secretRepo, fileStore, maxFileSize, secretMetrics)
 	r.Route("/api/v1/secrets", func(r chi.Router) {
 		// Create (10/min)
 		r.Group(func(r chi.Router) {
 			r.Use(rateLimitHandler(10, time.Minute))
 			r.Method("POST", "/", HandlerFunc(sh.CreateSecret))
-			fh := NewFileHandler(secretRepo, fileStore, maxFileSize, secretMetrics)
-			r.Method("POST", "/file", HandlerFunc(fh.UploadFile))
 		})
 
 		// Retrieve (30/min)
@@ -52,8 +50,6 @@ func registerRoutes(
 			r.Use(rateLimitHandler(30, time.Minute))
 			r.Method("POST", "/{publicID}", HandlerFunc(sh.RetrieveSecret))
 			r.Method("GET", "/{publicID}/meta", HandlerFunc(sh.SecretMetadata))
-			fh := NewFileHandler(secretRepo, fileStore, maxFileSize, secretMetrics)
-			r.Method("POST", "/{publicID}/file", HandlerFunc(fh.DownloadFile))
 		})
 
 		// Delete (30/min)

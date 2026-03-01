@@ -2,11 +2,9 @@ import {
   ApiError,
   createSecret,
   retrieveSecret,
-  uploadFile,
-  downloadFile,
   deleteSecret,
+  getSecretMetadata,
   type CreateSecretParams,
-  type UploadFileMetadata,
 } from "../api";
 
 describe("ApiError", () => {
@@ -87,29 +85,30 @@ describe("createSecret", () => {
     vi.restoreAllMocks();
   });
 
-  it("sends POST with JSON body and returns expires_at", async () => {
+  it("sends multipart form with metadata and file blob", async () => {
     const params: CreateSecretParams = {
       public_id: "pub123",
       retrieval_token: "ret-tok",
       deletion_token: "del-tok",
-      nonce: "nonce123",
-      encrypted_data: "data123",
+      encrypted_meta: "v1$nonce$ciphertext",
       expiration: "5m",
       burn_after_read: true,
-      password_protected: false,
     };
+    const blob = new Blob(["encrypted-data"]);
 
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(JSON.stringify({ expires_at: "2026-02-26T00:05:00Z" }), { status: 200 }),
     );
 
-    const result = await createSecret(params);
+    const result = await createSecret(params, blob);
     expect(result.expires_at).toBe("2026-02-26T00:05:00Z");
 
-    expect(fetchSpy).toHaveBeenCalledWith("/api/v1/secrets", expect.objectContaining({
-      method: "POST",
-      body: JSON.stringify(params),
-    }));
+    const call = fetchSpy.mock.calls[0];
+    expect(call[0]).toBe("/api/v1/secrets");
+    const body = call[1]?.body as FormData;
+    expect(body).toBeInstanceOf(FormData);
+    expect(body.get("metadata")).toBe(JSON.stringify(params));
+    expect(body.get("file")).toBeInstanceOf(Blob);
   });
 });
 
@@ -118,24 +117,36 @@ describe("retrieveSecret", () => {
     vi.restoreAllMocks();
   });
 
-  it("sends POST with retrieval token header", async () => {
-    const mockResponse = {
-      nonce: "nonce123",
-      encrypted_data: "data123",
-      secret_type: "text",
-      burn_after_read: false,
-      password_protected: true,
-    };
-    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      new Response(JSON.stringify(mockResponse), { status: 200 }),
-    );
+  it("returns blob and burn_after_read header", async () => {
+    const headers = new Headers({
+      "X-Burn-After-Read": "true",
+    });
+    const fileBlob = new Blob(["encrypted-blob-data"]);
+    vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true,
+      status: 200,
+      headers,
+      blob: () => Promise.resolve(fileBlob),
+    } as unknown as Response);
 
     const result = await retrieveSecret("pub-id", "ret-token");
-    expect(result).toEqual(mockResponse);
+    expect(result.burnAfterRead).toBe(true);
 
-    expect(fetchSpy).toHaveBeenCalledWith("/api/v1/secrets/pub-id", expect.objectContaining({
-      method: "POST",
-    }));
+    const text = await result.blob.text();
+    expect(text).toBe("encrypted-blob-data");
+  });
+
+  it("defaults burn_after_read to false when header missing", async () => {
+    const fileBlob = new Blob(["data"]);
+    vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true,
+      status: 200,
+      headers: new Headers(),
+      blob: () => Promise.resolve(fileBlob),
+    } as unknown as Response);
+
+    const result = await retrieveSecret("pub-id", "ret-token");
+    expect(result.burnAfterRead).toBe(false);
   });
 
   it("throws ApiError on 404", async () => {
@@ -145,108 +156,39 @@ describe("retrieveSecret", () => {
 
     await expect(retrieveSecret("missing", "tok")).rejects.toThrow(ApiError);
   });
-});
-
-describe("uploadFile", () => {
-  afterEach(() => {
-    vi.restoreAllMocks();
-  });
-
-  it("sends multipart form with metadata and file", async () => {
-    const metadata: UploadFileMetadata = {
-      public_id: "file-pub",
-      retrieval_token: "ret-tok",
-      deletion_token: "del-tok",
-      nonce: "nonce",
-      expiration: "1d",
-      burn_after_read: false,
-      password_protected: false,
-      encrypted_filename: "enc-name",
-    };
-    const blob = new Blob(["encrypted-data"]);
-
-    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      new Response(JSON.stringify({ expires_at: "2026-02-27T00:00:00Z" }), { status: 200 }),
-    );
-
-    const result = await uploadFile(metadata, blob);
-    expect(result.expires_at).toBe("2026-02-27T00:00:00Z");
-
-    const call = fetchSpy.mock.calls[0];
-    expect(call[0]).toBe("/api/v1/secrets/file");
-    const body = call[1]?.body as FormData;
-    expect(body).toBeInstanceOf(FormData);
-    expect(body.get("metadata")).toBe(JSON.stringify(metadata));
-    expect(body.get("file")).toBeInstanceOf(Blob);
-  });
-});
-
-describe("downloadFile", () => {
-  afterEach(() => {
-    vi.restoreAllMocks();
-  });
-
-  it("extracts response headers into result", async () => {
-    const headers = new Headers({
-      "X-Encrypted-Filename": "enc-fname",
-      "X-Nonce": "file-nonce",
-      "X-Burn-After-Read": "true",
-      "X-Password-Protected": "false",
-    });
-    const fileBlob = new Blob(["file-data"]);
-    vi.spyOn(globalThis, "fetch").mockResolvedValue({
-      ok: true,
-      status: 200,
-      headers,
-      blob: () => Promise.resolve(fileBlob),
-      json: () => Promise.resolve({}),
-    } as unknown as Response);
-
-    const result = await downloadFile("pub-id", "ret-tok");
-    expect(result.encryptedFilename).toBe("enc-fname");
-    expect(result.nonce).toBe("file-nonce");
-    expect(result.burnAfterRead).toBe(true);
-    expect(result.passwordProtected).toBe(false);
-
-    const text = await result.blob.text();
-    expect(text).toBe("file-data");
-  });
-
-  it("defaults missing headers to empty/false", async () => {
-    const fileBlob = new Blob(["data"]);
-    vi.spyOn(globalThis, "fetch").mockResolvedValue({
-      ok: true,
-      status: 200,
-      headers: new Headers(),
-      blob: () => Promise.resolve(fileBlob),
-      json: () => Promise.resolve({}),
-    } as unknown as Response);
-
-    const result = await downloadFile("pub-id", "ret-tok");
-    expect(result.encryptedFilename).toBe("");
-    expect(result.nonce).toBe("");
-    expect(result.burnAfterRead).toBe(false);
-    expect(result.passwordProtected).toBe(false);
-  });
-
-  it("throws ApiError on server error", async () => {
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      new Response(JSON.stringify({ error: "not found" }), { status: 404 }),
-    );
-
-    await expect(downloadFile("missing", "tok")).rejects.toThrow(ApiError);
-  });
 
   it("throws ApiError on network failure", async () => {
     vi.spyOn(globalThis, "fetch").mockRejectedValue(new TypeError("Network error"));
 
     try {
-      await downloadFile("pub", "tok");
+      await retrieveSecret("pub", "tok");
       expect.unreachable("should have thrown");
     } catch (e) {
       expect(e).toBeInstanceOf(ApiError);
       expect((e as ApiError).status).toBe(0);
     }
+  });
+});
+
+describe("getSecretMetadata", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("returns metadata with encrypted_meta", async () => {
+    const mockResponse = {
+      encrypted_meta: "v1$nonce$cipher",
+      blob_size: 2048,
+      burn_after_read: false,
+      expires_at: "2026-03-01T00:00:00Z",
+      created_at: "2026-02-28T00:00:00Z",
+    };
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify(mockResponse), { status: 200 }),
+    );
+
+    const result = await getSecretMetadata("pub-id", "ret-token");
+    expect(result).toEqual(mockResponse);
   });
 });
 

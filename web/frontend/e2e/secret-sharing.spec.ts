@@ -23,6 +23,12 @@ test.describe("Text secret sharing", () => {
     // Navigate to the share link
     await page.goto(shareUrl);
 
+    // Should show confirm screen first
+    await expect(page.locator("h1")).toHaveText("Secret Ready", { timeout: 10000 });
+
+    // Click reveal
+    await page.click("text=Reveal Secret");
+
     // Wait for decryption
     await expect(page.locator("h1")).toHaveText("Secret", { timeout: 10000 });
 
@@ -46,6 +52,12 @@ test.describe("Text secret sharing", () => {
 
     const shareUrl = await page.locator("input[readonly]").inputValue();
     await page.goto(shareUrl);
+
+    // Should show confirm screen with password required
+    await expect(page.locator("h1")).toHaveText("Secret Ready", { timeout: 10000 });
+
+    // Click reveal - should go to password prompt
+    await page.click("text=Reveal Secret");
 
     // Should prompt for password
     await expect(page.locator("h1")).toHaveText("Password Required", { timeout: 10000 });

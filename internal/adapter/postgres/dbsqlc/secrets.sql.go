@@ -8,73 +8,58 @@ package dbsqlc
 import (
 	"context"
 
-	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-const createSecret = `-- name: CreateSecret :one
+const createSecret = `-- name: CreateSecret :exec
 INSERT INTO secrets (
     public_id, retrieval_token, deletion_token,
-    encrypted_data, nonce, secret_type,
-    storage_key, encrypted_filename, encrypted_size,
-    burn_after_read, password_protected, expires_at
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
-RETURNING id
+    encrypted_meta, blob_size,
+    burn_after_read, expires_at
+) VALUES ($1, $2, $3, $4, $5, $6, $7)
 `
 
 type CreateSecretParams struct {
-	PublicID          string
-	RetrievalToken    string
-	DeletionToken     string
-	EncryptedData     pgtype.Text
-	Nonce             string
-	SecretType        string
-	StorageKey        pgtype.Text
-	EncryptedFilename pgtype.Text
-	EncryptedSize     pgtype.Int8
-	BurnAfterRead     bool
-	PasswordProtected bool
-	ExpiresAt         pgtype.Timestamptz
+	PublicID       string
+	RetrievalToken string
+	DeletionToken  string
+	EncryptedMeta  string
+	BlobSize       int64
+	BurnAfterRead  bool
+	ExpiresAt      pgtype.Timestamptz
 }
 
-func (q *Queries) CreateSecret(ctx context.Context, arg CreateSecretParams) (uuid.UUID, error) {
-	row := q.db.QueryRow(ctx, createSecret,
+func (q *Queries) CreateSecret(ctx context.Context, arg CreateSecretParams) error {
+	_, err := q.db.Exec(ctx, createSecret,
 		arg.PublicID,
 		arg.RetrievalToken,
 		arg.DeletionToken,
-		arg.EncryptedData,
-		arg.Nonce,
-		arg.SecretType,
-		arg.StorageKey,
-		arg.EncryptedFilename,
-		arg.EncryptedSize,
+		arg.EncryptedMeta,
+		arg.BlobSize,
 		arg.BurnAfterRead,
-		arg.PasswordProtected,
 		arg.ExpiresAt,
 	)
-	var id uuid.UUID
-	err := row.Scan(&id)
-	return id, err
+	return err
 }
 
 const deleteExpiredSecrets = `-- name: DeleteExpiredSecrets :many
 DELETE FROM secrets WHERE expires_at < NOW()
-RETURNING storage_key
+RETURNING public_id
 `
 
-func (q *Queries) DeleteExpiredSecrets(ctx context.Context) ([]pgtype.Text, error) {
+func (q *Queries) DeleteExpiredSecrets(ctx context.Context) ([]string, error) {
 	rows, err := q.db.Query(ctx, deleteExpiredSecrets)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []pgtype.Text{}
+	items := []string{}
 	for rows.Next() {
-		var storage_key pgtype.Text
-		if err := rows.Scan(&storage_key); err != nil {
+		var public_id string
+		if err := rows.Scan(&public_id); err != nil {
 			return nil, err
 		}
-		items = append(items, storage_key)
+		items = append(items, public_id)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -97,47 +82,22 @@ func (q *Queries) DeleteSecret(ctx context.Context, publicID string) (int64, err
 const getAndDeleteSecretByPublicID = `-- name: GetAndDeleteSecretByPublicID :one
 DELETE FROM secrets
 WHERE public_id = $1 AND expires_at > NOW()
-RETURNING id, public_id, retrieval_token, deletion_token,
-    encrypted_data, nonce, secret_type,
-    storage_key, encrypted_filename, encrypted_size,
-    burn_after_read, password_protected,
+RETURNING public_id, retrieval_token, deletion_token,
+    encrypted_meta, blob_size,
+    burn_after_read,
     expires_at, created_at, retrieved_at
 `
 
-type GetAndDeleteSecretByPublicIDRow struct {
-	ID                uuid.UUID
-	PublicID          string
-	RetrievalToken    string
-	DeletionToken     string
-	EncryptedData     pgtype.Text
-	Nonce             string
-	SecretType        string
-	StorageKey        pgtype.Text
-	EncryptedFilename pgtype.Text
-	EncryptedSize     pgtype.Int8
-	BurnAfterRead     bool
-	PasswordProtected bool
-	ExpiresAt         pgtype.Timestamptz
-	CreatedAt         pgtype.Timestamptz
-	RetrievedAt       pgtype.Timestamptz
-}
-
-func (q *Queries) GetAndDeleteSecretByPublicID(ctx context.Context, publicID string) (GetAndDeleteSecretByPublicIDRow, error) {
+func (q *Queries) GetAndDeleteSecretByPublicID(ctx context.Context, publicID string) (Secret, error) {
 	row := q.db.QueryRow(ctx, getAndDeleteSecretByPublicID, publicID)
-	var i GetAndDeleteSecretByPublicIDRow
+	var i Secret
 	err := row.Scan(
-		&i.ID,
 		&i.PublicID,
 		&i.RetrievalToken,
 		&i.DeletionToken,
-		&i.EncryptedData,
-		&i.Nonce,
-		&i.SecretType,
-		&i.StorageKey,
-		&i.EncryptedFilename,
-		&i.EncryptedSize,
+		&i.EncryptedMeta,
+		&i.BlobSize,
 		&i.BurnAfterRead,
-		&i.PasswordProtected,
 		&i.ExpiresAt,
 		&i.CreatedAt,
 		&i.RetrievedAt,
@@ -146,49 +106,24 @@ func (q *Queries) GetAndDeleteSecretByPublicID(ctx context.Context, publicID str
 }
 
 const getSecretByPublicID = `-- name: GetSecretByPublicID :one
-SELECT id, public_id, retrieval_token, deletion_token,
-    encrypted_data, nonce, secret_type,
-    storage_key, encrypted_filename, encrypted_size,
-    burn_after_read, password_protected,
+SELECT public_id, retrieval_token, deletion_token,
+    encrypted_meta, blob_size,
+    burn_after_read,
     expires_at, created_at, retrieved_at
 FROM secrets
 WHERE public_id = $1 AND expires_at > NOW()
 `
 
-type GetSecretByPublicIDRow struct {
-	ID                uuid.UUID
-	PublicID          string
-	RetrievalToken    string
-	DeletionToken     string
-	EncryptedData     pgtype.Text
-	Nonce             string
-	SecretType        string
-	StorageKey        pgtype.Text
-	EncryptedFilename pgtype.Text
-	EncryptedSize     pgtype.Int8
-	BurnAfterRead     bool
-	PasswordProtected bool
-	ExpiresAt         pgtype.Timestamptz
-	CreatedAt         pgtype.Timestamptz
-	RetrievedAt       pgtype.Timestamptz
-}
-
-func (q *Queries) GetSecretByPublicID(ctx context.Context, publicID string) (GetSecretByPublicIDRow, error) {
+func (q *Queries) GetSecretByPublicID(ctx context.Context, publicID string) (Secret, error) {
 	row := q.db.QueryRow(ctx, getSecretByPublicID, publicID)
-	var i GetSecretByPublicIDRow
+	var i Secret
 	err := row.Scan(
-		&i.ID,
 		&i.PublicID,
 		&i.RetrievalToken,
 		&i.DeletionToken,
-		&i.EncryptedData,
-		&i.Nonce,
-		&i.SecretType,
-		&i.StorageKey,
-		&i.EncryptedFilename,
-		&i.EncryptedSize,
+		&i.EncryptedMeta,
+		&i.BlobSize,
 		&i.BurnAfterRead,
-		&i.PasswordProtected,
 		&i.ExpiresAt,
 		&i.CreatedAt,
 		&i.RetrievedAt,
