@@ -11,8 +11,6 @@ The server SHALL load all configuration from environment variables as defined in
 - **AND** `S3_REGION` defaults to `us-east-1`
 - **AND** `MAX_FILE_SIZE` defaults to `104857600`
 - **AND** `CLEANUP_INTERVAL` defaults to `1m`
-- **AND** `SESSION_MAX_AGE` defaults to `720h`
-- **AND** `COOKIE_SECURE` defaults to `true`
 
 #### Scenario: Environment variables override defaults
 - **WHEN** `SERVER_PORT` is set to `9090`
@@ -20,7 +18,7 @@ The server SHALL load all configuration from environment variables as defined in
 - **THEN** the config struct reflects these overridden values
 
 ### Requirement: Config struct with all fields
-The `Config` struct SHALL include all fields from DESIGN.md section 8: `Port`, `DatabaseURL`, `S3Endpoint`, `S3Bucket`, `S3AccessKey`, `S3SecretKey`, `S3UseSSL`, `S3Region`, `MaxFileSize`, `CleanupInterval`, `SessionMaxAge`, `CookieDomain`, `CookieSecure`, `AllowedOrigins`.
+The `Config` struct SHALL include all fields from DESIGN.md section 8: `Port`, `DatabaseURL`, `S3Endpoint`, `S3Bucket`, `S3AccessKey`, `S3SecretKey`, `S3UseSSL`, `S3Region`, `MaxFileSize`, `CleanupInterval`, `AllowedOrigins`.
 
 #### Scenario: Config struct has all fields
 - **WHEN** the config package is used

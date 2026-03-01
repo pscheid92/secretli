@@ -35,14 +35,14 @@ The chart SHALL include a ConfigMap for non-sensitive environment variables.
 
 #### Scenario: ConfigMap contains app config
 - **WHEN** the chart is installed
-- **THEN** a ConfigMap SHALL contain SERVER_PORT, S3_BUCKET, S3_REGION, S3_USE_SSL, CLEANUP_INTERVAL, SESSION_MAX_AGE, COOKIE_SECURE, ALLOWED_ORIGINS, and MAX_FILE_SIZE
+- **THEN** a ConfigMap SHALL contain SERVER_PORT, S3_BUCKET, S3_REGION, S3_USE_SSL, CLEANUP_INTERVAL, ALLOWED_ORIGINS, and MAX_FILE_SIZE
 
 ### Requirement: Secret for sensitive config
 The chart SHALL include a Secret for sensitive environment variables.
 
 #### Scenario: Secret contains credentials
 - **WHEN** the chart is installed
-- **THEN** a Secret SHALL contain DATABASE_URL, S3_ENDPOINT, S3_ACCESS_KEY, S3_SECRET_KEY, and COOKIE_DOMAIN
+- **THEN** a Secret SHALL contain DATABASE_URL, S3_ENDPOINT, S3_ACCESS_KEY, and S3_SECRET_KEY
 
 ### Requirement: Pre-install/upgrade migration job
 The chart SHALL include a Job that runs database migrations as a Helm hook.

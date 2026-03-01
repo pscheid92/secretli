@@ -26,7 +26,7 @@ The system SHALL respond to CORS preflight `OPTIONS` requests.
 - **THEN** the response SHALL be `204 No Content` without CORS headers
 
 ### Requirement: CORS credentials support
-The system SHALL allow credentials (session cookies) in cross-origin requests.
+The system SHALL allow credentials in cross-origin requests.
 
 #### Scenario: Credentials allowed for valid origin
 - **WHEN** a request comes from an allowed origin

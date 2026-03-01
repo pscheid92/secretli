@@ -24,10 +24,6 @@ The system SHALL apply different rate limits based on endpoint category.
 - **WHEN** a request is made to `POST /api/v1/secrets/{publicID}` or `POST /api/v1/secrets/{publicID}/file`
 - **THEN** the rate limit SHALL be 30 requests per minute per IP
 
-#### Scenario: Auth endpoint rate limit
-- **WHEN** a request is made to any `/api/v1/auth/*` endpoint
-- **THEN** the rate limit SHALL be 5 requests per minute per IP
-
 #### Scenario: File upload rate limit
 - **WHEN** a request is made to `POST /api/v1/secrets/file`
 - **THEN** the rate limit SHALL be 5 requests per minute per IP (creation limit applies since it is lower than file-specific)

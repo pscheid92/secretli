@@ -44,8 +44,8 @@ The server SHALL serve the embedded React build output for all non-API paths. If
 - **THEN** the file is served with the correct content type
 
 #### Scenario: SPA fallback for client-side routes
-- **WHEN** a GET request is made to `/login`
-- **AND** no file named `login` exists in the embedded filesystem
+- **WHEN** a GET request is made to `/file`
+- **AND** no file named `file` exists in the embedded filesystem
 - **THEN** `index.html` is served so React Router handles the route
 
 ### Requirement: Recovery middleware
@@ -84,34 +84,12 @@ The server SHALL shut down gracefully when it receives SIGINT or SIGTERM. It SHA
 - **AND** waits up to 30 seconds for in-flight requests
 - **AND** exits with code 0
 
-### Requirement: Auth route registration
-The server SHALL register authentication endpoints using chi route groups: `POST /api/v1/auth/register`, `POST /api/v1/auth/login`, `POST /api/v1/auth/logout`, and `GET /api/v1/auth/me`. Auth creation routes (`register`, `login`) SHALL be rate limited at 5 requests per minute.
-
-#### Scenario: Auth routes registered with rate limiting
-- **WHEN** the server starts
-- **THEN** all four auth endpoints are available and routed to the appropriate handlers
-- **AND** register and login endpoints are rate limited at 5 requests per minute
-
-### Requirement: User route registration
-The server SHALL register the user secrets history endpoint `GET /api/v1/user/secrets` within the API route group.
-
-#### Scenario: User route registered
-- **WHEN** the server starts
-- **THEN** the user secrets history endpoint is available
-
-### Requirement: Session middleware in chain
-The server SHALL include session middleware in the middleware chain, after logging and before route handling. The session middleware SHALL populate the request context with the authenticated user if a valid session exists.
-
-#### Scenario: Middleware chain order
-- **WHEN** a request is processed
-- **THEN** the middleware executes in order: recovery, request ID, logging, session auth, then route handler
-
 ### Requirement: Server startup launches cleanup worker
 The server startup sequence SHALL start the cleanup worker as a background goroutine alongside the HTTP server.
 
 #### Scenario: Cleanup worker starts with server
 - **WHEN** the server starts
-- **THEN** the cleanup worker SHALL be started with the server's shutdown context, secret repo, session repo, and file store
+- **THEN** the cleanup worker SHALL be started with the server's shutdown context, secret repo, and file store
 
 #### Scenario: Cleanup worker stops on shutdown
 - **WHEN** the server receives SIGINT/SIGTERM
@@ -119,15 +97,15 @@ The server startup sequence SHALL start the cleanup worker as a background gorou
 - **AND** the server SHALL wait for the cleanup worker to finish before exiting
 
 ### Requirement: Middleware chain order
-The middleware chain SHALL be applied using `chi.Router.Use()` in the following order: recovery → request ID → structured logging → security headers → CORS → session. Rate limiting SHALL be applied per route group rather than globally.
+The middleware chain SHALL be applied using `chi.Router.Use()` in the following order: recovery → request ID → structured logging → security headers → CORS. Rate limiting SHALL be applied per route group rather than globally.
 
 #### Scenario: Security headers applied before routing
 - **WHEN** any request is processed
 - **THEN** security headers SHALL be set before the request reaches route handlers
 
-#### Scenario: CORS handled before session lookup
+#### Scenario: CORS handled before route handlers
 - **WHEN** a preflight OPTIONS request is received
-- **THEN** CORS middleware SHALL respond before session middleware is evaluated
+- **THEN** CORS middleware SHALL respond before route handlers are evaluated
 
 #### Scenario: Rate limiting applied per route group
 - **WHEN** a request hits a rate-limited endpoint

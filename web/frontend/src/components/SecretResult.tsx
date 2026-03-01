@@ -1,4 +1,5 @@
 import { toast } from "sonner";
+import QRCode from "./QRCode";
 
 interface SecretResultProps {
   url: string;
@@ -40,6 +41,8 @@ export default function SecretResult({ url, expiresAt, burnAfterRead }: SecretRe
           </button>
         </div>
       </div>
+
+      <QRCode url={url} />
 
       <div className="text-sm text-gray-600 dark:text-gray-400 space-y-1">
         <p>Expires: {new Date(expiresAt).toLocaleString()}</p>

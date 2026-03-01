@@ -23,7 +23,7 @@ The ExpirationPicker SHALL render a select dropdown with the allowed expiration 
 - **THEN** the `onChange` callback is called with `"7d"`
 
 ### Requirement: SecretResult component
-The SecretResult component SHALL display the share URL and a copy-to-clipboard button. It SHALL also show the expiration time and whether burn-after-read is enabled.
+The SecretResult component SHALL display the share URL, a copy-to-clipboard button, a QR code of the share URL, the expiration time, and whether burn-after-read is enabled. The QR code SHALL be rendered using the `qr-code` capability below the URL/copy row and above the metadata section.
 
 #### Scenario: Display share link
 - **WHEN** the SecretResult receives a share URL
@@ -32,6 +32,10 @@ The SecretResult component SHALL display the share URL and a copy-to-clipboard b
 #### Scenario: Copy to clipboard
 - **WHEN** the user clicks the copy button
 - **THEN** the share URL is copied to the clipboard and the button shows a "Copied!" confirmation
+
+#### Scenario: QR code displayed
+- **WHEN** the SecretResult receives a share URL
+- **THEN** a QR code encoding the full URL (including hash fragment) SHALL be visible below the copy row
 
 ### Requirement: SharePage orchestration
 The SharePage SHALL orchestrate the full secret creation flow: render SecretForm, on submit generate a KeySet (with optional password), encrypt the text, send to `POST /api/v1/secrets`, and display the result via SecretResult.

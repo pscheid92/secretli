@@ -18,8 +18,7 @@ This is a reboot of the original project (two separate repos: Go CLI + Vue 3 fro
 | **Database** | PostgreSQL (via `pgx/v5`) | Reliable, feature-rich. `pgx` is the fastest pure-Go driver. |
 | **Object Storage** | S3-compatible / MinIO (via `minio-go/v7`) | Encrypted file blobs. MinIO for self-hosted, AWS S3 for cloud. |
 | **Migrations** | `goose/v3` | Embeddable, supports SQL files, simple CLI. |
-| **Auth** | Server-side sessions in PostgreSQL | Simpler than JWT, instantly revocable, no refresh token complexity. |
-| **Frontend State** | TanStack Query v5 + React Context | Server state caching + auth context. No Redux needed. |
+| **Frontend State** | TanStack Query v5 | Server state caching. No Redux needed. |
 | **Routing** | React Router 7 | De facto standard, supports reading URL hash fragments. |
 | **Deployment** | Single Go binary (embedded frontend), Kubernetes + Helm | One artifact to deploy. `embed.FS` bundles the React build. |
 
@@ -30,7 +29,6 @@ This is a reboot of the original project (two separate repos: Go CLI + Vue 3 fro
 | `github.com/jackc/pgx/v5` | PostgreSQL driver + connection pooling (`pgxpool`) |
 | `github.com/minio/minio-go/v7` | S3-compatible object storage client |
 | `github.com/pressly/goose/v3` | Database migration tool |
-| `golang.org/x/crypto` | bcrypt (user passwords) |
 | `golang.org/x/time/rate` | Rate limiting |
 
 Everything else is stdlib: `net/http`, `encoding/json`, `crypto/sha256`, `log/slog`, `embed`, `database/sql`.
@@ -133,45 +131,6 @@ CREATE INDEX idx_secrets_public_id ON secrets (public_id);
 CREATE INDEX idx_secrets_expires_at ON secrets (expires_at) WHERE retrieved_at IS NULL;
 ```
 
-### `users`
-
-```sql
-CREATE TABLE users (
-    id            BIGSERIAL PRIMARY KEY,
-    email         TEXT NOT NULL UNIQUE,
-    password_hash TEXT NOT NULL,                -- bcrypt (cost 12)
-    display_name  TEXT NOT NULL DEFAULT '',
-    created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-```
-
-### `sessions`
-
-```sql
-CREATE TABLE sessions (
-    id         TEXT PRIMARY KEY,               -- Random 32-byte token, hex-encoded
-    user_id    BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    expires_at TIMESTAMPTZ NOT NULL,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
-CREATE INDEX idx_sessions_user_id ON sessions (user_id);
-CREATE INDEX idx_sessions_expires_at ON sessions (expires_at);
-```
-
-### `user_secrets`
-
-```sql
-CREATE TABLE user_secrets (
-    user_id    BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    secret_id  BIGINT NOT NULL REFERENCES secrets(id) ON DELETE CASCADE,
-    label      TEXT NOT NULL DEFAULT '',        -- User-provided label for history
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    PRIMARY KEY (user_id, secret_id)
-);
-```
-
 **Why SHA-256 for tokens (not bcrypt)?** The tokens are 16 bytes of cryptographically random data. Dictionary/brute-force attacks are infeasible. bcrypt's intentional slowness would add latency to every retrieval without security benefit.
 
 ---
@@ -194,12 +153,11 @@ Request:
   "encrypted_data": "base64url",
   "expiration": "7d",
   "burn_after_read": false,
-  "password_protected": false,
-  "label": ""
+  "password_protected": false
 }
 ```
 
-Server hashes tokens with SHA-256 before storing. Converts expiration string (`5m`, `10m`, `15m`, `1h`, `4h`, `12h`, `1d`, `3d`, `7d`) to absolute timestamp. If session cookie is present, links secret to user via `user_secrets`.
+Server hashes tokens with SHA-256 before storing. Converts expiration string (`5m`, `10m`, `15m`, `1h`, `4h`, `12h`, `1d`, `3d`, `7d`) to absolute timestamp.
 
 Response: `201 Created`
 ```json
@@ -255,25 +213,6 @@ Same auth as text retrieval. Server streams S3 object to response body. Returns 
 
 Response: `200 OK` with `application/octet-stream` body
 
-### Auth Endpoints
-
-```
-POST /api/v1/auth/register   { email, password, display_name } → 201 + Set-Cookie
-POST /api/v1/auth/login      { email, password }               → 200 + Set-Cookie
-POST /api/v1/auth/logout                                        → 204 + Clear-Cookie
-GET  /api/v1/auth/me                                            → 200 { user } or 401
-```
-
-Cookie: `session_id=<hex>; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=2592000`
-
-### User Endpoints
-
-```
-GET /api/v1/user/secrets?page=1&per_page=20
-```
-
-Returns metadata only (no encrypted data): `public_id`, `label`, `secret_type`, `burn_after_read`, `expires_at`, `created_at`, `retrieved_at`, `password_protected`.
-
 ### Health Endpoints
 
 ```
@@ -302,22 +241,17 @@ secretli/
 │   │   └── config.go                   # Env var loading
 │   ├── server/
 │   │   ├── server.go                   # HTTP server setup, SPA handler
-│   │   ├── middleware.go               # Logging, recovery, CORS, rate limit, auth, security headers
+│   │   ├── middleware.go               # Logging, recovery, CORS, rate limit, security headers
 │   │   └── routes.go                   # Route registration
 │   ├── handler/
 │   │   ├── secret.go                   # Create/retrieve/delete text secrets
 │   │   ├── file.go                     # Upload/download encrypted files
-│   │   ├── auth.go                     # Register/login/logout/me
-│   │   ├── user.go                     # User secret history
 │   │   └── health.go                   # Liveness/readiness probes
 │   ├── model/
-│   │   ├── secret.go                   # Secret domain types
-│   │   └── user.go                     # User + session domain types
+│   │   └── secret.go                   # Secret domain types
 │   ├── store/
 │   │   ├── postgres.go                 # pgxpool connection setup
-│   │   ├── secret_repo.go             # Secret CRUD + DeleteExpired
-│   │   ├── user_repo.go               # User CRUD
-│   │   └── session_repo.go            # Session CRUD
+│   │   └── secret_repo.go             # Secret CRUD + DeleteExpired
 │   ├── storage/
 │   │   └── s3.go                       # MinIO/S3: streaming put/get/delete
 │   ├── crypto/
@@ -326,14 +260,7 @@ secretli/
 │       └── worker.go                   # Background goroutine: expire secrets + cleanup S3
 │
 ├── migrations/
-│   ├── 001_create_secrets.up.sql
-│   ├── 001_create_secrets.down.sql
-│   ├── 002_create_users.up.sql
-│   ├── 002_create_users.down.sql
-│   ├── 003_create_sessions.up.sql
-│   ├── 003_create_sessions.down.sql
-│   ├── 004_create_user_secrets.up.sql
-│   └── 004_create_user_secrets.down.sql
+│   └── 001_create_secrets.up.sql
 │
 ├── web/
 │   ├── embed.go                        # //go:embed frontend/dist/*
@@ -353,17 +280,11 @@ secretli/
 │           │   ├── base64.ts           # Zero-dep URL-safe base64
 │           │   └── api.ts              # Typed fetch wrapper
 │           ├── hooks/
-│           │   ├── useAuth.ts
-│           │   └── useSecret.ts
-│           ├── context/
-│           │   └── AuthContext.tsx
+│           │   └── useTheme.ts
 │           ├── pages/
 │           │   ├── SharePage.tsx
 │           │   ├── RetrievePage.tsx
 │           │   ├── FilePage.tsx
-│           │   ├── LoginPage.tsx
-│           │   ├── RegisterPage.tsx
-│           │   ├── HistoryPage.tsx
 │           │   └── NotFoundPage.tsx
 │           └── components/
 │               ├── Layout.tsx          # Shell: nav + footer
@@ -402,9 +323,6 @@ secretli/
 /              → SharePage         (create a text secret)
 /file          → FilePage          (upload an encrypted file)
 /s#<secret>    → RetrievePage      (retrieve + decrypt using hash fragment)
-/login         → LoginPage
-/register      → RegisterPage
-/history       → HistoryPage       (authenticated, user's secret history)
 *              → NotFoundPage
 ```
 
@@ -413,7 +331,6 @@ The share URL format is `https://domain.com/s#<shareSecret>`. The hash fragment 
 ### State Management
 
 - **TanStack Query v5** for all server state (API calls, caching, loading/error states)
-- **React Context** for auth state only (`AuthContext` provides current user + login/logout)
 - No Redux, Zustand, or other global state library
 
 ### Encryption Module (`lib/encryption.ts`)
@@ -426,7 +343,7 @@ Ported from `old/ui/src/libs/encryption.tsx` with these changes:
 
 ### API Client (`lib/api.ts`)
 
-Thin typed wrapper around `fetch` with `credentials: "same-origin"` for session cookies. Custom `ApiError` class with status code + message.
+Thin typed wrapper around `fetch`. Custom `ApiError` class with status code + message.
 
 ---
 
@@ -448,9 +365,6 @@ All via environment variables:
 | `S3_REGION` | `us-east-1` | No |
 | `MAX_FILE_SIZE` | `104857600` (100MB) | No |
 | `CLEANUP_INTERVAL` | `1m` | No |
-| `SESSION_MAX_AGE` | `720h` (30d) | No |
-| `COOKIE_DOMAIN` | `""` | No |
-| `COOKIE_SECURE` | `true` | No |
 | `ALLOWED_ORIGINS` | `""` (same-origin) | No |
 
 ### HTTP Server
@@ -462,10 +376,10 @@ mux.HandleFunc("POST /api/v1/secrets/file", h.UploadFile)       // Must register
 mux.HandleFunc("POST /api/v1/secrets/{publicID}", h.RetrieveSecret)
 mux.HandleFunc("POST /api/v1/secrets/{publicID}/file", h.DownloadFile)
 mux.HandleFunc("DELETE /api/v1/secrets/{publicID}", h.DeleteSecret)
-// ... auth, user, health routes
+// ... health routes
 ```
 
-Middleware chain: recovery → request ID → structured logging (`slog`) → CORS → rate limit → security headers → auth (optional)
+Middleware chain: recovery → request ID → structured logging (`slog`) → CORS → rate limit → security headers
 
 ### SPA Handler
 
@@ -578,10 +492,7 @@ Port `encryption.ts` + `base64.ts` (zero-dep), add PBKDF2 password support, buil
 ### Phase 4: File Upload/Download
 S3 client (streaming), file upload/download handlers, MaxBytesReader, FileUpload component, file encrypt/decrypt in KeySet, FilePage, extend RetrievePage for files. **Verify:** Upload file, retrieve, verify decrypted output matches original.
 
-### Phase 5: Authentication + User History
-User/session repos, auth handlers, session middleware, user_secrets linking, AuthContext, LoginPage, RegisterPage, HistoryPage. **Verify:** Register, login, create secrets, see history, logout.
-
-### Phase 6: Production Hardening
+### Phase 5: Production Hardening
 Cleanup worker, rate limiting, security headers, CORS, graceful shutdown. **Verify:** Expired secrets cleaned up, rate limits trigger 429s.
 
 ### Phase 7: Deployment

@@ -13,13 +13,6 @@ The system SHALL run a background cleanup worker that periodically deletes expir
 - **WHEN** an S3 object deletion fails during cleanup
 - **THEN** the error SHALL be logged and the worker SHALL continue processing remaining expired secrets
 
-### Requirement: Periodic expired session cleanup
-The system SHALL delete expired sessions during cleanup cycles.
-
-#### Scenario: Expired sessions are removed
-- **WHEN** the cleanup worker runs and sessions have `expires_at < NOW()`
-- **THEN** expired session rows SHALL be deleted from the `sessions` table
-
 ### Requirement: Configurable cleanup interval
 The cleanup worker SHALL run at the interval specified by `CLEANUP_INTERVAL` (default: `1m`).
 

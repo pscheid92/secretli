@@ -18,9 +18,3 @@ An e2e test SHALL verify the full text secret lifecycle.
 - **WHEN** a user creates a password-protected secret and retrieves it with the correct password
 - **THEN** the decrypted text SHALL match the original input
 
-### Requirement: Auth flow test
-An e2e test SHALL verify user registration and login.
-
-#### Scenario: Register and login
-- **WHEN** a user registers with email/password and then logs in
-- **THEN** the user SHALL see their display name in the header and access the history page

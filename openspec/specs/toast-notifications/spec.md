@@ -44,13 +44,3 @@ The application SHALL show an error toast for API and network errors.
 - **WHEN** a network request fails (offline, timeout)
 - **THEN** an error toast SHALL appear indicating connectivity issues
 
-### Requirement: Toast on auth actions
-The application SHALL show toasts for authentication actions.
-
-#### Scenario: Login success
-- **WHEN** a user successfully logs in
-- **THEN** a success toast SHALL appear
-
-#### Scenario: Logout
-- **WHEN** a user logs out
-- **THEN** an info toast SHALL appear confirming logout
