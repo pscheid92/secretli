@@ -40,11 +40,17 @@ The Vite dev server SHALL proxy all requests matching `/api` to `http://localhos
 - **THEN** the request is proxied to `http://localhost:8080/api/v1/health/live`
 - **AND** the response is returned to the frontend
 
-### Requirement: Docker Compose for local infrastructure
-A `docker-compose.yml` SHALL provide PostgreSQL and MinIO services for local development. The Go app itself SHALL NOT be containerized in this compose file.
+### Requirement: Docker Compose provides full local stack
+The docker-compose.yml SHALL include an `app` service alongside postgres and minio for full local stack testing.
 
-#### Scenario: docker compose up starts infrastructure
-- **WHEN** `docker compose up -d` is run
-- **THEN** PostgreSQL is available on `localhost:5432`
-- **AND** MinIO is available on `localhost:9000` (API) and `localhost:9001` (console)
-- **AND** default credentials and database/bucket are provisioned
+#### Scenario: App service builds from Dockerfile
+- **WHEN** `docker compose up` is run
+- **THEN** the app service SHALL build from the project Dockerfile and start the HTTP server on port 8080
+
+#### Scenario: App connects to local services
+- **WHEN** the app service starts
+- **THEN** it SHALL connect to the postgres and minio services via Docker networking using appropriate environment variables
+
+#### Scenario: App depends on infrastructure services
+- **WHEN** docker compose starts services
+- **THEN** the app service SHALL wait for postgres and minio to be ready before starting

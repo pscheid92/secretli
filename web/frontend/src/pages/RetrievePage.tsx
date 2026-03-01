@@ -1,4 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
+import { toast } from 'sonner'
+import Spinner from '../components/Spinner'
 import { KeySet } from '../lib/encryption'
 import { retrieveSecret, downloadFile, deleteSecret, ApiError } from '../lib/api'
 
@@ -86,7 +88,6 @@ export default function RetrievePage() {
       filename = await keySet.decryptFilename(fileResponse.encryptedFilename)
     }
 
-    // Trigger browser download
     const url = URL.createObjectURL(new Blob([decryptedBytes.buffer.slice(decryptedBytes.byteOffset, decryptedBytes.byteOffset + decryptedBytes.byteLength) as ArrayBuffer]))
     const a = document.createElement('a')
     a.href = url
@@ -136,29 +137,38 @@ export default function RetrievePage() {
       const encoded = keySet.getEncoded()
       await deleteSecret(encoded.publicID, encoded.retrievalToken, state.deletionToken)
       setState({ stage: 'deleted' })
+      toast.success('Secret deleted')
     } catch (err) {
       if (err instanceof ApiError) {
-        setState({ stage: 'error', message: err.message })
+        toast.error(err.message)
       } else {
-        setState({ stage: 'error', message: 'Failed to delete secret.' })
+        toast.error('Failed to delete secret.')
       }
     } finally {
       setDeleting(false)
     }
   }
 
+  async function copyDecryptedText() {
+    if (state.stage !== 'decrypted') return
+    await navigator.clipboard.writeText(state.text)
+    toast.success('Secret copied to clipboard')
+  }
+
   if (state.stage === 'loading') {
     return (
-      <div className="flex justify-center py-12">
-        <p className="text-gray-500">Decrypting secret...</p>
+      <div className="flex flex-col items-center justify-center gap-3 py-12">
+        <Spinner size="lg" className="text-blue-600" />
+        <p className="text-gray-500 dark:text-gray-400">Decrypting secret...</p>
       </div>
     )
   }
 
   if (state.stage === 'downloading') {
     return (
-      <div className="flex justify-center py-12">
-        <p className="text-gray-500">Downloading and decrypting file...</p>
+      <div className="flex flex-col items-center justify-center gap-3 py-12">
+        <Spinner size="lg" className="text-blue-600" />
+        <p className="text-gray-500 dark:text-gray-400">Downloading and decrypting file...</p>
       </div>
     )
   }
@@ -166,11 +176,11 @@ export default function RetrievePage() {
   if (state.stage === 'error') {
     return (
       <div className="space-y-4">
-        <div className="rounded-md border border-red-200 bg-red-50 p-4">
-          <h2 className="text-lg font-semibold text-red-800">Unable to retrieve secret</h2>
-          <p className="mt-1 text-sm text-red-700">{state.message}</p>
+        <div className="rounded-md border border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-950 p-4">
+          <h2 className="text-lg font-semibold text-red-800 dark:text-red-300">Unable to retrieve secret</h2>
+          <p className="mt-1 text-sm text-red-700 dark:text-red-400">{state.message}</p>
         </div>
-        <a href="/" className="inline-block text-sm text-blue-600 hover:text-blue-800">
+        <a href="/" className="inline-block text-sm text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300">
           Share a new secret
         </a>
       </div>
@@ -181,8 +191,8 @@ export default function RetrievePage() {
     return (
       <div className="space-y-4">
         <div>
-          <h1 className="text-2xl font-bold">Password Required</h1>
-          <p className="mt-1 text-sm text-gray-500">
+          <h1 className="text-2xl font-bold dark:text-white">Password Required</h1>
+          <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
             This secret is password-protected. Enter the password to decrypt it.
           </p>
         </div>
@@ -193,14 +203,15 @@ export default function RetrievePage() {
             onChange={(e) => { setPassword(e.target.value); setPasswordError('') }}
             placeholder="Enter password..."
             autoFocus
-            className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm placeholder:text-gray-400 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            className="w-full rounded-md border border-gray-300 dark:border-gray-600 dark:bg-gray-800 dark:text-white px-3 py-2 text-sm shadow-sm placeholder:text-gray-400 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
           />
-          {passwordError && <p className="text-sm text-red-600">{passwordError}</p>}
+          {passwordError && <p className="text-sm text-red-600 dark:text-red-400">{passwordError}</p>}
           <button
             type="submit"
             disabled={passwordLoading}
-            className="w-full rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+            className="flex w-full items-center justify-center gap-2 rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
           >
+            {passwordLoading && <Spinner size="sm" />}
             {passwordLoading ? 'Decrypting...' : 'Decrypt'}
           </button>
         </form>
@@ -211,11 +222,11 @@ export default function RetrievePage() {
   if (state.stage === 'deleted') {
     return (
       <div className="space-y-4">
-        <div className="rounded-md border border-green-200 bg-green-50 p-4">
-          <h2 className="text-lg font-semibold text-green-800">Secret deleted</h2>
-          <p className="mt-1 text-sm text-green-700">The secret has been permanently destroyed.</p>
+        <div className="rounded-md border border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-950 p-4">
+          <h2 className="text-lg font-semibold text-green-800 dark:text-green-300">Secret deleted</h2>
+          <p className="mt-1 text-sm text-green-700 dark:text-green-400">The secret has been permanently destroyed.</p>
         </div>
-        <a href="/" className="inline-block text-sm text-blue-600 hover:text-blue-800">
+        <a href="/" className="inline-block text-sm text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300">
           Share a new secret
         </a>
       </div>
@@ -226,21 +237,22 @@ export default function RetrievePage() {
     return (
       <div className="space-y-4">
         <div>
-          <h1 className="text-2xl font-bold">File Downloaded</h1>
-          <p className="mt-1 text-sm text-gray-500">
+          <h1 className="text-2xl font-bold dark:text-white">File Downloaded</h1>
+          <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
             The file has been decrypted and saved to your downloads.
           </p>
         </div>
-        <div className="rounded-md border border-green-200 bg-green-50 p-4">
-          <p className="text-sm font-medium text-green-800">{state.filename}</p>
+        <div className="rounded-md border border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-950 p-4">
+          <p className="text-sm font-medium text-green-800 dark:text-green-300">{state.filename}</p>
         </div>
         {state.deletionToken && (
           <button
             type="button"
             onClick={handleDelete}
             disabled={deleting}
-            className="rounded-md bg-red-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed"
+            className="flex items-center gap-2 rounded-md bg-red-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed"
           >
+            {deleting && <Spinner size="sm" />}
             {deleting ? 'Deleting...' : 'Delete this secret'}
           </button>
         )}
@@ -252,14 +264,23 @@ export default function RetrievePage() {
   return (
     <div className="space-y-4">
       <div>
-        <h1 className="text-2xl font-bold">Secret</h1>
-        <p className="mt-1 text-sm text-gray-500">
+        <h1 className="text-2xl font-bold dark:text-white">Secret</h1>
+        <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
           This secret was shared with you. Copy the contents below.
         </p>
       </div>
 
-      <div className="rounded-md border border-gray-200 bg-white p-4">
-        <pre className="whitespace-pre-wrap break-words text-sm text-gray-900">{state.text}</pre>
+      <div className="rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4">
+        <div className="flex items-start justify-between gap-2">
+          <pre className="flex-1 whitespace-pre-wrap break-words text-sm text-gray-900 dark:text-gray-100">{state.text}</pre>
+          <button
+            type="button"
+            onClick={copyDecryptedText}
+            className="shrink-0 rounded-md bg-gray-100 dark:bg-gray-700 px-3 py-1 text-xs font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600"
+          >
+            Copy
+          </button>
+        </div>
       </div>
 
       {state.deletionToken && (
@@ -267,8 +288,9 @@ export default function RetrievePage() {
           type="button"
           onClick={handleDelete}
           disabled={deleting}
-          className="rounded-md bg-red-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed"
+          className="flex items-center gap-2 rounded-md bg-red-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed"
         >
+          {deleting && <Spinner size="sm" />}
           {deleting ? 'Deleting...' : 'Delete this secret'}
         </button>
       )}

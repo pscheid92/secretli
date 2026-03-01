@@ -1,5 +1,6 @@
 import { createContext, useContext, useCallback } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { toast } from 'sonner'
 import * as api from '../lib/api'
 
 interface AuthContextValue {
@@ -50,6 +51,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     onSuccess: () => {
       queryClient.setQueryData(['auth', 'me'], null)
       queryClient.removeQueries({ queryKey: ['auth'] })
+      toast.info('Signed out')
     },
   })
 

@@ -14,7 +14,30 @@ import (
 	"github.com/pscheid92/secretli/web"
 )
 
-func New(cfg config.Config, pool *pgxpool.Pool) *http.Server {
+// App holds the HTTP server and dependencies needed by the cleanup worker.
+type App struct {
+	HTTPServer  *http.Server
+	SecretRepo  store.SecretRepo
+	SessionRepo store.SessionRepo
+	FileStore   storage.FileStore
+	RateLimiter *IPRateLimiter
+}
+
+func parseOrigins(origins string) []string {
+	if origins == "" {
+		return nil
+	}
+	var result []string
+	for _, o := range strings.Split(origins, ",") {
+		o = strings.TrimSpace(o)
+		if o != "" {
+			result = append(result, o)
+		}
+	}
+	return result
+}
+
+func New(cfg config.Config, pool *pgxpool.Pool) *App {
 	mux := http.NewServeMux()
 
 	// Create S3 file store if configured
@@ -36,8 +59,9 @@ func New(cfg config.Config, pool *pgxpool.Pool) *http.Server {
 	userRepo := store.NewPostgresUserRepo(pool)
 	sessionRepo := store.NewPostgresSessionRepo(pool, cfg.SessionMaxAge)
 	userSecretRepo := store.NewPostgresUserSecretRepo(pool)
+	rateLimiter := NewIPRateLimiter()
 
-	registerRoutes(mux, pool, secretRepo, fileStore, cfg.MaxFileSize, userRepo, sessionRepo, userSecretRepo, cfg)
+	registerRoutes(mux, pool, secretRepo, fileStore, cfg.MaxFileSize, userRepo, sessionRepo, userSecretRepo, cfg, rateLimiter)
 
 	// SPA handler as catch-all
 	distFS, _ := fs.Sub(web.DistFS, "frontend/dist")
@@ -47,15 +71,23 @@ func New(cfg config.Config, pool *pgxpool.Pool) *http.Server {
 		recoveryMiddleware,
 		requestIDMiddleware,
 		loggingMiddleware,
+		securityHeadersMiddleware,
+		corsMiddleware(parseOrigins(cfg.AllowedOrigins)),
 		sessionMiddleware(sessionRepo),
 	)
 
-	return &http.Server{
-		Addr:         ":" + cfg.Port,
-		Handler:      handler,
-		ReadTimeout:  30 * time.Second,
-		WriteTimeout: 60 * time.Second,
-		IdleTimeout:  120 * time.Second,
+	return &App{
+		HTTPServer: &http.Server{
+			Addr:         ":" + cfg.Port,
+			Handler:      handler,
+			ReadTimeout:  30 * time.Second,
+			WriteTimeout: 60 * time.Second,
+			IdleTimeout:  120 * time.Second,
+		},
+		SecretRepo:  secretRepo,
+		SessionRepo: sessionRepo,
+		FileStore:   fileStore,
+		RateLimiter: rateLimiter,
 	}
 }
 

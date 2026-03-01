@@ -1,5 +1,6 @@
 import { BrowserRouter, Routes, Route } from 'react-router'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { Toaster } from 'sonner'
 import { AuthProvider } from './context/AuthContext'
 import Layout from './components/Layout'
 import SharePage from './pages/SharePage'
@@ -16,6 +17,7 @@ export default function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <AuthProvider>
+        <Toaster richColors position="top-right" />
         <BrowserRouter>
           <Routes>
             <Route element={<Layout />}>

@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router'
 import { useQuery } from '@tanstack/react-query'
 import { useAuth } from '../context/AuthContext'
 import { getUserSecrets, type SecretSummary } from '../lib/api'
+import Spinner from '../components/Spinner'
 
 function formatDate(iso: string): string {
   return new Date(iso).toLocaleDateString(undefined, {
@@ -19,12 +20,12 @@ function StatusBadge({ secret }: { secret: SecretSummary }) {
   const expires = new Date(secret.expires_at)
 
   if (expires < now) {
-    return <span className="rounded bg-gray-100 px-2 py-0.5 text-xs text-gray-500">Expired</span>
+    return <span className="rounded bg-gray-100 dark:bg-gray-700 px-2 py-0.5 text-xs text-gray-500 dark:text-gray-400">Expired</span>
   }
   if (secret.retrieved_at) {
-    return <span className="rounded bg-green-100 px-2 py-0.5 text-xs text-green-700">Retrieved</span>
+    return <span className="rounded bg-green-100 dark:bg-green-900 px-2 py-0.5 text-xs text-green-700 dark:text-green-400">Retrieved</span>
   }
-  return <span className="rounded bg-blue-100 px-2 py-0.5 text-xs text-blue-700">Pending</span>
+  return <span className="rounded bg-blue-100 dark:bg-blue-900 px-2 py-0.5 text-xs text-blue-700 dark:text-blue-400">Pending</span>
 }
 
 export default function HistoryPage() {
@@ -51,21 +52,24 @@ export default function HistoryPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-bold">Secret History</h1>
-        <p className="mt-1 text-sm text-gray-500">
+        <h1 className="text-2xl font-bold dark:text-white">Secret History</h1>
+        <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
           Secrets you've shared while signed in.
         </p>
       </div>
 
       {isLoading || authLoading ? (
-        <p className="text-sm text-gray-400">Loading...</p>
+        <div className="flex justify-center py-8">
+          <Spinner size="lg" className="text-blue-600" />
+        </div>
       ) : secrets.length === 0 ? (
         <p className="text-sm text-gray-400">No secrets yet. Share one to get started.</p>
       ) : (
         <>
-          <div className="overflow-x-auto">
+          {/* Desktop table */}
+          <div className="hidden md:block overflow-x-auto">
             <table className="w-full text-left text-sm">
-              <thead className="border-b border-gray-200 text-xs uppercase text-gray-500">
+              <thead className="border-b border-gray-200 dark:border-gray-700 text-xs uppercase text-gray-500 dark:text-gray-400">
                 <tr>
                   <th className="px-3 py-2">Label</th>
                   <th className="px-3 py-2">Type</th>
@@ -74,15 +78,15 @@ export default function HistoryPage() {
                   <th className="px-3 py-2">Status</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-100">
+              <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
                 {secrets.map((s) => (
-                  <tr key={s.public_id} className="hover:bg-gray-50">
+                  <tr key={s.public_id} className="hover:bg-gray-50 dark:hover:bg-gray-800/50">
                     <td className="px-3 py-2 font-medium">
-                      {s.label || <span className="text-gray-300">untitled</span>}
+                      {s.label || <span className="text-gray-300 dark:text-gray-600">untitled</span>}
                     </td>
                     <td className="px-3 py-2 capitalize">{s.secret_type}</td>
-                    <td className="px-3 py-2 text-gray-500">{formatDate(s.created_at)}</td>
-                    <td className="px-3 py-2 text-gray-500">{formatDate(s.expires_at)}</td>
+                    <td className="px-3 py-2 text-gray-500 dark:text-gray-400">{formatDate(s.created_at)}</td>
+                    <td className="px-3 py-2 text-gray-500 dark:text-gray-400">{formatDate(s.expires_at)}</td>
                     <td className="px-3 py-2">
                       <StatusBadge secret={s} />
                     </td>
@@ -92,22 +96,40 @@ export default function HistoryPage() {
             </table>
           </div>
 
+          {/* Mobile cards */}
+          <div className="md:hidden space-y-3">
+            {secrets.map((s) => (
+              <div key={s.public_id} className="rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-3 space-y-1">
+                <div className="flex items-center justify-between">
+                  <span className="font-medium text-sm">
+                    {s.label || <span className="text-gray-300 dark:text-gray-600">untitled</span>}
+                  </span>
+                  <StatusBadge secret={s} />
+                </div>
+                <div className="flex items-center gap-3 text-xs text-gray-500 dark:text-gray-400">
+                  <span className="capitalize">{s.secret_type}</span>
+                  <span>{formatDate(s.created_at)}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+
           {totalPages > 1 && (
             <div className="flex items-center justify-between text-sm">
               <button
                 disabled={page <= 1}
                 onClick={() => setPage((p) => p - 1)}
-                className="rounded border border-gray-300 px-3 py-1 disabled:opacity-50"
+                className="rounded border border-gray-300 dark:border-gray-600 px-3 py-1 disabled:opacity-50 dark:text-gray-300"
               >
                 Previous
               </button>
-              <span className="text-gray-500">
+              <span className="text-gray-500 dark:text-gray-400">
                 Page {page} of {totalPages}
               </span>
               <button
                 disabled={page >= totalPages}
                 onClick={() => setPage((p) => p + 1)}
-                className="rounded border border-gray-300 px-3 py-1 disabled:opacity-50"
+                className="rounded border border-gray-300 dark:border-gray-600 px-3 py-1 disabled:opacity-50 dark:text-gray-300"
               >
                 Next
               </button>

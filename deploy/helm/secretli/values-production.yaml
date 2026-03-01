@@ -1,0 +1,30 @@
+replicaCount: 2
+
+resources:
+  limits:
+    cpu: 500m
+    memory: 256Mi
+  requests:
+    cpu: 200m
+    memory: 128Mi
+
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+  hosts:
+    - host: secretli.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - secretName: secretli-tls
+      hosts:
+        - secretli.example.com
+
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 75

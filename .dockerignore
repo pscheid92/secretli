@@ -1,0 +1,13 @@
+.git
+.github
+bin
+tmp
+web/frontend/node_modules
+web/frontend/dist
+deploy
+openspec
+*.md
+!web/frontend/*.md
+.air.toml
+.dockerignore
+Dockerfile

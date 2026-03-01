@@ -20,7 +20,7 @@ export default function ExpirationPicker({ value, onChange }: ExpirationPickerPr
     <select
       value={value}
       onChange={(e) => onChange(e.target.value)}
-      className="rounded-md border border-gray-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+      className="rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 dark:text-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
     >
       {OPTIONS.map((opt) => (
         <option key={opt.value} value={opt.value}>

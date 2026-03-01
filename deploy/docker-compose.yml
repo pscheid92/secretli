@@ -1,4 +1,27 @@
 services:
+  app:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_started
+      createbucket:
+        condition: service_completed_successfully
+    environment:
+      DATABASE_URL: postgres://secretli:secretli@postgres:5432/secretli?sslmode=disable
+      S3_ENDPOINT: minio:9000
+      S3_BUCKET: secretli
+      S3_ACCESS_KEY: minioadmin
+      S3_SECRET_KEY: minioadmin
+      S3_USE_SSL: "false"
+      S3_REGION: us-east-1
+      SERVER_PORT: "8080"
+      COOKIE_SECURE: "false"
+      COOKIE_DOMAIN: ""
+
   postgres:
     image: postgres:17-alpine
     ports:

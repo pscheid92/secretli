@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { toast } from 'sonner'
 import SecretForm, { type SecretFormData } from '../components/SecretForm'
 import SecretResult from '../components/SecretResult'
 import { KeySet } from '../lib/encryption'
@@ -13,18 +14,14 @@ interface ShareResult {
 export default function SharePage() {
   const [loading, setLoading] = useState(false)
   const [result, setResult] = useState<ShareResult | null>(null)
-  const [error, setError] = useState('')
 
   async function handleSubmit(data: SecretFormData) {
     setLoading(true)
-    setError('')
-    setResult(null)
 
     try {
       const keySet = await KeySet.generateRandom()
       const hasPassword = data.password.length > 0
 
-      // If password-protected, re-derive keys with the password for encryption
       let encryptKeySet = keySet
       if (hasPassword) {
         const encoded = keySet.getEncoded()
@@ -52,11 +49,12 @@ export default function SharePage() {
         expiresAt: response.expires_at,
         burnAfterRead: data.burnAfterRead,
       })
+      toast.success('Secret created')
     } catch (err) {
       if (err instanceof ApiError) {
-        setError(err.message)
+        toast.error(err.message)
       } else {
-        setError('An unexpected error occurred. Please try again.')
+        toast.error('An unexpected error occurred. Please try again.')
       }
     } finally {
       setLoading(false)
@@ -66,8 +64,8 @@ export default function SharePage() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-bold">Share a Secret</h1>
-        <p className="mt-1 text-sm text-gray-500">
+        <h1 className="text-2xl font-bold dark:text-white">Share a Secret</h1>
+        <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
           Your secret is encrypted in your browser before being sent to the server. Only the link holder can decrypt it.
         </p>
       </div>
@@ -82,20 +80,13 @@ export default function SharePage() {
           <button
             type="button"
             onClick={() => setResult(null)}
-            className="text-sm text-blue-600 hover:text-blue-800"
+            className="text-sm text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300"
           >
             Share another secret
           </button>
         </div>
       ) : (
-        <>
-          {error && (
-            <div className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-              {error}
-            </div>
-          )}
-          <SecretForm onSubmit={handleSubmit} loading={loading} />
-        </>
+        <SecretForm onSubmit={handleSubmit} loading={loading} />
       )}
     </div>
   )

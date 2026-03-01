@@ -49,8 +49,8 @@ export default function FileUpload({ onSelect }: FileUploadProps) {
         onClick={() => inputRef.current?.click()}
         className={`cursor-pointer rounded-md border-2 border-dashed p-8 text-center transition-colors ${
           dragOver
-            ? 'border-blue-400 bg-blue-50'
-            : 'border-gray-300 hover:border-gray-400'
+            ? 'border-blue-400 bg-blue-50 dark:bg-blue-950'
+            : 'border-gray-300 dark:border-gray-600 hover:border-gray-400 dark:hover:border-gray-500'
         }`}
       >
         <input
@@ -61,18 +61,18 @@ export default function FileUpload({ onSelect }: FileUploadProps) {
         />
         {selectedFile ? (
           <div className="space-y-1">
-            <p className="text-sm font-medium text-gray-900">{selectedFile.name}</p>
-            <p className="text-xs text-gray-500">{formatSize(selectedFile.size)}</p>
-            <p className="text-xs text-blue-600">Click or drop to change file</p>
+            <p className="text-sm font-medium text-gray-900 dark:text-gray-100">{selectedFile.name}</p>
+            <p className="text-xs text-gray-500 dark:text-gray-400">{formatSize(selectedFile.size)}</p>
+            <p className="text-xs text-blue-600 dark:text-blue-400">Click or drop to change file</p>
           </div>
         ) : (
           <div className="space-y-1">
-            <p className="text-sm text-gray-600">Drop a file here, or click to select</p>
-            <p className="text-xs text-gray-400">Max 100MB</p>
+            <p className="text-sm text-gray-600 dark:text-gray-400">Drop a file here, or click to select</p>
+            <p className="text-xs text-gray-400 dark:text-gray-500">Max 100MB</p>
           </div>
         )}
       </div>
-      {error && <p className="mt-1 text-sm text-red-600">{error}</p>}
+      {error && <p className="mt-1 text-sm text-red-600 dark:text-red-400">{error}</p>}
     </div>
   )
 }

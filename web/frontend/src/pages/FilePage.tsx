@@ -1,7 +1,9 @@
 import { useState } from 'react'
+import { toast } from 'sonner'
 import FileUpload from '../components/FileUpload'
 import ExpirationPicker from '../components/ExpirationPicker'
 import SecretResult from '../components/SecretResult'
+import Spinner from '../components/Spinner'
 import { KeySet } from '../lib/encryption'
 import { uploadFile, ApiError } from '../lib/api'
 
@@ -19,18 +21,15 @@ export default function FilePage() {
   const [showPassword, setShowPassword] = useState(false)
   const [loading, setLoading] = useState(false)
   const [result, setResult] = useState<FileResult | null>(null)
-  const [error, setError] = useState('')
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     if (!file) {
-      setError('Please select a file.')
+      toast.error('Please select a file.')
       return
     }
 
     setLoading(true)
-    setError('')
-    setResult(null)
 
     try {
       const keySet = await KeySet.generateRandom()
@@ -42,7 +41,6 @@ export default function FilePage() {
         encryptKeySet = await KeySet.fromShareSecret(encoded.shareSecret, password)
       }
 
-      // Read file into memory and encrypt
       const fileBytes = new Uint8Array(await file.arrayBuffer())
       const { nonce, encryptedBlob } = await encryptKeySet.encryptFile(fileBytes)
       const encryptedFilename = await encryptKeySet.encryptFilename(file.name)
@@ -70,11 +68,12 @@ export default function FilePage() {
         expiresAt: response.expires_at,
         burnAfterRead,
       })
+      toast.success('File uploaded')
     } catch (err) {
       if (err instanceof ApiError) {
-        setError(err.message)
+        toast.error(err.message)
       } else {
-        setError('An unexpected error occurred. Please try again.')
+        toast.error('An unexpected error occurred. Please try again.')
       }
     } finally {
       setLoading(false)
@@ -84,8 +83,8 @@ export default function FilePage() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-bold">Share a File</h1>
-        <p className="mt-1 text-sm text-gray-500">
+        <h1 className="text-2xl font-bold dark:text-white">Share a File</h1>
+        <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
           Your file is encrypted in your browser before being uploaded. Only the link holder can decrypt it.
         </p>
       </div>
@@ -100,68 +99,62 @@ export default function FilePage() {
           <button
             type="button"
             onClick={() => { setResult(null); setFile(null) }}
-            className="text-sm text-blue-600 hover:text-blue-800"
+            className="text-sm text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300"
           >
             Share another file
           </button>
         </div>
       ) : (
-        <>
-          {error && (
-            <div className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-              {error}
-            </div>
-          )}
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <FileUpload onSelect={setFile} />
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <FileUpload onSelect={setFile} />
 
-            <div className="flex flex-wrap items-center gap-4">
-              <div>
-                <label htmlFor="expiration" className="block text-sm font-medium text-gray-700 mb-1">
-                  Expires in
-                </label>
-                <ExpirationPicker value={expiration} onChange={setExpiration} />
-              </div>
-
-              <label className="flex items-center gap-2 pt-5 text-sm text-gray-700 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={burnAfterRead}
-                  onChange={(e) => setBurnAfterRead(e.target.checked)}
-                  className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                />
-                Burn after reading
-              </label>
-            </div>
-
+          <div className="flex flex-wrap items-center gap-4">
             <div>
-              <button
-                type="button"
-                onClick={() => setShowPassword(!showPassword)}
-                className="text-sm text-blue-600 hover:text-blue-800"
-              >
-                {showPassword ? 'Remove password protection' : 'Add password protection'}
-              </button>
-              {showPassword && (
-                <input
-                  type="password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder="Enter a password..."
-                  className="mt-2 w-full rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm placeholder:text-gray-400 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                />
-              )}
+              <label htmlFor="expiration" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                Expires in
+              </label>
+              <ExpirationPicker value={expiration} onChange={setExpiration} />
             </div>
 
+            <label className="flex items-center gap-2 pt-5 text-sm text-gray-700 dark:text-gray-300 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={burnAfterRead}
+                onChange={(e) => setBurnAfterRead(e.target.checked)}
+                className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+              />
+              Burn after reading
+            </label>
+          </div>
+
+          <div>
             <button
-              type="submit"
-              disabled={loading || !file}
-              className="w-full rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
+              type="button"
+              onClick={() => setShowPassword(!showPassword)}
+              className="text-sm text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300"
             >
-              {loading ? 'Encrypting & uploading...' : 'Share File'}
+              {showPassword ? 'Remove password protection' : 'Add password protection'}
             </button>
-          </form>
-        </>
+            {showPassword && (
+              <input
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="Enter a password..."
+                className="mt-2 w-full rounded-md border border-gray-300 dark:border-gray-600 dark:bg-gray-800 dark:text-white px-3 py-2 text-sm shadow-sm placeholder:text-gray-400 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              />
+            )}
+          </div>
+
+          <button
+            type="submit"
+            disabled={loading || !file}
+            className="flex w-full items-center justify-center gap-2 rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {loading && <Spinner size="sm" />}
+            {loading ? 'Encrypting & uploading...' : 'Share File'}
+          </button>
+        </form>
       )}
     </div>
   )
