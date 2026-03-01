@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Controller, useForm } from "react-hook-form";
 import { toast } from "sonner";
 import ExpirationPicker from "../components/ExpirationPicker";
 import FileUpload from "../components/FileUpload";
@@ -7,6 +8,13 @@ import Spinner from "../components/Spinner";
 import { ApiError, uploadFile } from "../lib/api";
 import { KeySet } from "../lib/encryption";
 
+interface FileFormData {
+  files: File[];
+  expiration: string;
+  burnAfterRead: boolean;
+  password: string;
+}
+
 interface FileResult {
   url: string;
   expiresAt: string;
@@ -14,44 +22,53 @@ interface FileResult {
 }
 
 export default function FilePage() {
-  const [files, setFiles] = useState<File[]>([]);
-  const [expiration, setExpiration] = useState("1d");
-  const [burnAfterRead, setBurnAfterRead] = useState(false);
-  const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<FileResult | null>(null);
 
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    if (files.length === 0) {
-      toast.error("Please select a file.");
-      return;
-    }
+  const {
+    register,
+    handleSubmit,
+    control,
+    setValue,
+    watch,
+    formState: { errors },
+    reset,
+  } = useForm<FileFormData>({
+    defaultValues: {
+      files: [],
+      expiration: "1d",
+      burnAfterRead: false,
+      password: "",
+    },
+  });
 
+  const files = watch("files");
+
+  async function onSubmit(data: FileFormData) {
     setLoading(true);
 
     try {
       let fileToUpload: File;
-      if (files.length > 1) {
+      if (data.files.length > 1) {
         const JSZip = (await import("jszip")).default;
         const zip = new JSZip();
-        for (const f of files) {
+        for (const f of data.files) {
           zip.file(f.name, f);
         }
         const blob = await zip.generateAsync({ type: "blob" });
         fileToUpload = new File([blob], "multiple.zip", { type: "application/zip" });
       } else {
-        fileToUpload = files[0];
+        fileToUpload = data.files[0];
       }
 
       const keySet = await KeySet.generateRandom();
-      const hasPassword = password.length > 0;
+      const hasPassword = data.password.length > 0;
 
       let encryptKeySet = keySet;
       if (hasPassword) {
         const encoded = keySet.getEncoded();
-        encryptKeySet = await KeySet.fromShareSecret(encoded.shareSecret, password);
+        encryptKeySet = await KeySet.fromShareSecret(encoded.shareSecret, data.password);
       }
 
       const fileBytes = new Uint8Array(await fileToUpload.arrayBuffer());
@@ -66,8 +83,8 @@ export default function FilePage() {
           retrieval_token: encoded.retrievalToken,
           deletion_token: encoded.deletionToken,
           nonce,
-          expiration,
-          burn_after_read: burnAfterRead,
+          expiration: data.expiration,
+          burn_after_read: data.burnAfterRead,
           password_protected: hasPassword,
           encrypted_filename: encryptedFilename,
         },
@@ -79,9 +96,9 @@ export default function FilePage() {
       setResult({
         url: shareUrl,
         expiresAt: response.expires_at,
-        burnAfterRead,
+        burnAfterRead: data.burnAfterRead,
       });
-      toast.success(files.length > 1 ? "Files uploaded" : "File uploaded");
+      toast.success(data.files.length > 1 ? "Files uploaded" : "File uploaded");
     } catch (err) {
       if (err instanceof ApiError) {
         toast.error(err.message);
@@ -114,7 +131,7 @@ export default function FilePage() {
             type="button"
             onClick={() => {
               setResult(null);
-              setFiles([]);
+              reset();
             }}
             className="text-sm font-medium text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300 transition-colors duration-150"
           >
@@ -123,8 +140,19 @@ export default function FilePage() {
         </div>
       ) : (
         <div className="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-5 shadow-sm">
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <FileUpload onSelect={setFiles} />
+          <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
+            <div>
+              <FileUpload
+                onSelect={(selected) => {
+                  setValue("files", selected, { shouldValidate: true });
+                }}
+              />
+              {errors.files && (
+                <p className="mt-1 text-sm text-red-600 dark:text-red-400">
+                  {errors.files.message}
+                </p>
+              )}
+            </div>
 
             <div className="flex flex-wrap items-center gap-4">
               <div>
@@ -134,14 +162,19 @@ export default function FilePage() {
                 >
                   Expires in
                 </label>
-                <ExpirationPicker value={expiration} onChange={setExpiration} />
+                <Controller
+                  name="expiration"
+                  control={control}
+                  render={({ field }) => (
+                    <ExpirationPicker value={field.value} onChange={field.onChange} />
+                  )}
+                />
               </div>
 
               <label className="flex items-center gap-2 pt-5 text-sm text-gray-700 dark:text-gray-300 cursor-pointer">
                 <input
                   type="checkbox"
-                  checked={burnAfterRead}
-                  onChange={(e) => setBurnAfterRead(e.target.checked)}
+                  {...register("burnAfterRead")}
                   className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
                 />
                 Burn after reading
@@ -157,13 +190,21 @@ export default function FilePage() {
                 {showPassword ? "Remove password protection" : "Add password protection"}
               </button>
               {showPassword && (
-                <input
-                  type="password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder="Enter a password..."
-                  className="mt-2 w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-800 dark:text-white px-3.5 py-2.5 text-sm placeholder:text-gray-400 focus:bg-white dark:focus:bg-gray-800 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-colors duration-150"
-                />
+                <>
+                  <input
+                    type="password"
+                    {...register("password", {
+                      validate: (v) => !showPassword || v.length > 0 || "Password is required",
+                    })}
+                    placeholder="Enter a password..."
+                    className="mt-2 w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-800 dark:text-white px-3.5 py-2.5 text-sm placeholder:text-gray-400 focus:bg-white dark:focus:bg-gray-800 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-colors duration-150"
+                  />
+                  {errors.password && (
+                    <p className="mt-1 text-sm text-red-600 dark:text-red-400">
+                      {errors.password.message}
+                    </p>
+                  )}
+                </>
               )}
             </div>
 

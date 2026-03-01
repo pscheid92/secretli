@@ -14,8 +14,6 @@ import (
 	"github.com/pscheid92/secretli/internal/store"
 )
 
-const maxEncryptedDataSize = 1 << 20 // 1MB
-
 type SecretHandler struct {
 	repo      store.SecretRepo
 	fileStore storage.FileStore
@@ -32,19 +30,11 @@ func (h *SecretHandler) CreateSecret(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Validate required fields
-	if req.PublicID == "" || req.RetrievalToken == "" || req.DeletionToken == "" || req.Nonce == "" || req.EncryptedData == "" {
-		writeError(w, http.StatusBadRequest, "missing required fields")
+	if details := validateRequest(&req); details != nil {
+		writeValidationError(w, details)
 		return
 	}
 
-	// Validate encrypted data size
-	if len(req.EncryptedData) > maxEncryptedDataSize {
-		writeError(w, http.StatusBadRequest, "encrypted_data exceeds 1MB limit")
-		return
-	}
-
-	// Parse expiration
 	duration, err := parseExpiration(req.Expiration)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())

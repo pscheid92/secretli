@@ -26,17 +26,6 @@ func NewFileHandler(repo store.SecretRepo, fileStore storage.FileStore, maxFileS
 	return &FileHandler{repo: repo, fileStore: fileStore, MaxFileSize: maxFileSize}
 }
 
-type fileMetadata struct {
-	PublicID          string `json:"public_id"`
-	RetrievalToken    string `json:"retrieval_token"`
-	DeletionToken     string `json:"deletion_token"`
-	Nonce             string `json:"nonce"`
-	Expiration        string `json:"expiration"`
-	BurnAfterRead     bool   `json:"burn_after_read"`
-	PasswordProtected bool   `json:"password_protected"`
-	EncryptedFilename string `json:"encrypted_filename"`
-}
-
 func (h *FileHandler) UploadFile(w http.ResponseWriter, r *http.Request) {
 	// Enforce max file size on the entire request body
 	r.Body = http.MaxBytesReader(w, r.Body, h.MaxFileSize+1<<20) // extra 1MB for metadata
@@ -58,19 +47,17 @@ func (h *FileHandler) UploadFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var meta fileMetadata
+	var meta model.CreateFileRequest
 	if err := json.Unmarshal([]byte(metadataStr), &meta); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid metadata JSON")
 		return
 	}
 
-	// Validate required fields
-	if meta.PublicID == "" || meta.RetrievalToken == "" || meta.DeletionToken == "" || meta.Nonce == "" || meta.Expiration == "" {
-		writeError(w, http.StatusBadRequest, "missing required metadata fields")
+	if details := validateRequest(&meta); details != nil {
+		writeValidationError(w, details)
 		return
 	}
 
-	// Parse expiration
 	duration, err := parseExpiration(meta.Expiration)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())

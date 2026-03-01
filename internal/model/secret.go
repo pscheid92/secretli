@@ -25,12 +25,23 @@ type Secret struct {
 }
 
 type CreateSecretRequest struct {
-	PublicID          string `json:"public_id"`
-	RetrievalToken    string `json:"retrieval_token"`
-	DeletionToken     string `json:"deletion_token"`
-	Nonce             string `json:"nonce"`
-	EncryptedData     string `json:"encrypted_data"`
-	Expiration        string `json:"expiration"`
+	PublicID          string `json:"public_id" validate:"required"`
+	RetrievalToken    string `json:"retrieval_token" validate:"required"`
+	DeletionToken     string `json:"deletion_token" validate:"required"`
+	Nonce             string `json:"nonce" validate:"required"`
+	EncryptedData     string `json:"encrypted_data" validate:"required,max=1048576"`
+	Expiration        string `json:"expiration" validate:"required,expiration"`
 	BurnAfterRead     bool   `json:"burn_after_read"`
 	PasswordProtected bool   `json:"password_protected"`
+}
+
+type CreateFileRequest struct {
+	PublicID          string `json:"public_id" validate:"required"`
+	RetrievalToken    string `json:"retrieval_token" validate:"required"`
+	DeletionToken     string `json:"deletion_token" validate:"required"`
+	Nonce             string `json:"nonce" validate:"required"`
+	Expiration        string `json:"expiration" validate:"required,expiration"`
+	BurnAfterRead     bool   `json:"burn_after_read"`
+	PasswordProtected bool   `json:"password_protected"`
+	EncryptedFilename string `json:"encrypted_filename" validate:"required"`
 }

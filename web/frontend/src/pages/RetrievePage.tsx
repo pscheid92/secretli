@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { useForm } from "react-hook-form";
 import { toast } from "sonner";
 import SecretTypeIcon from "../components/SecretTypeIcon";
 import Spinner from "../components/Spinner";
@@ -40,8 +41,12 @@ export default function RetrievePage() {
   const hash = window.location.hash.slice(1);
   const [state, setState] = useState<State>(hash ? { stage: "loading" } : { stage: "prompt" });
   const [linkInput, setLinkInput] = useState("");
-  const [password, setPassword] = useState("");
-  const [passwordError, setPasswordError] = useState("");
+  const {
+    register: registerPassword,
+    handleSubmit: handlePasswordFormSubmit,
+    formState: { errors: passwordErrors },
+    setError: setPasswordFormError,
+  } = useForm<{ password: string }>({ defaultValues: { password: "" } });
   const [passwordLoading, setPasswordLoading] = useState(false);
   const [revealing, setRevealing] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -174,15 +179,13 @@ export default function RetrievePage() {
     }
   }
 
-  async function handlePasswordSubmit(e: React.FormEvent) {
-    e.preventDefault();
+  async function handlePasswordSubmit(data: { password: string }) {
     if (state.stage !== "password") return;
 
     setPasswordLoading(true);
-    setPasswordError("");
 
     try {
-      const keySet = await KeySet.fromShareSecret(state.shareSecret, password);
+      const keySet = await KeySet.fromShareSecret(state.shareSecret, data.password);
       const encoded = keySet.getEncoded();
 
       if (state.secretType === "file") {
@@ -204,7 +207,7 @@ export default function RetrievePage() {
         shareSecret: state.shareSecret,
       });
     } catch {
-      setPasswordError("Wrong password. Please try again.");
+      setPasswordFormError("password", { message: "Wrong password. Please try again." });
     } finally {
       setPasswordLoading(false);
     }
@@ -424,20 +427,18 @@ export default function RetrievePage() {
           </p>
         </div>
         <div className="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-5 shadow-sm">
-          <form onSubmit={handlePasswordSubmit} className="space-y-3">
+          <form onSubmit={handlePasswordFormSubmit(handlePasswordSubmit)} className="space-y-3">
             <input
               type="password"
-              value={password}
-              onChange={(e) => {
-                setPassword(e.target.value);
-                setPasswordError("");
-              }}
+              {...registerPassword("password", { required: "Password is required" })}
               placeholder="Enter password..."
               autoFocus
               className="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-800 dark:text-white px-3.5 py-2.5 text-sm placeholder:text-gray-400 focus:bg-white dark:focus:bg-gray-800 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-colors duration-150"
             />
-            {passwordError && (
-              <p className="text-sm text-red-600 dark:text-red-400">{passwordError}</p>
+            {passwordErrors.password && (
+              <p className="text-sm text-red-600 dark:text-red-400">
+                {passwordErrors.password.message}
+              </p>
             )}
             <button
               type="submit"

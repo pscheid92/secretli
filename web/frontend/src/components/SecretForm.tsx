@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Controller, useForm } from "react-hook-form";
 import ExpirationPicker from "./ExpirationPicker";
 import Spinner from "./Spinner";
 
@@ -15,30 +16,25 @@ interface SecretFormProps {
 }
 
 export default function SecretForm({ onSubmit, loading }: SecretFormProps) {
-  const [text, setText] = useState("");
-  const [expiration, setExpiration] = useState("1d");
-  const [burnAfterRead, setBurnAfterRead] = useState(false);
-  const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
-  const [error, setError] = useState("");
 
-  function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    if (!text.trim()) {
-      setError("Please enter a secret to share.");
-      return;
-    }
-    if (showPassword && !password) {
-      setError("Please enter a password or disable password protection.");
-      return;
-    }
-    setError("");
-    onSubmit({ text, expiration, burnAfterRead, password });
-  }
+  const {
+    register,
+    handleSubmit,
+    control,
+    formState: { errors },
+  } = useForm<SecretFormData>({
+    defaultValues: {
+      text: "",
+      expiration: "1d",
+      burnAfterRead: false,
+      password: "",
+    },
+  });
 
   return (
     <div className="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-5 shadow-sm">
-      <form onSubmit={handleSubmit} className="space-y-4">
+      <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
         <div>
           <label
             htmlFor="secret-text"
@@ -48,16 +44,14 @@ export default function SecretForm({ onSubmit, loading }: SecretFormProps) {
           </label>
           <textarea
             id="secret-text"
-            value={text}
-            onChange={(e) => {
-              setText(e.target.value);
-              setError("");
-            }}
+            {...register("text", { required: "Secret text is required" })}
             placeholder="Enter your secret text..."
             rows={6}
             className="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-800 dark:text-white px-3.5 py-2.5 text-sm placeholder:text-gray-400 focus:bg-white dark:focus:bg-gray-800 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-colors duration-150"
           />
-          {error && <p className="mt-1 text-sm text-red-600 dark:text-red-400">{error}</p>}
+          {errors.text && (
+            <p className="mt-1 text-sm text-red-600 dark:text-red-400">{errors.text.message}</p>
+          )}
         </div>
 
         <div className="flex flex-wrap items-center gap-4">
@@ -68,14 +62,19 @@ export default function SecretForm({ onSubmit, loading }: SecretFormProps) {
             >
               Expires in
             </label>
-            <ExpirationPicker value={expiration} onChange={setExpiration} />
+            <Controller
+              name="expiration"
+              control={control}
+              render={({ field }) => (
+                <ExpirationPicker value={field.value} onChange={field.onChange} />
+              )}
+            />
           </div>
 
           <label className="flex items-center gap-2 pt-5 text-sm text-gray-700 dark:text-gray-300 cursor-pointer">
             <input
               type="checkbox"
-              checked={burnAfterRead}
-              onChange={(e) => setBurnAfterRead(e.target.checked)}
+              {...register("burnAfterRead")}
               className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
             />
             Burn after reading
@@ -91,13 +90,21 @@ export default function SecretForm({ onSubmit, loading }: SecretFormProps) {
             {showPassword ? "Remove password protection" : "Add password protection"}
           </button>
           {showPassword && (
-            <input
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder="Enter a password..."
-              className="mt-2 w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-800 dark:text-white px-3.5 py-2.5 text-sm placeholder:text-gray-400 focus:bg-white dark:focus:bg-gray-800 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-colors duration-150"
-            />
+            <>
+              <input
+                type="password"
+                {...register("password", {
+                  validate: (v) => !showPassword || v.length > 0 || "Password is required",
+                })}
+                placeholder="Enter a password..."
+                className="mt-2 w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-800 dark:text-white px-3.5 py-2.5 text-sm placeholder:text-gray-400 focus:bg-white dark:focus:bg-gray-800 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-colors duration-150"
+              />
+              {errors.password && (
+                <p className="mt-1 text-sm text-red-600 dark:text-red-400">
+                  {errors.password.message}
+                </p>
+              )}
+            </>
           )}
         </div>
 

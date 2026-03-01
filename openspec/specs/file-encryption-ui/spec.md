@@ -20,7 +20,7 @@ The FileUpload component SHALL provide a drag-and-drop zone and a file input but
 - **THEN** the selection is cleared and `onSelect` is called with null
 
 ### Requirement: FilePage orchestration
-The FilePage SHALL render a FileUpload component, an ExpirationPicker, a burn-after-read toggle, an optional password field, and a submit button. On submit, it SHALL generate a KeySet, encrypt the file and filename client-side, upload via `POST /api/v1/secrets/file`, and display a share link via SecretResult.
+The FilePage SHALL render a FileUpload component, an ExpirationPicker, a burn-after-read toggle, an optional password field, and a submit button. Form state for non-file fields SHALL be managed by react-hook-form's `useForm` hook. The ExpirationPicker SHALL be integrated via `Controller`. File selection SHALL be synced to form state via `setValue`. On submit, it SHALL generate a KeySet, encrypt the file and filename client-side, upload via `POST /api/v1/secrets/file`, and display a share link via SecretResult.
 
 #### Scenario: Successful file upload
 - **WHEN** the user selects a file, configures options, and clicks "Share File"
@@ -37,6 +37,21 @@ The FilePage SHALL render a FileUpload component, an ExpirationPicker, a burn-af
 #### Scenario: API error during upload
 - **WHEN** the API returns an error
 - **THEN** the page displays the error message
+
+### Requirement: Form validation on file upload
+The file upload form SHALL use react-hook-form for state management and validation of non-file fields (expiration, password, burn-after-read). File selection SHALL be bridged to react-hook-form via `setValue`. All fields SHALL display per-field inline error messages.
+
+#### Scenario: No file selected
+- **WHEN** the user submits the file upload form without selecting a file
+- **THEN** a field-level error message "Please select a file" SHALL appear below the file upload area
+
+#### Scenario: Password required when protection enabled
+- **WHEN** the user enables password protection on the file form and submits without entering a password
+- **THEN** a field-level error message "Password is required" SHALL appear below the password input
+
+#### Scenario: Valid file form submission
+- **WHEN** the user selects a file, configures options, and submits
+- **THEN** react-hook-form validates all fields and calls the submit handler with form data
 
 ### Requirement: RetrievePage file download
 The RetrievePage SHALL detect `secret_type: "file"` from the text retrieval response and fetch the encrypted file from `POST /api/v1/secrets/{publicID}/file`. It SHALL decrypt the file and filename client-side and trigger a browser download with the original filename.
