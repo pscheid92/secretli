@@ -2,7 +2,6 @@ package domain
 
 import "context"
 
-// SecretRepo defines the persistence contract for secrets.
 type SecretRepo interface {
 	Create(ctx context.Context, secret *Secret) error
 	GetByPublicID(ctx context.Context, publicID string) (*Secret, error)

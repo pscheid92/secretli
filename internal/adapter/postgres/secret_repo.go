@@ -27,8 +27,8 @@ func NewSecretRepo(pool *pgxpool.Pool) *SecretRepo {
 func (r *SecretRepo) Create(ctx context.Context, secret *domain.Secret) error {
 	id, err := r.q.CreateSecret(ctx, dbsqlc.CreateSecretParams{
 		PublicID:           secret.PublicID,
-		RetrievalTokenHash: secret.RetrievalTokenHash,
-		DeletionTokenHash:  secret.DeletionTokenHash,
+		RetrievalToken: secret.RetrievalToken,
+		DeletionToken:  secret.DeletionToken,
 		EncryptedData:      textFromPtr(secret.EncryptedData),
 		Nonce:              secret.Nonce,
 		SecretType:         secret.SecretType,
@@ -107,8 +107,8 @@ func secretFromGetRow(row dbsqlc.GetSecretByPublicIDRow) *domain.Secret {
 	return &domain.Secret{
 		ID:                 row.ID,
 		PublicID:           row.PublicID,
-		RetrievalTokenHash: row.RetrievalTokenHash,
-		DeletionTokenHash:  row.DeletionTokenHash,
+		RetrievalToken: row.RetrievalToken,
+		DeletionToken:  row.DeletionToken,
 		EncryptedData:      ptrFromText(row.EncryptedData),
 		Nonce:              row.Nonce,
 		SecretType:         row.SecretType,
@@ -127,8 +127,8 @@ func secretFromDeleteRow(row dbsqlc.GetAndDeleteSecretByPublicIDRow) *domain.Sec
 	return &domain.Secret{
 		ID:                 row.ID,
 		PublicID:           row.PublicID,
-		RetrievalTokenHash: row.RetrievalTokenHash,
-		DeletionTokenHash:  row.DeletionTokenHash,
+		RetrievalToken: row.RetrievalToken,
+		DeletionToken:  row.DeletionToken,
 		EncryptedData:      ptrFromText(row.EncryptedData),
 		Nonce:              row.Nonce,
 		SecretType:         row.SecretType,

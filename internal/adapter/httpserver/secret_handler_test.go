@@ -12,7 +12,6 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/pscheid92/secretli/internal/domain"
-	"github.com/pscheid92/secretli/internal/platform/crypto"
 )
 
 func withChiURLParam(r *http.Request, key, value string) *http.Request {
@@ -187,8 +186,8 @@ func seedSecret(repo *mockSecretRepo, publicID, retrievalToken, deletionToken st
 	encData := "ZW5jcnlwdGVkZGF0YQ"
 	repo.secrets[publicID] = &domain.Secret{
 		PublicID:           publicID,
-		RetrievalTokenHash: crypto.HashToken(retrievalToken),
-		DeletionTokenHash:  crypto.HashToken(deletionToken),
+		RetrievalToken: retrievalToken,
+		DeletionToken:  deletionToken,
 		EncryptedData:      &encData,
 		Nonce:              "dGVzdG5vbmNl",
 		SecretType:         "text",

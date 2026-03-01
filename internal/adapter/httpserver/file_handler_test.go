@@ -14,7 +14,6 @@ import (
 	"time"
 
 	"github.com/pscheid92/secretli/internal/domain"
-	"github.com/pscheid92/secretli/internal/platform/crypto"
 )
 
 // mockFileStore implements domain.FileStore for testing
@@ -221,8 +220,8 @@ func seedFileSecret(repo *mockSecretRepo, fs *mockFileStore, publicID, retrieval
 	fs.objects[storageKey] = []byte("encrypted-file-content")
 	repo.secrets[publicID] = &domain.Secret{
 		PublicID:           publicID,
-		RetrievalTokenHash: crypto.HashToken(retrievalToken),
-		DeletionTokenHash:  crypto.HashToken(deletionToken),
+		RetrievalToken: retrievalToken,
+		DeletionToken:  deletionToken,
 		Nonce:              "ZmlsZW5vbmNl",
 		SecretType:         "file",
 		StorageKey:         &storageKey,
@@ -520,8 +519,8 @@ func TestDownloadFile_MissingStorageKey(t *testing.T) {
 	// Create a file secret with nil StorageKey
 	repo.secrets["no-key"] = &domain.Secret{
 		PublicID:           "no-key",
-		RetrievalTokenHash: crypto.HashToken("ret-tok"),
-		DeletionTokenHash:  crypto.HashToken("del-tok"),
+		RetrievalToken: "ret-tok",
+		DeletionToken:  "del-tok",
 		Nonce:              "nonce",
 		SecretType:         "file",
 		StorageKey:         nil, // missing!

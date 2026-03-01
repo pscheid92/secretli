@@ -9,8 +9,8 @@ import (
 type Secret struct {
 	ID                 uuid.UUID  `json:"-"`
 	PublicID           string     `json:"public_id"`
-	RetrievalTokenHash string     `json:"-"`
-	DeletionTokenHash  string     `json:"-"`
+	RetrievalToken string `json:"-"`
+	DeletionToken  string `json:"-"`
 	EncryptedData      *string    `json:"encrypted_data,omitempty"`
 	Nonce              string     `json:"nonce"`
 	SecretType         string     `json:"secret_type"`

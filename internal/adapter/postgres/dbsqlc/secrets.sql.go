@@ -14,7 +14,7 @@ import (
 
 const createSecret = `-- name: CreateSecret :one
 INSERT INTO secrets (
-    public_id, retrieval_token_hash, deletion_token_hash,
+    public_id, retrieval_token, deletion_token,
     encrypted_data, nonce, secret_type,
     storage_key, encrypted_filename, encrypted_size,
     burn_after_read, password_protected, expires_at
@@ -23,25 +23,25 @@ RETURNING id
 `
 
 type CreateSecretParams struct {
-	PublicID           string
-	RetrievalTokenHash string
-	DeletionTokenHash  string
-	EncryptedData      pgtype.Text
-	Nonce              string
-	SecretType         string
-	StorageKey         pgtype.Text
-	EncryptedFilename  pgtype.Text
-	EncryptedSize      pgtype.Int8
-	BurnAfterRead      bool
-	PasswordProtected  bool
-	ExpiresAt          pgtype.Timestamptz
+	PublicID          string
+	RetrievalToken    string
+	DeletionToken     string
+	EncryptedData     pgtype.Text
+	Nonce             string
+	SecretType        string
+	StorageKey        pgtype.Text
+	EncryptedFilename pgtype.Text
+	EncryptedSize     pgtype.Int8
+	BurnAfterRead     bool
+	PasswordProtected bool
+	ExpiresAt         pgtype.Timestamptz
 }
 
 func (q *Queries) CreateSecret(ctx context.Context, arg CreateSecretParams) (uuid.UUID, error) {
 	row := q.db.QueryRow(ctx, createSecret,
 		arg.PublicID,
-		arg.RetrievalTokenHash,
-		arg.DeletionTokenHash,
+		arg.RetrievalToken,
+		arg.DeletionToken,
 		arg.EncryptedData,
 		arg.Nonce,
 		arg.SecretType,
@@ -97,7 +97,7 @@ func (q *Queries) DeleteSecret(ctx context.Context, publicID string) (int64, err
 const getAndDeleteSecretByPublicID = `-- name: GetAndDeleteSecretByPublicID :one
 DELETE FROM secrets
 WHERE public_id = $1 AND expires_at > NOW()
-RETURNING id, public_id, retrieval_token_hash, deletion_token_hash,
+RETURNING id, public_id, retrieval_token, deletion_token,
     encrypted_data, nonce, secret_type,
     storage_key, encrypted_filename, encrypted_size,
     burn_after_read, password_protected,
@@ -105,21 +105,21 @@ RETURNING id, public_id, retrieval_token_hash, deletion_token_hash,
 `
 
 type GetAndDeleteSecretByPublicIDRow struct {
-	ID                 uuid.UUID
-	PublicID           string
-	RetrievalTokenHash string
-	DeletionTokenHash  string
-	EncryptedData      pgtype.Text
-	Nonce              string
-	SecretType         string
-	StorageKey         pgtype.Text
-	EncryptedFilename  pgtype.Text
-	EncryptedSize      pgtype.Int8
-	BurnAfterRead      bool
-	PasswordProtected  bool
-	ExpiresAt          pgtype.Timestamptz
-	CreatedAt          pgtype.Timestamptz
-	RetrievedAt        pgtype.Timestamptz
+	ID                uuid.UUID
+	PublicID          string
+	RetrievalToken    string
+	DeletionToken     string
+	EncryptedData     pgtype.Text
+	Nonce             string
+	SecretType        string
+	StorageKey        pgtype.Text
+	EncryptedFilename pgtype.Text
+	EncryptedSize     pgtype.Int8
+	BurnAfterRead     bool
+	PasswordProtected bool
+	ExpiresAt         pgtype.Timestamptz
+	CreatedAt         pgtype.Timestamptz
+	RetrievedAt       pgtype.Timestamptz
 }
 
 func (q *Queries) GetAndDeleteSecretByPublicID(ctx context.Context, publicID string) (GetAndDeleteSecretByPublicIDRow, error) {
@@ -128,8 +128,8 @@ func (q *Queries) GetAndDeleteSecretByPublicID(ctx context.Context, publicID str
 	err := row.Scan(
 		&i.ID,
 		&i.PublicID,
-		&i.RetrievalTokenHash,
-		&i.DeletionTokenHash,
+		&i.RetrievalToken,
+		&i.DeletionToken,
 		&i.EncryptedData,
 		&i.Nonce,
 		&i.SecretType,
@@ -146,7 +146,7 @@ func (q *Queries) GetAndDeleteSecretByPublicID(ctx context.Context, publicID str
 }
 
 const getSecretByPublicID = `-- name: GetSecretByPublicID :one
-SELECT id, public_id, retrieval_token_hash, deletion_token_hash,
+SELECT id, public_id, retrieval_token, deletion_token,
     encrypted_data, nonce, secret_type,
     storage_key, encrypted_filename, encrypted_size,
     burn_after_read, password_protected,
@@ -156,21 +156,21 @@ WHERE public_id = $1 AND expires_at > NOW()
 `
 
 type GetSecretByPublicIDRow struct {
-	ID                 uuid.UUID
-	PublicID           string
-	RetrievalTokenHash string
-	DeletionTokenHash  string
-	EncryptedData      pgtype.Text
-	Nonce              string
-	SecretType         string
-	StorageKey         pgtype.Text
-	EncryptedFilename  pgtype.Text
-	EncryptedSize      pgtype.Int8
-	BurnAfterRead      bool
-	PasswordProtected  bool
-	ExpiresAt          pgtype.Timestamptz
-	CreatedAt          pgtype.Timestamptz
-	RetrievedAt        pgtype.Timestamptz
+	ID                uuid.UUID
+	PublicID          string
+	RetrievalToken    string
+	DeletionToken     string
+	EncryptedData     pgtype.Text
+	Nonce             string
+	SecretType        string
+	StorageKey        pgtype.Text
+	EncryptedFilename pgtype.Text
+	EncryptedSize     pgtype.Int8
+	BurnAfterRead     bool
+	PasswordProtected bool
+	ExpiresAt         pgtype.Timestamptz
+	CreatedAt         pgtype.Timestamptz
+	RetrievedAt       pgtype.Timestamptz
 }
 
 func (q *Queries) GetSecretByPublicID(ctx context.Context, publicID string) (GetSecretByPublicIDRow, error) {
@@ -179,8 +179,8 @@ func (q *Queries) GetSecretByPublicID(ctx context.Context, publicID string) (Get
 	err := row.Scan(
 		&i.ID,
 		&i.PublicID,
-		&i.RetrievalTokenHash,
-		&i.DeletionTokenHash,
+		&i.RetrievalToken,
+		&i.DeletionToken,
 		&i.EncryptedData,
 		&i.Nonce,
 		&i.SecretType,

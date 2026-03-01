@@ -10,19 +10,19 @@ import (
 )
 
 type Secret struct {
-	PublicID           string
-	RetrievalTokenHash string
-	DeletionTokenHash  string
-	EncryptedData      pgtype.Text
-	Nonce              string
-	SecretType         string
-	StorageKey         pgtype.Text
-	EncryptedFilename  pgtype.Text
-	EncryptedSize      pgtype.Int8
-	BurnAfterRead      bool
-	PasswordProtected  bool
-	ExpiresAt          pgtype.Timestamptz
-	CreatedAt          pgtype.Timestamptz
-	RetrievedAt        pgtype.Timestamptz
-	ID                 uuid.UUID
+	PublicID          string
+	RetrievalToken    string
+	DeletionToken     string
+	EncryptedData     pgtype.Text
+	Nonce             string
+	SecretType        string
+	StorageKey        pgtype.Text
+	EncryptedFilename pgtype.Text
+	EncryptedSize     pgtype.Int8
+	BurnAfterRead     bool
+	PasswordProtected bool
+	ExpiresAt         pgtype.Timestamptz
+	CreatedAt         pgtype.Timestamptz
+	RetrievedAt       pgtype.Timestamptz
+	ID                uuid.UUID
 }

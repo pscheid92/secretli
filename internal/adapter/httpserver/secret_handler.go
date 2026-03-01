@@ -43,8 +43,8 @@ func (h *SecretHandler) CreateSecret(w http.ResponseWriter, r *http.Request) err
 
 	secret := &domain.Secret{
 		PublicID:           req.PublicID,
-		RetrievalTokenHash: crypto.HashToken(req.RetrievalToken),
-		DeletionTokenHash:  crypto.HashToken(req.DeletionToken),
+		RetrievalToken: req.RetrievalToken,
+		DeletionToken:  req.DeletionToken,
 		EncryptedData:      &req.EncryptedData,
 		Nonce:              req.Nonce,
 		SecretType:         "text",
@@ -89,7 +89,7 @@ func (h *SecretHandler) RetrieveSecret(w http.ResponseWriter, r *http.Request) e
 		return apperrors.InternalError("failed to get secret", err)
 	}
 
-	if !crypto.VerifyToken(token, secret.RetrievalTokenHash) {
+	if !crypto.TokensEqual(token, secret.RetrievalToken) {
 		return apperrors.ForbiddenError("invalid retrieval token")
 	}
 
@@ -148,7 +148,7 @@ func (h *SecretHandler) SecretMetadata(w http.ResponseWriter, r *http.Request) e
 		return apperrors.InternalError("failed to get secret", err)
 	}
 
-	if !crypto.VerifyToken(token, secret.RetrievalTokenHash) {
+	if !crypto.TokensEqual(token, secret.RetrievalToken) {
 		return apperrors.ForbiddenError("invalid retrieval token")
 	}
 
@@ -187,11 +187,11 @@ func (h *SecretHandler) DeleteSecret(w http.ResponseWriter, r *http.Request) err
 		return apperrors.InternalError("failed to get secret", err)
 	}
 
-	if !crypto.VerifyToken(retrievalToken, secret.RetrievalTokenHash) {
+	if !crypto.TokensEqual(retrievalToken, secret.RetrievalToken) {
 		return apperrors.ForbiddenError("invalid retrieval token")
 	}
 
-	if !crypto.VerifyToken(deletionToken, secret.DeletionTokenHash) {
+	if !crypto.TokensEqual(deletionToken, secret.DeletionToken) {
 		return apperrors.ForbiddenError("invalid deletion token")
 	}
 

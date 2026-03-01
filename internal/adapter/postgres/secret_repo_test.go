@@ -14,8 +14,8 @@ func newTextSecret(publicID string, expiresAt time.Time) *domain.Secret {
 	data := "encrypted-data"
 	return &domain.Secret{
 		PublicID:           publicID,
-		RetrievalTokenHash: "retrieval-hash-" + publicID,
-		DeletionTokenHash:  "deletion-hash-" + publicID,
+		RetrievalToken: "retrieval-token-" + publicID,
+		DeletionToken:  "deletion-token-" + publicID,
 		EncryptedData:      &data,
 		Nonce:              "nonce-" + publicID,
 		SecretType:         "text",
@@ -43,8 +43,8 @@ func TestSecretRepo_CreateAndGet(t *testing.T) {
 	if got.PublicID != "pub-001" {
 		t.Errorf("public_id = %q, want %q", got.PublicID, "pub-001")
 	}
-	if got.RetrievalTokenHash != "retrieval-hash-pub-001" {
-		t.Errorf("retrieval_token_hash = %q, want %q", got.RetrievalTokenHash, "retrieval-hash-pub-001")
+	if got.RetrievalToken != "retrieval-token-pub-001" {
+		t.Errorf("retrieval_token = %q, want %q", got.RetrievalToken, "retrieval-token-pub-001")
 	}
 	if got.SecretType != "text" {
 		t.Errorf("secret_type = %q, want %q", got.SecretType, "text")

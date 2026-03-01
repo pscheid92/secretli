@@ -1,24 +1,8 @@
 package crypto
 
-import (
-	"crypto/sha256"
-	"crypto/subtle"
-	"encoding/base64"
-	"encoding/hex"
-)
+import "crypto/subtle"
 
-func HashToken(token string) string {
-	decoded, err := base64.RawURLEncoding.DecodeString(token)
-	if err != nil {
-		// If not valid base64, hash the raw string bytes
-		h := sha256.Sum256([]byte(token))
-		return hex.EncodeToString(h[:])
-	}
-	h := sha256.Sum256(decoded)
-	return hex.EncodeToString(h[:])
-}
-
-func VerifyToken(token, storedHash string) bool {
-	computed := HashToken(token)
-	return subtle.ConstantTimeCompare([]byte(computed), []byte(storedHash)) == 1
+// TokensEqual compares two tokens in constant time to prevent timing attacks.
+func TokensEqual(a, b string) bool {
+	return subtle.ConstantTimeCompare([]byte(a), []byte(b)) == 1
 }

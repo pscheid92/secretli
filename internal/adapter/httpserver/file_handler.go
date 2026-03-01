@@ -79,8 +79,8 @@ func (h *FileHandler) UploadFile(w http.ResponseWriter, r *http.Request) error {
 
 	secret := &domain.Secret{
 		PublicID:           meta.PublicID,
-		RetrievalTokenHash: crypto.HashToken(meta.RetrievalToken),
-		DeletionTokenHash:  crypto.HashToken(meta.DeletionToken),
+		RetrievalToken: meta.RetrievalToken,
+		DeletionToken:  meta.DeletionToken,
 		Nonce:              meta.Nonce,
 		SecretType:         "file",
 		StorageKey:         &storageKey,
@@ -131,7 +131,7 @@ func (h *FileHandler) DownloadFile(w http.ResponseWriter, r *http.Request) error
 	}
 
 	// Verify retrieval token
-	if !crypto.VerifyToken(token, secret.RetrievalTokenHash) {
+	if !crypto.TokensEqual(token, secret.RetrievalToken) {
 		return apperrors.ForbiddenError("invalid retrieval token")
 	}
 
