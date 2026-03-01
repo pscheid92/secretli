@@ -37,77 +37,79 @@ export default function SecretForm({ onSubmit, loading }: SecretFormProps) {
   }
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-4">
-      <div>
-        <label
-          htmlFor="secret-text"
-          className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1"
-        >
-          Secret
-        </label>
-        <textarea
-          id="secret-text"
-          value={text}
-          onChange={(e) => {
-            setText(e.target.value);
-            setError("");
-          }}
-          placeholder="Enter your secret text..."
-          rows={6}
-          className="w-full rounded-md border border-gray-300 dark:border-gray-600 dark:bg-gray-800 dark:text-white px-3 py-2 text-sm shadow-sm placeholder:text-gray-400 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-        />
-        {error && <p className="mt-1 text-sm text-red-600 dark:text-red-400">{error}</p>}
-      </div>
-
-      <div className="flex flex-wrap items-center gap-4">
+    <div className="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-5 shadow-sm">
+      <form onSubmit={handleSubmit} className="space-y-4">
         <div>
           <label
-            htmlFor="expiration"
+            htmlFor="secret-text"
             className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1"
           >
-            Expires in
+            Secret
           </label>
-          <ExpirationPicker value={expiration} onChange={setExpiration} />
+          <textarea
+            id="secret-text"
+            value={text}
+            onChange={(e) => {
+              setText(e.target.value);
+              setError("");
+            }}
+            placeholder="Enter your secret text..."
+            rows={6}
+            className="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-800 dark:text-white px-3.5 py-2.5 text-sm placeholder:text-gray-400 focus:bg-white dark:focus:bg-gray-800 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-colors duration-150"
+          />
+          {error && <p className="mt-1 text-sm text-red-600 dark:text-red-400">{error}</p>}
         </div>
 
-        <label className="flex items-center gap-2 pt-5 text-sm text-gray-700 dark:text-gray-300 cursor-pointer">
-          <input
-            type="checkbox"
-            checked={burnAfterRead}
-            onChange={(e) => setBurnAfterRead(e.target.checked)}
-            className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-          />
-          Burn after reading
-        </label>
-      </div>
+        <div className="flex flex-wrap items-center gap-4">
+          <div>
+            <label
+              htmlFor="expiration"
+              className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1"
+            >
+              Expires in
+            </label>
+            <ExpirationPicker value={expiration} onChange={setExpiration} />
+          </div>
 
-      <div>
+          <label className="flex items-center gap-2 pt-5 text-sm text-gray-700 dark:text-gray-300 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={burnAfterRead}
+              onChange={(e) => setBurnAfterRead(e.target.checked)}
+              className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+            />
+            Burn after reading
+          </label>
+        </div>
+
+        <div>
+          <button
+            type="button"
+            onClick={() => setShowPassword(!showPassword)}
+            className="text-sm font-medium text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300 transition-colors duration-150"
+          >
+            {showPassword ? "Remove password protection" : "Add password protection"}
+          </button>
+          {showPassword && (
+            <input
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="Enter a password..."
+              className="mt-2 w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-800 dark:text-white px-3.5 py-2.5 text-sm placeholder:text-gray-400 focus:bg-white dark:focus:bg-gray-800 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-colors duration-150"
+            />
+          )}
+        </div>
+
         <button
-          type="button"
-          onClick={() => setShowPassword(!showPassword)}
-          className="text-sm text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300"
+          type="submit"
+          disabled={loading}
+          className="flex w-full items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2.5 font-semibold text-white shadow-md hover:bg-blue-700 hover:shadow-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-150"
         >
-          {showPassword ? "Remove password protection" : "Add password protection"}
+          {loading && <Spinner size="sm" />}
+          {loading ? "Encrypting..." : "Share Secret"}
         </button>
-        {showPassword && (
-          <input
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            placeholder="Enter a password..."
-            className="mt-2 w-full rounded-md border border-gray-300 dark:border-gray-600 dark:bg-gray-800 dark:text-white px-3 py-2 text-sm shadow-sm placeholder:text-gray-400 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-          />
-        )}
-      </div>
-
-      <button
-        type="submit"
-        disabled={loading}
-        className="flex w-full items-center justify-center gap-2 rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
-      >
-        {loading && <Spinner size="sm" />}
-        {loading ? "Encrypting..." : "Share Secret"}
-      </button>
-    </form>
+      </form>
+    </div>
   );
 }

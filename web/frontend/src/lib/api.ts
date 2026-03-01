@@ -135,6 +135,26 @@ export async function downloadFile(
   };
 }
 
+// --- Metadata ---
+
+export interface SecretMetadataResponse {
+  secret_type: string;
+  burn_after_read: boolean;
+  password_protected: boolean;
+  expires_at: string;
+  created_at: string;
+}
+
+export function getSecretMetadata(
+  publicID: string,
+  retrievalToken: string,
+): Promise<SecretMetadataResponse> {
+  return request(`/api/v1/secrets/${publicID}/meta`, {
+    method: "GET",
+    headers: { "X-Retrieval-Token": retrievalToken },
+  });
+}
+
 // --- Auth ---
 
 export interface User {

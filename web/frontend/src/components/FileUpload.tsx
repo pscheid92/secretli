@@ -1,26 +1,33 @@
 import { useCallback, useRef, useState } from "react";
 
-const MAX_FILE_SIZE = 100 * 1024 * 1024; // 100MB
+const MAX_TOTAL_SIZE = 100 * 1024 * 1024; // 100MB
 
 interface FileUploadProps {
-  onSelect: (file: File) => void;
+  onSelect: (files: File[]) => void;
+}
+
+function formatSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 export default function FileUpload({ onSelect }: FileUploadProps) {
   const [dragOver, setDragOver] = useState(false);
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [error, setError] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const handleFile = useCallback(
-    (file: File) => {
+  const handleFiles = useCallback(
+    (files: File[]) => {
       setError("");
-      if (file.size > MAX_FILE_SIZE) {
-        setError("File exceeds 100MB limit.");
+      const total = files.reduce((sum, f) => sum + f.size, 0);
+      if (total > MAX_TOTAL_SIZE) {
+        setError("Total file size exceeds 100MB limit.");
         return;
       }
-      setSelectedFile(file);
-      onSelect(file);
+      setSelectedFiles(files);
+      onSelect(files);
     },
     [onSelect],
   );
@@ -28,19 +35,13 @@ export default function FileUpload({ onSelect }: FileUploadProps) {
   function handleDrop(e: React.DragEvent) {
     e.preventDefault();
     setDragOver(false);
-    const file = e.dataTransfer.files[0];
-    if (file) handleFile(file);
+    const files = Array.from(e.dataTransfer.files);
+    if (files.length > 0) handleFiles(files);
   }
 
   function handleChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (file) handleFile(file);
-  }
-
-  function formatSize(bytes: number): string {
-    if (bytes < 1024) return `${bytes} B`;
-    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+    const files = Array.from(e.target.files ?? []);
+    if (files.length > 0) handleFiles(files);
   }
 
   return (
@@ -58,29 +59,81 @@ export default function FileUpload({ onSelect }: FileUploadProps) {
         onKeyDown={(e) => {
           if (e.key === "Enter" || e.key === " ") inputRef.current?.click();
         }}
-        className={`cursor-pointer rounded-md border-2 border-dashed p-8 text-center transition-colors ${
+        className={`cursor-pointer rounded-xl border-2 border-dashed p-10 text-center transition-all duration-150 ${
           dragOver
-            ? "border-blue-400 bg-blue-50 dark:bg-blue-950"
-            : "border-gray-300 dark:border-gray-600 hover:border-gray-400 dark:hover:border-gray-500"
+            ? "border-blue-400 bg-blue-50 dark:bg-blue-950 scale-[1.01]"
+            : "border-gray-300 dark:border-gray-600 hover:border-blue-400 dark:hover:border-blue-500"
         }`}
       >
-        <input ref={inputRef} type="file" onChange={handleChange} className="hidden" />
-        {selectedFile ? (
+        <input
+          ref={inputRef}
+          type="file"
+          multiple
+          onChange={handleChange}
+          className="hidden"
+        />
+        {selectedFiles.length === 1 ? (
           <div className="space-y-1">
             <p className="text-sm font-medium text-gray-900 dark:text-gray-100">
-              {selectedFile.name}
+              {selectedFiles[0].name}
             </p>
             <p className="text-xs text-gray-500 dark:text-gray-400">
-              {formatSize(selectedFile.size)}
+              {formatSize(selectedFiles[0].size)}
             </p>
-            <p className="text-xs text-blue-600 dark:text-blue-400">Click or drop to change file</p>
+            <p className="text-xs text-blue-600 dark:text-blue-400">
+              Click or drop to change file
+            </p>
+          </div>
+        ) : selectedFiles.length > 1 ? (
+          <div className="space-y-2">
+            <table className="mx-auto text-sm">
+              <tbody>
+                {selectedFiles.map((f, i) => (
+                  <tr key={i}>
+                    <td className="pr-4 text-left font-medium text-gray-900 dark:text-gray-100">
+                      {f.name}
+                    </td>
+                    <td className="text-right text-gray-500 dark:text-gray-400">
+                      {formatSize(f.size)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot>
+                <tr className="border-t border-gray-200 dark:border-gray-700">
+                  <td className="pr-4 pt-1 text-left text-xs text-gray-500 dark:text-gray-400">
+                    {selectedFiles.length} files
+                  </td>
+                  <td className="pt-1 text-right text-xs text-gray-500 dark:text-gray-400">
+                    {formatSize(selectedFiles.reduce((s, f) => s + f.size, 0))}
+                  </td>
+                </tr>
+              </tfoot>
+            </table>
+            <p className="text-xs text-blue-600 dark:text-blue-400">
+              Click or drop to change files
+            </p>
           </div>
         ) : (
-          <div className="space-y-1">
+          <div className="space-y-2">
+            <svg
+              className="mx-auto h-10 w-10 text-gray-400 dark:text-gray-500"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+              strokeWidth={1.5}
+              aria-hidden="true"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5"
+              />
+            </svg>
             <p className="text-sm text-gray-600 dark:text-gray-400">
-              Drop a file here, or click to select
+              Drop files here, or click to select
             </p>
-            <p className="text-xs text-gray-400 dark:text-gray-500">Max 100MB</p>
+            <p className="text-xs text-gray-400 dark:text-gray-500">Max 100MB total</p>
           </div>
         )}
       </div>

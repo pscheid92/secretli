@@ -13,7 +13,7 @@ export default function SecretResult({ url, expiresAt, burnAfterRead }: SecretRe
   }
 
   return (
-    <div className="space-y-4 rounded-md border border-green-200 bg-green-50 dark:border-green-800 dark:bg-green-950 p-4">
+    <div className="rounded-xl border-l-4 border-green-500 bg-white dark:bg-gray-900 p-5 shadow-sm space-y-4">
       <h2 className="text-lg font-semibold text-green-800 dark:text-green-300">Secret created!</h2>
 
       <div>
@@ -29,12 +29,12 @@ export default function SecretResult({ url, expiresAt, burnAfterRead }: SecretRe
             type="text"
             readOnly
             value={url}
-            className="flex-1 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 dark:text-white px-3 py-2 text-sm shadow-sm"
+            className="flex-1 rounded-lg border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-800 dark:text-white px-3.5 py-2.5 font-mono text-xs focus:bg-white dark:focus:bg-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-colors duration-150"
           />
           <button
             type="button"
             onClick={copyToClipboard}
-            className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+            className="rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white shadow-md hover:bg-blue-700 hover:shadow-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-all duration-150"
           >
             Copy
           </button>

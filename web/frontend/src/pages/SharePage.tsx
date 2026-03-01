@@ -81,7 +81,7 @@ export default function SharePage() {
           <button
             type="button"
             onClick={() => setResult(null)}
-            className="text-sm text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300"
+            className="text-sm font-medium text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300 transition-colors duration-150"
           >
             Share another secret
           </button>

@@ -5,6 +5,7 @@ import Layout from "./components/Layout";
 import { AuthProvider } from "./context/AuthContext";
 import FilePage from "./pages/FilePage";
 import HistoryPage from "./pages/HistoryPage";
+import LandingPage from "./pages/LandingPage";
 import LoginPage from "./pages/LoginPage";
 import NotFoundPage from "./pages/NotFoundPage";
 import RegisterPage from "./pages/RegisterPage";
@@ -21,7 +22,8 @@ export default function App() {
         <BrowserRouter>
           <Routes>
             <Route element={<Layout />}>
-              <Route index element={<SharePage />} />
+              <Route index element={<LandingPage />} />
+              <Route path="share" element={<SharePage />} />
               <Route path="s" element={<RetrievePage />} />
               <Route path="file" element={<FilePage />} />
               <Route path="login" element={<LoginPage />} />

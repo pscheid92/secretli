@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Link, Outlet } from "react-router";
+import { Link, Outlet, useLocation } from "react-router";
 import { useAuth } from "../context/AuthContext";
 import { useTheme } from "../hooks/useTheme";
 
@@ -59,50 +59,64 @@ function ThemeIcon({ theme }: { theme: string }) {
   );
 }
 
+function navLinkClass(currentPath: string, linkPath: string): string {
+  const isActive = currentPath === linkPath;
+  return [
+    "pb-0.5 transition-colors duration-150",
+    isActive
+      ? "text-blue-600 dark:text-blue-400 border-b-2 border-blue-600 dark:border-blue-400"
+      : "hover:text-blue-600 dark:hover:text-blue-400",
+  ].join(" ");
+}
+
 export default function Layout() {
   const { user, logout } = useAuth();
   const { theme, cycle } = useTheme();
   const [menuOpen, setMenuOpen] = useState(false);
+  const location = useLocation();
 
   return (
     <div className="min-h-screen flex flex-col bg-gray-50 dark:bg-gray-950 text-gray-900 dark:text-gray-100">
-      <header className="border-b border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900">
+      <header className="bg-white/80 dark:bg-gray-900/80 backdrop-blur-md sticky top-0 z-50 border-b border-gray-200 dark:border-gray-800">
         <nav className="mx-auto flex max-w-4xl items-center justify-between px-6 py-4">
-          <Link to="/" className="text-xl font-bold tracking-tight">
+          <Link
+            to="/"
+            className="text-xl font-bold tracking-tight bg-gradient-to-r from-blue-600 to-violet-600 bg-clip-text text-transparent"
+          >
             Secretli
           </Link>
 
           {/* Desktop nav */}
           <div className="hidden md:flex items-center gap-6 text-sm font-medium">
-            <Link to="/" className="hover:text-blue-600 dark:hover:text-blue-400">
-              Share
+            <Link to="/share" className={navLinkClass(location.pathname, "/share")}>
+              Text
             </Link>
-            <Link to="/file" className="hover:text-blue-600 dark:hover:text-blue-400">
+            <Link to="/file" className={navLinkClass(location.pathname, "/file")}>
               File
             </Link>
             {user ? (
               <>
-                <Link to="/history" className="hover:text-blue-600 dark:hover:text-blue-400">
+                <Link to="/history" className={navLinkClass(location.pathname, "/history")}>
                   History
                 </Link>
                 <span className="text-gray-400">{user.display_name || user.email}</span>
                 <button
                   type="button"
                   onClick={() => logout()}
-                  className="text-gray-500 hover:text-red-600 dark:text-gray-400 dark:hover:text-red-400"
+                  className="text-gray-500 hover:text-red-600 dark:text-gray-400 dark:hover:text-red-400 transition-colors duration-150"
                 >
                   Logout
                 </button>
               </>
             ) : (
-              <Link to="/login" className="hover:text-blue-600 dark:hover:text-blue-400">
+              <Link to="/login" className={navLinkClass(location.pathname, "/login")}>
                 Login
               </Link>
             )}
             <button
               type="button"
               onClick={cycle}
-              className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+              className="rounded-lg p-1.5 text-gray-500 hover:bg-gray-100 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-200 transition-colors duration-150"
               title={`Theme: ${theme}`}
             >
               <ThemeIcon theme={theme} />
@@ -114,7 +128,7 @@ export default function Layout() {
             <button
               type="button"
               onClick={cycle}
-              className="text-gray-500 dark:text-gray-400"
+              className="rounded-lg p-1.5 text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-800 transition-colors duration-150"
               title={`Theme: ${theme}`}
             >
               <ThemeIcon theme={theme} />
@@ -122,7 +136,7 @@ export default function Layout() {
             <button
               type="button"
               onClick={() => setMenuOpen(!menuOpen)}
-              className="text-gray-500 dark:text-gray-400"
+              className="rounded-lg p-1.5 text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-800 transition-colors duration-150"
             >
               <svg
                 className="h-6 w-6"
@@ -144,18 +158,18 @@ export default function Layout() {
 
         {/* Mobile menu dropdown */}
         {menuOpen && (
-          <div className="md:hidden border-t border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 px-6 py-3 space-y-2 text-sm font-medium">
+          <div className="md:hidden border-t border-gray-200 dark:border-gray-800 bg-white/80 dark:bg-gray-900/80 backdrop-blur-md px-6 py-3 space-y-1 text-sm font-medium">
             <Link
-              to="/"
+              to="/share"
               onClick={() => setMenuOpen(false)}
-              className="block py-1 hover:text-blue-600 dark:hover:text-blue-400"
+              className="block rounded-lg px-2 py-2 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors duration-150"
             >
-              Share
+              Text
             </Link>
             <Link
               to="/file"
               onClick={() => setMenuOpen(false)}
-              className="block py-1 hover:text-blue-600 dark:hover:text-blue-400"
+              className="block rounded-lg px-2 py-2 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors duration-150"
             >
               File
             </Link>
@@ -164,18 +178,20 @@ export default function Layout() {
                 <Link
                   to="/history"
                   onClick={() => setMenuOpen(false)}
-                  className="block py-1 hover:text-blue-600 dark:hover:text-blue-400"
+                  className="block rounded-lg px-2 py-2 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors duration-150"
                 >
                   History
                 </Link>
-                <span className="block py-1 text-gray-400">{user.display_name || user.email}</span>
+                <span className="block px-2 py-2 text-gray-400">
+                  {user.display_name || user.email}
+                </span>
                 <button
                   type="button"
                   onClick={() => {
                     logout();
                     setMenuOpen(false);
                   }}
-                  className="block py-1 text-gray-500 hover:text-red-600 dark:text-gray-400 dark:hover:text-red-400"
+                  className="block w-full text-left rounded-lg px-2 py-2 text-gray-500 hover:bg-gray-100 hover:text-red-600 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-red-400 transition-colors duration-150"
                 >
                   Logout
                 </button>
@@ -184,7 +200,7 @@ export default function Layout() {
               <Link
                 to="/login"
                 onClick={() => setMenuOpen(false)}
-                className="block py-1 hover:text-blue-600 dark:hover:text-blue-400"
+                className="block rounded-lg px-2 py-2 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors duration-150"
               >
                 Login
               </Link>
@@ -197,7 +213,7 @@ export default function Layout() {
         <Outlet />
       </main>
 
-      <footer className="border-t border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 py-4 text-center text-xs text-gray-400">
+      <footer className="py-6 text-center text-xs text-gray-400">
         Secretli &mdash; Zero-knowledge secret sharing
       </footer>
     </div>

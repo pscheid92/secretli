@@ -41,6 +41,7 @@ func registerRoutes(
 	sh := handler.NewSecretHandler(secretRepo, fileStore, userSecretRepo)
 	mux.HandleFunc("POST /api/v1/secrets", createLimit(sh.CreateSecret))
 	mux.HandleFunc("POST /api/v1/secrets/{publicID}", retrieveLimit(sh.RetrieveSecret))
+	mux.HandleFunc("GET /api/v1/secrets/{publicID}/meta", retrieveLimit(sh.SecretMetadata))
 	mux.HandleFunc("DELETE /api/v1/secrets/{publicID}", deleteLimit(sh.DeleteSecret))
 
 	// File secrets

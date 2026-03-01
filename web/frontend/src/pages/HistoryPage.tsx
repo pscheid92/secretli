@@ -21,20 +21,20 @@ function StatusBadge({ secret }: { secret: SecretSummary }) {
 
   if (expires < now) {
     return (
-      <span className="rounded bg-gray-100 dark:bg-gray-700 px-2 py-0.5 text-xs text-gray-500 dark:text-gray-400">
+      <span className="rounded-full bg-gray-100 dark:bg-gray-700 px-2.5 py-0.5 text-xs font-medium text-gray-500 dark:text-gray-400">
         Expired
       </span>
     );
   }
   if (secret.retrieved_at) {
     return (
-      <span className="rounded bg-green-100 dark:bg-green-900 px-2 py-0.5 text-xs text-green-700 dark:text-green-400">
+      <span className="rounded-full bg-green-100 dark:bg-green-900 px-2.5 py-0.5 text-xs font-medium text-green-700 dark:text-green-400">
         Retrieved
       </span>
     );
   }
   return (
-    <span className="rounded bg-blue-100 dark:bg-blue-900 px-2 py-0.5 text-xs text-blue-700 dark:text-blue-400">
+    <span className="rounded-full bg-blue-100 dark:bg-blue-900 px-2.5 py-0.5 text-xs font-medium text-blue-700 dark:text-blue-400">
       Pending
     </span>
   );
@@ -79,33 +79,33 @@ export default function HistoryPage() {
       ) : (
         <>
           {/* Desktop table */}
-          <div className="hidden md:block overflow-x-auto">
+          <div className="hidden md:block rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 shadow-sm overflow-hidden">
             <table className="w-full text-left text-sm">
-              <thead className="border-b border-gray-200 dark:border-gray-700 text-xs uppercase text-gray-500 dark:text-gray-400">
+              <thead className="bg-gray-50 dark:bg-gray-800/50 text-xs uppercase text-gray-500 dark:text-gray-400">
                 <tr>
-                  <th className="px-3 py-2">Label</th>
-                  <th className="px-3 py-2">Type</th>
-                  <th className="px-3 py-2">Created</th>
-                  <th className="px-3 py-2">Expires</th>
-                  <th className="px-3 py-2">Status</th>
+                  <th className="px-4 py-3">Label</th>
+                  <th className="px-4 py-3">Type</th>
+                  <th className="px-4 py-3">Created</th>
+                  <th className="px-4 py-3">Expires</th>
+                  <th className="px-4 py-3">Status</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
                 {secrets.map((s) => (
-                  <tr key={s.public_id} className="hover:bg-gray-50 dark:hover:bg-gray-800/50">
-                    <td className="px-3 py-2 font-medium">
+                  <tr key={s.public_id} className="hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors">
+                    <td className="px-4 py-3 font-medium">
                       {s.label || (
                         <span className="text-gray-300 dark:text-gray-600">untitled</span>
                       )}
                     </td>
-                    <td className="px-3 py-2 capitalize">{s.secret_type}</td>
-                    <td className="px-3 py-2 text-gray-500 dark:text-gray-400">
+                    <td className="px-4 py-3 capitalize">{s.secret_type}</td>
+                    <td className="px-4 py-3 text-gray-500 dark:text-gray-400">
                       {formatDate(s.created_at)}
                     </td>
-                    <td className="px-3 py-2 text-gray-500 dark:text-gray-400">
+                    <td className="px-4 py-3 text-gray-500 dark:text-gray-400">
                       {formatDate(s.expires_at)}
                     </td>
-                    <td className="px-3 py-2">
+                    <td className="px-4 py-3">
                       <StatusBadge secret={s} />
                     </td>
                   </tr>
@@ -119,7 +119,7 @@ export default function HistoryPage() {
             {secrets.map((s) => (
               <div
                 key={s.public_id}
-                className="rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-3 space-y-1"
+                className="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-4 shadow-sm space-y-1"
               >
                 <div className="flex items-center justify-between">
                   <span className="font-medium text-sm">
@@ -141,7 +141,7 @@ export default function HistoryPage() {
                 type="button"
                 disabled={page <= 1}
                 onClick={() => setPage((p) => p - 1)}
-                className="rounded border border-gray-300 dark:border-gray-600 px-3 py-1 disabled:opacity-50 dark:text-gray-300"
+                className="rounded-lg border border-gray-300 dark:border-gray-600 px-3 py-1.5 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50 dark:text-gray-300 transition-colors duration-150"
               >
                 Previous
               </button>
@@ -152,7 +152,7 @@ export default function HistoryPage() {
                 type="button"
                 disabled={page >= totalPages}
                 onClick={() => setPage((p) => p + 1)}
-                className="rounded border border-gray-300 dark:border-gray-600 px-3 py-1 disabled:opacity-50 dark:text-gray-300"
+                className="rounded-lg border border-gray-300 dark:border-gray-600 px-3 py-1.5 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50 dark:text-gray-300 transition-colors duration-150"
               >
                 Next
               </button>

@@ -159,6 +159,52 @@ func (h *SecretHandler) RetrieveSecret(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (h *SecretHandler) SecretMetadata(w http.ResponseWriter, r *http.Request) {
+	publicID := r.PathValue("publicID")
+	if publicID == "" {
+		writeError(w, http.StatusBadRequest, "missing public_id")
+		return
+	}
+
+	token := r.Header.Get("X-Retrieval-Token")
+	if token == "" {
+		writeError(w, http.StatusBadRequest, "missing X-Retrieval-Token header")
+		return
+	}
+
+	secret, err := h.repo.GetByPublicID(r.Context(), publicID)
+	if errors.Is(err, store.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "secret not found")
+		return
+	}
+	if err != nil {
+		slog.Error("failed to get secret", "error", err)
+		writeError(w, http.StatusInternalServerError, "internal server error")
+		return
+	}
+
+	if !crypto.VerifyToken(token, secret.RetrievalTokenHash) {
+		writeError(w, http.StatusForbidden, "invalid retrieval token")
+		return
+	}
+
+	type metadataResponse struct {
+		SecretType        string `json:"secret_type"`
+		BurnAfterRead     bool   `json:"burn_after_read"`
+		PasswordProtected bool   `json:"password_protected"`
+		ExpiresAt         string `json:"expires_at"`
+		CreatedAt         string `json:"created_at"`
+	}
+
+	writeJSON(w, http.StatusOK, metadataResponse{
+		SecretType:        secret.SecretType,
+		BurnAfterRead:     secret.BurnAfterRead,
+		PasswordProtected: secret.PasswordProtected,
+		ExpiresAt:         secret.ExpiresAt.UTC().Format(time.RFC3339),
+		CreatedAt:         secret.CreatedAt.UTC().Format(time.RFC3339),
+	})
+}
+
 func (h *SecretHandler) DeleteSecret(w http.ResponseWriter, r *http.Request) {
 	publicID := r.PathValue("publicID")
 	if publicID == "" {
