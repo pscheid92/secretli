@@ -47,6 +47,10 @@ export default function SecretForm({ onSubmit, loading }: SecretFormProps) {
           {...register("text", { required: "Secret text is required" })}
           placeholder="Type or paste your secret here..."
           rows={7}
+          data-gramm="false"
+          data-gramm_editor="false"
+          data-enable-grammarly="false"
+          data-1p-ignore
           className="block w-full h-[168px] rounded-lg border border-zinc-200 dark:border-zinc-500 bg-white dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 px-4 py-3 text-sm placeholder:text-zinc-500 dark:placeholder:text-zinc-500 focus:outline-none focus:border-amber-400 dark:focus:border-amber-400 focus:ring-1 focus:ring-amber-400/20 transition-colors duration-150 resize-none"
         />
         {errors.text && (
@@ -98,6 +102,11 @@ export default function SecretForm({ onSubmit, loading }: SecretFormProps) {
               })}
               placeholder="Enter a password..."
               autoFocus
+              autoComplete="off"
+              data-gramm="false"
+              data-gramm_editor="false"
+              data-enable-grammarly="false"
+              data-1p-ignore
               className="w-full rounded-md border border-zinc-200 dark:border-zinc-500 bg-zinc-50 dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 px-3 py-2.5 text-sm placeholder:text-zinc-500 dark:placeholder:text-zinc-500 focus:outline-none focus:border-amber-400 dark:focus:border-amber-400 focus:ring-1 focus:ring-amber-400/20 transition-colors duration-150"
             />
             {errors.password && (
