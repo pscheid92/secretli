@@ -1,0 +1,20 @@
+# Go
+bin/
+tmp/
+
+# Node
+node_modules/
+web/frontend/dist/
+
+# Environment
+.env
+.env.local
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
