@@ -25,24 +25,18 @@ func Run(migrationsFS fs.FS) error {
 		return fmt.Errorf("loading config: %w", err)
 	}
 
-	// Handle migrate subcommand
-	if len(os.Args) > 1 && os.Args[1] == "migrate" {
-		if cfg.DatabaseURL == "" {
-			return fmt.Errorf("DATABASE_URL is required for migrations")
-		}
-		slog.Info("running database migrations")
-		if err := store.RunMigrations(context.Background(), cfg.DatabaseURL, migrationsFS); err != nil {
-			return fmt.Errorf("migrations failed: %w", err)
-		}
-		slog.Info("migrations complete")
-		return nil
-	}
-
 	// Connect to database
 	ctx := context.Background()
 	if cfg.DatabaseURL == "" {
 		return fmt.Errorf("DATABASE_URL is required")
 	}
+
+	// Run migrations automatically on startup (advisory-locked for safety)
+	slog.Info("running database migrations")
+	if err := store.RunMigrations(ctx, cfg.DatabaseURL, migrationsFS); err != nil {
+		return fmt.Errorf("migrations failed: %w", err)
+	}
+	slog.Info("migrations complete")
 
 	pool, err := store.NewPool(ctx, cfg.DatabaseURL)
 	if err != nil {

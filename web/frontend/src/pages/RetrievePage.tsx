@@ -12,6 +12,7 @@ import {
 import { KeySet } from "../lib/encryption";
 
 type State =
+  | { stage: "prompt" }
   | { stage: "loading" }
   | {
       stage: "confirm";
@@ -34,7 +35,9 @@ type State =
   | { stage: "error"; message: string };
 
 export default function RetrievePage() {
-  const [state, setState] = useState<State>({ stage: "loading" });
+  const hash = window.location.hash.slice(1);
+  const [state, setState] = useState<State>(hash ? { stage: "loading" } : { stage: "prompt" });
+  const [linkInput, setLinkInput] = useState("");
   const [password, setPassword] = useState("");
   const [passwordError, setPasswordError] = useState("");
   const [passwordLoading, setPasswordLoading] = useState(false);
@@ -83,7 +86,7 @@ export default function RetrievePage() {
   const fetchMetadata = useCallback(async () => {
     const hash = window.location.hash.slice(1);
     if (!hash) {
-      setState({ stage: "error", message: "No secret key found in the URL." });
+      setState({ stage: "prompt" });
       return;
     }
 
@@ -235,6 +238,62 @@ export default function RetrievePage() {
 
   function formatTimestamp(iso: string): string {
     return new Date(iso).toLocaleString();
+  }
+
+  if (state.stage === "prompt") {
+    function handleLinkSubmit(e: React.FormEvent) {
+      e.preventDefault();
+      try {
+        const url = new URL(linkInput.trim());
+        const fragment = url.hash.slice(1);
+        if (!fragment) {
+          toast.error("That link doesn't contain a secret key.");
+          return;
+        }
+        window.location.href = `${window.location.pathname}#${fragment}`;
+        window.location.reload();
+      } catch {
+        toast.error("Please enter a valid Secretli link.");
+      }
+    }
+
+    return (
+      <div className="space-y-6">
+        <div>
+          <h1 className="text-2xl font-bold dark:text-white">Retrieve a Secret</h1>
+          <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+            Paste the secret link you received to decrypt and view its contents.
+          </p>
+        </div>
+        <div className="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-5 shadow-sm">
+          <form onSubmit={handleLinkSubmit} className="space-y-4">
+            <div>
+              <label
+                htmlFor="secret-link"
+                className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1"
+              >
+                Secret link
+              </label>
+              <input
+                id="secret-link"
+                type="text"
+                value={linkInput}
+                onChange={(e) => setLinkInput(e.target.value)}
+                placeholder="https://secretli.example/s#..."
+                autoFocus
+                className="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-800 dark:text-white px-3.5 py-2.5 text-sm font-mono placeholder:text-gray-400 focus:bg-white dark:focus:bg-gray-800 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-colors duration-150"
+              />
+            </div>
+            <button
+              type="submit"
+              className="flex w-full items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2.5 font-semibold text-white shadow-md hover:bg-blue-700 hover:shadow-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-all duration-150"
+            >
+              Retrieve Secret
+            </button>
+          </form>
+        </div>
+      </div>
+    );
   }
 
   if (state.stage === "loading") {
