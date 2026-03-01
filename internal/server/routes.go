@@ -1,12 +1,28 @@
 package server
 
 import (
+	"encoding/json"
+	"net/http"
+	"time"
+
 	"github.com/go-chi/chi/v5"
-	"github.com/pscheid92/secretli/internal/config"
+	"github.com/go-chi/httprate"
 	"github.com/pscheid92/secretli/internal/handler"
 	"github.com/pscheid92/secretli/internal/storage"
 	"github.com/pscheid92/secretli/internal/store"
 )
+
+func rateLimitHandler(limit int, window time.Duration) func(http.Handler) http.Handler {
+	return httprate.Limit(limit, window,
+		httprate.WithKeyFuncs(httprate.KeyByRealIP),
+		httprate.WithLimitHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Retry-After", "60")
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusTooManyRequests)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "rate limit exceeded"})
+		})),
+	)
+}
 
 func registerRoutes(
 	r chi.Router,
@@ -14,60 +30,39 @@ func registerRoutes(
 	secretRepo store.SecretRepo,
 	fileStore storage.FileStore,
 	maxFileSize int64,
-	userRepo store.UserRepo,
-	sessionRepo store.SessionRepo,
-	userSecretRepo store.UserSecretRepo,
-	cfg config.Config,
-	rl *IPRateLimiter,
 ) {
 	// Health (not rate limited)
 	r.Get("/api/v1/health/live", handler.Liveness)
 	r.Method("GET", "/api/v1/health/ready", handler.ReadinessWithDB(pinger))
 
-	// Auth
-	ah := handler.NewAuthHandler(userRepo, sessionRepo, cfg.SessionMaxAge, cfg.CookieDomain, cfg.CookieSecure)
-	r.Route("/api/v1/auth", func(r chi.Router) {
-		r.Group(func(r chi.Router) {
-			r.Use(RateLimit(rl, 5)) // 5/min for auth creation
-			r.Post("/register", ah.Register)
-			r.Post("/login", ah.Login)
-		})
-		r.Post("/logout", ah.Logout)
-		r.Get("/me", ah.Me)
-	})
-
 	// Secrets
-	sh := handler.NewSecretHandler(secretRepo, fileStore, userSecretRepo)
+	sh := handler.NewSecretHandler(secretRepo, fileStore)
 	r.Route("/api/v1/secrets", func(r chi.Router) {
 		// Create (10/min)
 		r.Group(func(r chi.Router) {
-			r.Use(RateLimit(rl, 10))
+			r.Use(rateLimitHandler(10, time.Minute))
 			r.Post("/", sh.CreateSecret)
 			if fileStore != nil {
-				fh := handler.NewFileHandler(secretRepo, fileStore, maxFileSize, userSecretRepo)
+				fh := handler.NewFileHandler(secretRepo, fileStore, maxFileSize)
 				r.Post("/file", fh.UploadFile)
 			}
 		})
 
 		// Retrieve (30/min)
 		r.Group(func(r chi.Router) {
-			r.Use(RateLimit(rl, 30))
+			r.Use(rateLimitHandler(30, time.Minute))
 			r.Post("/{publicID}", sh.RetrieveSecret)
 			r.Get("/{publicID}/meta", sh.SecretMetadata)
 			if fileStore != nil {
-				fh := handler.NewFileHandler(secretRepo, fileStore, maxFileSize, userSecretRepo)
+				fh := handler.NewFileHandler(secretRepo, fileStore, maxFileSize)
 				r.Post("/{publicID}/file", fh.DownloadFile)
 			}
 		})
 
 		// Delete (30/min)
 		r.Group(func(r chi.Router) {
-			r.Use(RateLimit(rl, 30))
+			r.Use(rateLimitHandler(30, time.Minute))
 			r.Delete("/{publicID}", sh.DeleteSecret)
 		})
 	})
-
-	// User
-	uh := handler.NewUserHandler(userSecretRepo)
-	r.Get("/api/v1/user/secrets", uh.ListSecrets)
 }

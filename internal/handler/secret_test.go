@@ -94,28 +94,6 @@ func (m *mockSecretRepo) DeleteExpired(_ context.Context) (int64, []string, erro
 	return count, keys, nil
 }
 
-// mockUserSecretRepoForSecret tracks LinkSecret calls
-type mockUserSecretRepoForSecret struct {
-	linked []struct {
-		userID   int64
-		secretID int64
-		label    string
-	}
-}
-
-func (m *mockUserSecretRepoForSecret) LinkSecret(_ context.Context, userID, secretID int64, label string) error {
-	m.linked = append(m.linked, struct {
-		userID   int64
-		secretID int64
-		label    string
-	}{userID, secretID, label})
-	return nil
-}
-
-func (m *mockUserSecretRepoForSecret) ListByUser(_ context.Context, _ int64, _, _ int) ([]store.SecretSummary, int64, error) {
-	return nil, 0, nil
-}
-
 // Helper to create a valid request body
 func validCreateBody() map[string]any {
 	return map[string]any{
@@ -132,7 +110,7 @@ func validCreateBody() map[string]any {
 
 func TestCreateSecret_Success(t *testing.T) {
 	repo := newMockRepo()
-	h := NewSecretHandler(repo, nil, nil)
+	h := NewSecretHandler(repo, nil)
 
 	body, _ := json.Marshal(validCreateBody())
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/secrets", bytes.NewReader(body))
@@ -153,7 +131,7 @@ func TestCreateSecret_Success(t *testing.T) {
 
 func TestCreateSecret_MissingFields(t *testing.T) {
 	repo := newMockRepo()
-	h := NewSecretHandler(repo, nil, nil)
+	h := NewSecretHandler(repo, nil)
 
 	body, _ := json.Marshal(map[string]string{"public_id": "test"})
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/secrets", bytes.NewReader(body))
@@ -168,7 +146,7 @@ func TestCreateSecret_MissingFields(t *testing.T) {
 
 func TestCreateSecret_InvalidExpiration(t *testing.T) {
 	repo := newMockRepo()
-	h := NewSecretHandler(repo, nil, nil)
+	h := NewSecretHandler(repo, nil)
 
 	b := validCreateBody()
 	b["expiration"] = "99d"
@@ -185,7 +163,7 @@ func TestCreateSecret_InvalidExpiration(t *testing.T) {
 
 func TestCreateSecret_DuplicatePublicID(t *testing.T) {
 	repo := newMockRepo()
-	h := NewSecretHandler(repo, nil, nil)
+	h := NewSecretHandler(repo, nil)
 
 	body, _ := json.Marshal(validCreateBody())
 
@@ -222,7 +200,7 @@ func seedSecret(repo *mockSecretRepo, publicID, retrievalToken, deletionToken st
 
 func TestRetrieveSecret_Success(t *testing.T) {
 	repo := newMockRepo()
-	h := NewSecretHandler(repo, nil, nil)
+	h := NewSecretHandler(repo, nil)
 	seedSecret(repo, "pub1", "retrieval-tok", "deletion-tok", false)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/secrets/pub1", nil)
@@ -248,7 +226,7 @@ func TestRetrieveSecret_Success(t *testing.T) {
 
 func TestRetrieveSecret_InvalidToken(t *testing.T) {
 	repo := newMockRepo()
-	h := NewSecretHandler(repo, nil, nil)
+	h := NewSecretHandler(repo, nil)
 	seedSecret(repo, "pub1", "retrieval-tok", "deletion-tok", false)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/secrets/pub1", nil)
@@ -265,7 +243,7 @@ func TestRetrieveSecret_InvalidToken(t *testing.T) {
 
 func TestRetrieveSecret_NotFound(t *testing.T) {
 	repo := newMockRepo()
-	h := NewSecretHandler(repo, nil, nil)
+	h := NewSecretHandler(repo, nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/secrets/nonexistent", nil)
 	req = withChiURLParam(req, "publicID", "nonexistent")
@@ -281,7 +259,7 @@ func TestRetrieveSecret_NotFound(t *testing.T) {
 
 func TestRetrieveSecret_MissingToken(t *testing.T) {
 	repo := newMockRepo()
-	h := NewSecretHandler(repo, nil, nil)
+	h := NewSecretHandler(repo, nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/secrets/pub1", nil)
 	req = withChiURLParam(req, "publicID", "pub1")
@@ -296,7 +274,7 @@ func TestRetrieveSecret_MissingToken(t *testing.T) {
 
 func TestRetrieveSecret_BurnAfterRead(t *testing.T) {
 	repo := newMockRepo()
-	h := NewSecretHandler(repo, nil, nil)
+	h := NewSecretHandler(repo, nil)
 	seedSecret(repo, "burn1", "retrieval-tok", "deletion-tok", true)
 
 	// First retrieval succeeds
@@ -324,7 +302,7 @@ func TestRetrieveSecret_BurnAfterRead(t *testing.T) {
 
 func TestDeleteSecret_Success(t *testing.T) {
 	repo := newMockRepo()
-	h := NewSecretHandler(repo, nil, nil)
+	h := NewSecretHandler(repo, nil)
 	seedSecret(repo, "del1", "retrieval-tok", "deletion-tok", false)
 
 	req := httptest.NewRequest(http.MethodDelete, "/api/v1/secrets/del1", nil)
@@ -342,7 +320,7 @@ func TestDeleteSecret_Success(t *testing.T) {
 
 func TestDeleteSecret_InvalidDeletionToken(t *testing.T) {
 	repo := newMockRepo()
-	h := NewSecretHandler(repo, nil, nil)
+	h := NewSecretHandler(repo, nil)
 	seedSecret(repo, "del1", "retrieval-tok", "deletion-tok", false)
 
 	req := httptest.NewRequest(http.MethodDelete, "/api/v1/secrets/del1", nil)
@@ -360,7 +338,7 @@ func TestDeleteSecret_InvalidDeletionToken(t *testing.T) {
 
 func TestDeleteSecret_MissingDeletionToken(t *testing.T) {
 	repo := newMockRepo()
-	h := NewSecretHandler(repo, nil, nil)
+	h := NewSecretHandler(repo, nil)
 
 	req := httptest.NewRequest(http.MethodDelete, "/api/v1/secrets/del1", nil)
 	req = withChiURLParam(req, "publicID", "del1")
@@ -376,7 +354,7 @@ func TestDeleteSecret_MissingDeletionToken(t *testing.T) {
 
 func TestDeleteSecret_NotFound(t *testing.T) {
 	repo := newMockRepo()
-	h := NewSecretHandler(repo, nil, nil)
+	h := NewSecretHandler(repo, nil)
 
 	req := httptest.NewRequest(http.MethodDelete, "/api/v1/secrets/nonexistent", nil)
 	req = withChiURLParam(req, "publicID", "nonexistent")
@@ -425,34 +403,9 @@ func TestParseExpiration(t *testing.T) {
 	}
 }
 
-func TestCreateSecret_LinksToAuthenticatedUser(t *testing.T) {
-	repo := newMockRepo()
-	usr := &mockUserSecretRepoForSecret{}
-	h := NewSecretHandler(repo, nil, usr)
-
-	body, _ := json.Marshal(validCreateBody())
-	user := &model.User{ID: 42, Email: "test@example.com"}
-	ctx := ContextWithUser(context.Background(), user)
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/secrets", bytes.NewReader(body)).WithContext(ctx)
-	rec := httptest.NewRecorder()
-
-	h.CreateSecret(rec, req)
-
-	if rec.Code != http.StatusCreated {
-		t.Fatalf("status = %d, want %d. body: %s", rec.Code, http.StatusCreated, rec.Body.String())
-	}
-
-	if len(usr.linked) != 1 {
-		t.Fatalf("expected 1 link, got %d", len(usr.linked))
-	}
-	if usr.linked[0].userID != 42 {
-		t.Errorf("linked userID = %d, want 42", usr.linked[0].userID)
-	}
-}
-
 func TestCreateSecret_InvalidJSON(t *testing.T) {
 	repo := newMockRepo()
-	h := NewSecretHandler(repo, nil, nil)
+	h := NewSecretHandler(repo, nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/secrets", bytes.NewReader([]byte("{invalid json")))
 	rec := httptest.NewRecorder()
@@ -466,7 +419,7 @@ func TestCreateSecret_InvalidJSON(t *testing.T) {
 
 func TestCreateSecret_EncryptedDataTooLarge(t *testing.T) {
 	repo := newMockRepo()
-	h := NewSecretHandler(repo, nil, nil)
+	h := NewSecretHandler(repo, nil)
 
 	b := validCreateBody()
 	// Create encrypted_data that exceeds 1MB
@@ -489,7 +442,7 @@ func TestCreateSecret_EncryptedDataTooLarge(t *testing.T) {
 func TestCreateSecret_RepoError(t *testing.T) {
 	repo := newMockRepo()
 	repo.createErr = errors.New("database connection lost")
-	h := NewSecretHandler(repo, nil, nil)
+	h := NewSecretHandler(repo, nil)
 
 	body, _ := json.Marshal(validCreateBody())
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/secrets", bytes.NewReader(body))
@@ -504,7 +457,7 @@ func TestCreateSecret_RepoError(t *testing.T) {
 
 func TestRetrieveSecret_MissingPublicID(t *testing.T) {
 	repo := newMockRepo()
-	h := NewSecretHandler(repo, nil, nil)
+	h := NewSecretHandler(repo, nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/secrets/", nil)
 	// No path value set
@@ -520,7 +473,7 @@ func TestRetrieveSecret_MissingPublicID(t *testing.T) {
 
 func TestDeleteSecret_MissingRetrievalToken(t *testing.T) {
 	repo := newMockRepo()
-	h := NewSecretHandler(repo, nil, nil)
+	h := NewSecretHandler(repo, nil)
 
 	req := httptest.NewRequest(http.MethodDelete, "/api/v1/secrets/del1", nil)
 	req = withChiURLParam(req, "publicID", "del1")
@@ -536,7 +489,7 @@ func TestDeleteSecret_MissingRetrievalToken(t *testing.T) {
 
 func TestDeleteSecret_MissingPublicID(t *testing.T) {
 	repo := newMockRepo()
-	h := NewSecretHandler(repo, nil, nil)
+	h := NewSecretHandler(repo, nil)
 
 	req := httptest.NewRequest(http.MethodDelete, "/api/v1/secrets/", nil)
 	req.Header.Set("X-Retrieval-Token", "tok")
@@ -552,7 +505,7 @@ func TestDeleteSecret_MissingPublicID(t *testing.T) {
 
 func TestDeleteSecret_InvalidRetrievalToken(t *testing.T) {
 	repo := newMockRepo()
-	h := NewSecretHandler(repo, nil, nil)
+	h := NewSecretHandler(repo, nil)
 	seedSecret(repo, "del2", "retrieval-tok", "deletion-tok", false)
 
 	req := httptest.NewRequest(http.MethodDelete, "/api/v1/secrets/del2", nil)
@@ -572,7 +525,7 @@ func TestDeleteSecret_S3DeleteError(t *testing.T) {
 	repo := newMockRepo()
 	fs := newMockFileStore()
 	fs.deleteErr = errors.New("S3 connection failed")
-	h := NewSecretHandler(repo, fs, nil)
+	h := NewSecretHandler(repo, fs)
 	seedFileSecret(repo, fs, "del-s3-err", "ret-tok", "del-tok", false)
 
 	req := httptest.NewRequest(http.MethodDelete, "/api/v1/secrets/del-s3-err", nil)
@@ -589,22 +542,3 @@ func TestDeleteSecret_S3DeleteError(t *testing.T) {
 	}
 }
 
-func TestCreateSecret_AnonymousDoesNotLink(t *testing.T) {
-	repo := newMockRepo()
-	usr := &mockUserSecretRepoForSecret{}
-	h := NewSecretHandler(repo, nil, usr)
-
-	body, _ := json.Marshal(validCreateBody())
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/secrets", bytes.NewReader(body))
-	rec := httptest.NewRecorder()
-
-	h.CreateSecret(rec, req)
-
-	if rec.Code != http.StatusCreated {
-		t.Fatalf("status = %d, want %d", rec.Code, http.StatusCreated)
-	}
-
-	if len(usr.linked) != 0 {
-		t.Errorf("expected 0 links for anonymous, got %d", len(usr.linked))
-	}
-}

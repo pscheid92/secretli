@@ -5,11 +5,6 @@ import {
   uploadFile,
   downloadFile,
   deleteSecret,
-  register,
-  login,
-  logout,
-  getCurrentUser,
-  getUserSecrets,
   type CreateSecretParams,
   type UploadFileMetadata,
 } from "../api";
@@ -29,19 +24,9 @@ describe("ApiError", () => {
   });
 });
 
-describe("request helper (via getCurrentUser)", () => {
+describe("request helper (via deleteSecret)", () => {
   afterEach(() => {
     vi.restoreAllMocks();
-  });
-
-  it("returns parsed JSON on success", async () => {
-    const mockUser = { id: 1, email: "test@test.com", display_name: "Test", created_at: "2025-01-01" };
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      new Response(JSON.stringify(mockUser), { status: 200, headers: { "Content-Type": "application/json" } }),
-    );
-
-    const user = await getCurrentUser();
-    expect(user).toEqual(mockUser);
   });
 
   it("throws ApiError with server error message", async () => {
@@ -50,7 +35,7 @@ describe("request helper (via getCurrentUser)", () => {
     );
 
     try {
-      await getCurrentUser();
+      await deleteSecret("pub-id", "ret-tok", "del-tok");
       expect.unreachable("should have thrown");
     } catch (e) {
       expect(e).toBeInstanceOf(ApiError);
@@ -65,7 +50,7 @@ describe("request helper (via getCurrentUser)", () => {
     );
 
     try {
-      await getCurrentUser();
+      await deleteSecret("pub-id", "ret-tok", "del-tok");
       expect.unreachable("should have thrown");
     } catch (e) {
       expect(e).toBeInstanceOf(ApiError);
@@ -78,7 +63,7 @@ describe("request helper (via getCurrentUser)", () => {
     vi.spyOn(globalThis, "fetch").mockRejectedValue(new TypeError("Failed to fetch"));
 
     try {
-      await getCurrentUser();
+      await deleteSecret("pub-id", "ret-tok", "del-tok");
       expect.unreachable("should have thrown");
     } catch (e) {
       expect(e).toBeInstanceOf(ApiError);
@@ -92,7 +77,7 @@ describe("request helper (via getCurrentUser)", () => {
       new Response(null, { status: 204 }),
     );
 
-    const result = await logout();
+    const result = await deleteSecret("pub-id", "ret-tok", "del-tok");
     expect(result).toBeUndefined();
   });
 });
@@ -281,93 +266,5 @@ describe("deleteSecret", () => {
     expect(fetchSpy).toHaveBeenCalledWith("/api/v1/secrets/pub-id", expect.objectContaining({
       method: "DELETE",
     }));
-  });
-});
-
-describe("register", () => {
-  afterEach(() => {
-    vi.restoreAllMocks();
-  });
-
-  it("sends POST with email, password, display_name", async () => {
-    const mockUser = { id: 1, email: "user@test.com", display_name: "Test User", created_at: "2026-01-01" };
-    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      new Response(JSON.stringify(mockUser), { status: 200 }),
-    );
-
-    const result = await register("user@test.com", "password123", "Test User");
-    expect(result).toEqual(mockUser);
-
-    expect(fetchSpy).toHaveBeenCalledWith("/api/v1/auth/register", expect.objectContaining({
-      method: "POST",
-      body: JSON.stringify({ email: "user@test.com", password: "password123", display_name: "Test User" }),
-    }));
-  });
-});
-
-describe("login", () => {
-  afterEach(() => {
-    vi.restoreAllMocks();
-  });
-
-  it("sends POST with email and password", async () => {
-    const mockUser = { id: 1, email: "user@test.com", display_name: "User", created_at: "2026-01-01" };
-    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      new Response(JSON.stringify(mockUser), { status: 200 }),
-    );
-
-    const result = await login("user@test.com", "password123");
-    expect(result).toEqual(mockUser);
-
-    expect(fetchSpy).toHaveBeenCalledWith("/api/v1/auth/login", expect.objectContaining({
-      method: "POST",
-      body: JSON.stringify({ email: "user@test.com", password: "password123" }),
-    }));
-  });
-
-  it("throws ApiError on invalid credentials", async () => {
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      new Response(JSON.stringify({ error: "invalid credentials" }), { status: 401 }),
-    );
-
-    await expect(login("user@test.com", "wrong")).rejects.toThrow(ApiError);
-  });
-});
-
-describe("getUserSecrets", () => {
-  afterEach(() => {
-    vi.restoreAllMocks();
-  });
-
-  it("includes pagination params in URL", async () => {
-    const mockResponse = {
-      secrets: [{ public_id: "pub1", label: "test", secret_type: "text", burn_after_read: false, password_protected: false, expires_at: "2026-03-01", created_at: "2026-02-26", retrieved_at: null }],
-      page: 2,
-      per_page: 50,
-      total: 100,
-    };
-    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      new Response(JSON.stringify(mockResponse), { status: 200 }),
-    );
-
-    const result = await getUserSecrets(2, 50);
-    expect(result.page).toBe(2);
-    expect(result.per_page).toBe(50);
-    expect(result.total).toBe(100);
-    expect(result.secrets).toHaveLength(1);
-
-    expect(fetchSpy).toHaveBeenCalledWith("/api/v1/user/secrets?page=2&per_page=50", expect.objectContaining({
-      method: "GET",
-    }));
-  });
-
-  it("uses defaults when no params provided", async () => {
-    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      new Response(JSON.stringify({ secrets: [], page: 1, per_page: 20, total: 0 }), { status: 200 }),
-    );
-
-    await getUserSecrets();
-
-    expect(fetchSpy).toHaveBeenCalledWith("/api/v1/user/secrets?page=1&per_page=20", expect.anything());
   });
 });

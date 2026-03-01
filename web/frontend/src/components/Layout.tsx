@@ -1,6 +1,5 @@
 import { useState } from "react";
 import { Link, Outlet, useLocation } from "react-router";
-import { useAuth } from "../context/AuthContext";
 import { useTheme } from "../hooks/useTheme";
 
 function ThemeIcon({ theme }: { theme: string }) {
@@ -70,7 +69,6 @@ function navLinkClass(currentPath: string, linkPath: string): string {
 }
 
 export default function Layout() {
-  const { user, logout } = useAuth();
   const { theme, cycle } = useTheme();
   const [menuOpen, setMenuOpen] = useState(false);
   const location = useLocation();
@@ -94,25 +92,6 @@ export default function Layout() {
             <Link to="/file" className={navLinkClass(location.pathname, "/file")}>
               File
             </Link>
-            {user ? (
-              <>
-                <Link to="/history" className={navLinkClass(location.pathname, "/history")}>
-                  History
-                </Link>
-                <span className="text-gray-400">{user.display_name || user.email}</span>
-                <button
-                  type="button"
-                  onClick={() => logout()}
-                  className="text-gray-500 hover:text-red-600 dark:text-gray-400 dark:hover:text-red-400 transition-colors duration-150"
-                >
-                  Logout
-                </button>
-              </>
-            ) : (
-              <Link to="/login" className={navLinkClass(location.pathname, "/login")}>
-                Login
-              </Link>
-            )}
             <button
               type="button"
               onClick={cycle}
@@ -173,38 +152,6 @@ export default function Layout() {
             >
               File
             </Link>
-            {user ? (
-              <>
-                <Link
-                  to="/history"
-                  onClick={() => setMenuOpen(false)}
-                  className="block rounded-lg px-2 py-2 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors duration-150"
-                >
-                  History
-                </Link>
-                <span className="block px-2 py-2 text-gray-400">
-                  {user.display_name || user.email}
-                </span>
-                <button
-                  type="button"
-                  onClick={() => {
-                    logout();
-                    setMenuOpen(false);
-                  }}
-                  className="block w-full text-left rounded-lg px-2 py-2 text-gray-500 hover:bg-gray-100 hover:text-red-600 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-red-400 transition-colors duration-150"
-                >
-                  Logout
-                </button>
-              </>
-            ) : (
-              <Link
-                to="/login"
-                onClick={() => setMenuOpen(false)}
-                className="block rounded-lg px-2 py-2 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors duration-150"
-              >
-                Login
-              </Link>
-            )}
           </div>
         )}
       </header>

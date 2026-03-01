@@ -34,25 +34,9 @@ func (m *mockSecretRepo) DeleteExpired(_ context.Context) (int64, []string, erro
 	return m.deleteExpiredCount, m.deleteExpiredKeys, m.deleteExpiredErr
 }
 
-type mockSessionRepo struct {
-	deleteExpiredCount  int64
-	deleteExpiredErr    error
-	deleteExpiredCalled atomic.Int32
-}
-
-func (m *mockSessionRepo) Create(_ context.Context, _ int64) (string, error) { return "", nil }
-func (m *mockSessionRepo) GetByIDWithUser(_ context.Context, _ string) (*model.User, error) {
-	return nil, nil
-}
-func (m *mockSessionRepo) Delete(_ context.Context, _ string) error { return nil }
-func (m *mockSessionRepo) DeleteExpiredSessions(_ context.Context) (int64, error) {
-	m.deleteExpiredCalled.Add(1)
-	return m.deleteExpiredCount, m.deleteExpiredErr
-}
-
 type mockFileStore struct {
-	deletedKeys []string
-	deleteErr   error
+	deletedKeys  []string
+	deleteErr    error
 	deleteCalled atomic.Int32
 }
 
@@ -64,16 +48,6 @@ func (m *mockFileStore) Delete(_ context.Context, key string) error {
 	return m.deleteErr
 }
 
-type mockRateLimiter struct {
-	cleanupCalled atomic.Int32
-	lastMaxAge    time.Duration
-}
-
-func (m *mockRateLimiter) CleanupStaleEntries(maxAge time.Duration) {
-	m.cleanupCalled.Add(1)
-	m.lastMaxAge = maxAge
-}
-
 // --- Tests ---
 
 func TestRunCycle_Success(t *testing.T) {
@@ -81,20 +55,13 @@ func TestRunCycle_Success(t *testing.T) {
 		deleteExpiredCount: 3,
 		deleteExpiredKeys:  []string{"key1", "key2", "key3"},
 	}
-	sessionRepo := &mockSessionRepo{
-		deleteExpiredCount: 2,
-	}
 	fileStore := &mockFileStore{}
-	rateLimiter := &mockRateLimiter{}
 
-	w := NewWorker(time.Minute, secretRepo, sessionRepo, fileStore, rateLimiter)
+	w := NewWorker(time.Minute, secretRepo, fileStore)
 	w.runCycle(context.Background())
 
 	if secretRepo.deleteExpiredCalled.Load() != 1 {
 		t.Errorf("expected DeleteExpired called once, got %d", secretRepo.deleteExpiredCalled.Load())
-	}
-	if sessionRepo.deleteExpiredCalled.Load() != 1 {
-		t.Errorf("expected DeleteExpiredSessions called once, got %d", sessionRepo.deleteExpiredCalled.Load())
 	}
 	if fileStore.deleteCalled.Load() != 3 {
 		t.Errorf("expected fileStore.Delete called 3 times, got %d", fileStore.deleteCalled.Load())
@@ -107,37 +74,20 @@ func TestRunCycle_Success(t *testing.T) {
 			t.Errorf("deletedKeys[%d] = %q, want %q", i, fileStore.deletedKeys[i], expected)
 		}
 	}
-	if rateLimiter.cleanupCalled.Load() != 1 {
-		t.Errorf("expected CleanupStaleEntries called once, got %d", rateLimiter.cleanupCalled.Load())
-	}
-	if rateLimiter.lastMaxAge != 10*time.Minute {
-		t.Errorf("expected maxAge 10m, got %v", rateLimiter.lastMaxAge)
-	}
 }
 
 func TestRunCycle_RepoErrors(t *testing.T) {
 	secretRepo := &mockSecretRepo{
 		deleteExpiredErr: errors.New("db connection lost"),
 	}
-	sessionRepo := &mockSessionRepo{
-		deleteExpiredErr: errors.New("session cleanup failed"),
-	}
-	rateLimiter := &mockRateLimiter{}
 
-	w := NewWorker(time.Minute, secretRepo, sessionRepo, nil, rateLimiter)
+	w := NewWorker(time.Minute, secretRepo, nil)
 
 	// Should not panic despite repo errors.
 	w.runCycle(context.Background())
 
 	if secretRepo.deleteExpiredCalled.Load() != 1 {
 		t.Errorf("expected DeleteExpired called once, got %d", secretRepo.deleteExpiredCalled.Load())
-	}
-	if sessionRepo.deleteExpiredCalled.Load() != 1 {
-		t.Errorf("expected DeleteExpiredSessions called once, got %d", sessionRepo.deleteExpiredCalled.Load())
-	}
-	// Rate limiter should still be called even if repos error.
-	if rateLimiter.cleanupCalled.Load() != 1 {
-		t.Errorf("expected CleanupStaleEntries called once, got %d", rateLimiter.cleanupCalled.Load())
 	}
 }
 
@@ -146,31 +96,20 @@ func TestRunCycle_NilFileStore(t *testing.T) {
 		deleteExpiredCount: 2,
 		deleteExpiredKeys:  []string{"key1", "key2"},
 	}
-	sessionRepo := &mockSessionRepo{
-		deleteExpiredCount: 1,
-	}
-	rateLimiter := &mockRateLimiter{}
 
 	// fileStore is nil — should not panic when storageKeys are returned.
-	w := NewWorker(time.Minute, secretRepo, sessionRepo, nil, rateLimiter)
+	w := NewWorker(time.Minute, secretRepo, nil)
 	w.runCycle(context.Background())
 
 	if secretRepo.deleteExpiredCalled.Load() != 1 {
 		t.Errorf("expected DeleteExpired called once, got %d", secretRepo.deleteExpiredCalled.Load())
 	}
-	if sessionRepo.deleteExpiredCalled.Load() != 1 {
-		t.Errorf("expected DeleteExpiredSessions called once, got %d", sessionRepo.deleteExpiredCalled.Load())
-	}
-	if rateLimiter.cleanupCalled.Load() != 1 {
-		t.Errorf("expected CleanupStaleEntries called once, got %d", rateLimiter.cleanupCalled.Load())
-	}
 }
 
 func TestRun_ContextCancellation(t *testing.T) {
 	secretRepo := &mockSecretRepo{}
-	sessionRepo := &mockSessionRepo{}
 
-	w := NewWorker(10*time.Millisecond, secretRepo, sessionRepo, nil, nil)
+	w := NewWorker(10*time.Millisecond, secretRepo, nil)
 
 	ctx, cancel := context.WithCancel(context.Background())
 

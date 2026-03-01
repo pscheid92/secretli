@@ -17,13 +17,12 @@ import (
 const maxEncryptedDataSize = 1 << 20 // 1MB
 
 type SecretHandler struct {
-	repo           store.SecretRepo
-	fileStore      storage.FileStore
-	userSecretRepo store.UserSecretRepo
+	repo      store.SecretRepo
+	fileStore storage.FileStore
 }
 
-func NewSecretHandler(repo store.SecretRepo, fileStore storage.FileStore, userSecretRepo store.UserSecretRepo) *SecretHandler {
-	return &SecretHandler{repo: repo, fileStore: fileStore, userSecretRepo: userSecretRepo}
+func NewSecretHandler(repo store.SecretRepo, fileStore storage.FileStore) *SecretHandler {
+	return &SecretHandler{repo: repo, fileStore: fileStore}
 }
 
 func (h *SecretHandler) CreateSecret(w http.ResponseWriter, r *http.Request) {
@@ -74,13 +73,6 @@ func (h *SecretHandler) CreateSecret(w http.ResponseWriter, r *http.Request) {
 		slog.Error("failed to create secret", "error", err)
 		writeError(w, http.StatusInternalServerError, "internal server error")
 		return
-	}
-
-	// Link secret to authenticated user if present
-	if user := UserFromContext(r.Context()); user != nil && h.userSecretRepo != nil {
-		if err := h.userSecretRepo.LinkSecret(r.Context(), user.ID, secret.ID, req.Label); err != nil {
-			slog.Error("failed to link secret to user", "error", err)
-		}
 	}
 
 	writeJSON(w, http.StatusCreated, map[string]string{

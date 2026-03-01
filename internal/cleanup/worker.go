@@ -9,34 +9,23 @@ import (
 	"github.com/pscheid92/secretli/internal/store"
 )
 
-// RateLimiterCleaner is implemented by the rate limiter to clean stale entries.
-type RateLimiterCleaner interface {
-	CleanupStaleEntries(maxAge time.Duration)
-}
-
-// Worker periodically cleans up expired secrets, sessions, and stale rate limiter entries.
+// Worker periodically cleans up expired secrets.
 type Worker struct {
-	interval    time.Duration
-	secretRepo  store.SecretRepo
-	sessionRepo store.SessionRepo
-	fileStore   storage.FileStore
-	rateLimiter RateLimiterCleaner
+	interval   time.Duration
+	secretRepo store.SecretRepo
+	fileStore  storage.FileStore
 }
 
 // NewWorker creates a new cleanup worker.
 func NewWorker(
 	interval time.Duration,
 	secretRepo store.SecretRepo,
-	sessionRepo store.SessionRepo,
 	fileStore storage.FileStore,
-	rateLimiter RateLimiterCleaner,
 ) *Worker {
 	return &Worker{
-		interval:    interval,
-		secretRepo:  secretRepo,
-		sessionRepo: sessionRepo,
-		fileStore:   fileStore,
-		rateLimiter: rateLimiter,
+		interval:   interval,
+		secretRepo: secretRepo,
+		fileStore:  fileStore,
 	}
 }
 
@@ -78,18 +67,5 @@ func (w *Worker) runCycle(ctx context.Context) {
 		if s3Errors > 0 {
 			slog.Warn("cleanup: some S3 deletions failed", "failed", s3Errors, "total", len(storageKeys))
 		}
-	}
-
-	// Clean expired sessions
-	sessionCount, err := w.sessionRepo.DeleteExpiredSessions(ctx)
-	if err != nil {
-		slog.Error("cleanup: failed to delete expired sessions", "error", err)
-	} else if sessionCount > 0 {
-		slog.Info("cleanup: deleted expired sessions", "count", sessionCount)
-	}
-
-	// Clean stale rate limiter entries
-	if w.rateLimiter != nil {
-		w.rateLimiter.CleanupStaleEntries(10 * time.Minute)
 	}
 }

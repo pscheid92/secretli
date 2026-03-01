@@ -19,11 +19,9 @@ import (
 
 // App holds the HTTP server and dependencies needed by the cleanup worker.
 type App struct {
-	HTTPServer  *http.Server
-	SecretRepo  store.SecretRepo
-	SessionRepo store.SessionRepo
-	FileStore   storage.FileStore
-	RateLimiter *IPRateLimiter
+	HTTPServer *http.Server
+	SecretRepo store.SecretRepo
+	FileStore  storage.FileStore
 }
 
 func parseOrigins(origins string) []string {
@@ -59,10 +57,6 @@ func New(cfg config.Config, pool *pgxpool.Pool) *App {
 	}
 
 	secretRepo := store.NewPostgresSecretRepo(pool)
-	userRepo := store.NewPostgresUserRepo(pool)
-	sessionRepo := store.NewPostgresSessionRepo(pool, cfg.SessionMaxAge)
-	userSecretRepo := store.NewPostgresUserSecretRepo(pool)
-	rateLimiter := NewIPRateLimiter()
 
 	// Global middleware
 	r.Use(middleware.Recoverer)
@@ -82,9 +76,7 @@ func New(cfg config.Config, pool *pgxpool.Pool) *App {
 		}))
 	}
 
-	r.Use(sessionMiddleware(sessionRepo))
-
-	registerRoutes(r, pool, secretRepo, fileStore, cfg.MaxFileSize, userRepo, sessionRepo, userSecretRepo, cfg, rateLimiter)
+	registerRoutes(r, pool, secretRepo, fileStore, cfg.MaxFileSize)
 
 	// SPA handler as catch-all
 	distFS, _ := fs.Sub(web.DistFS, "frontend/dist")
@@ -98,10 +90,8 @@ func New(cfg config.Config, pool *pgxpool.Pool) *App {
 			WriteTimeout: 60 * time.Second,
 			IdleTimeout:  120 * time.Second,
 		},
-		SecretRepo:  secretRepo,
-		SessionRepo: sessionRepo,
-		FileStore:   fileStore,
-		RateLimiter: rateLimiter,
+		SecretRepo: secretRepo,
+		FileStore:  fileStore,
 	}
 }
 

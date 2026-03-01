@@ -17,14 +17,13 @@ import (
 )
 
 type FileHandler struct {
-	repo           store.SecretRepo
-	fileStore      storage.FileStore
-	MaxFileSize    int64
-	userSecretRepo store.UserSecretRepo
+	repo        store.SecretRepo
+	fileStore   storage.FileStore
+	MaxFileSize int64
 }
 
-func NewFileHandler(repo store.SecretRepo, fileStore storage.FileStore, maxFileSize int64, userSecretRepo store.UserSecretRepo) *FileHandler {
-	return &FileHandler{repo: repo, fileStore: fileStore, MaxFileSize: maxFileSize, userSecretRepo: userSecretRepo}
+func NewFileHandler(repo store.SecretRepo, fileStore storage.FileStore, maxFileSize int64) *FileHandler {
+	return &FileHandler{repo: repo, fileStore: fileStore, MaxFileSize: maxFileSize}
 }
 
 type fileMetadata struct {
@@ -36,7 +35,6 @@ type fileMetadata struct {
 	BurnAfterRead     bool   `json:"burn_after_read"`
 	PasswordProtected bool   `json:"password_protected"`
 	EncryptedFilename string `json:"encrypted_filename"`
-	Label             string `json:"label"`
 }
 
 func (h *FileHandler) UploadFile(w http.ResponseWriter, r *http.Request) {
@@ -123,13 +121,6 @@ func (h *FileHandler) UploadFile(w http.ResponseWriter, r *http.Request) {
 		slog.Error("failed to create file secret", "error", err)
 		writeError(w, http.StatusInternalServerError, "internal server error")
 		return
-	}
-
-	// Link secret to authenticated user if present
-	if user := UserFromContext(r.Context()); user != nil && h.userSecretRepo != nil {
-		if err := h.userSecretRepo.LinkSecret(r.Context(), user.ID, secret.ID, meta.Label); err != nil {
-			slog.Error("failed to link file secret to user", "error", err)
-		}
 	}
 
 	writeJSON(w, http.StatusCreated, map[string]string{

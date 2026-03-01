@@ -100,7 +100,7 @@ func validFileMetadata() map[string]any {
 func TestUploadFile_Success(t *testing.T) {
 	repo := newMockRepo()
 	fs := newMockFileStore()
-	h := NewFileHandler(repo, fs, 100*1024*1024, nil)
+	h := NewFileHandler(repo, fs, 100*1024*1024)
 
 	fileData := []byte("encrypted-file-content")
 	req, _ := createMultipartRequest(t, validFileMetadata(), fileData)
@@ -135,7 +135,7 @@ func TestUploadFile_Success(t *testing.T) {
 func TestUploadFile_MissingMetadata(t *testing.T) {
 	repo := newMockRepo()
 	fs := newMockFileStore()
-	h := NewFileHandler(repo, fs, 100*1024*1024, nil)
+	h := NewFileHandler(repo, fs, 100*1024*1024)
 
 	// Create request with file but no metadata
 	var buf bytes.Buffer
@@ -158,7 +158,7 @@ func TestUploadFile_MissingMetadata(t *testing.T) {
 func TestUploadFile_MissingFile(t *testing.T) {
 	repo := newMockRepo()
 	fs := newMockFileStore()
-	h := NewFileHandler(repo, fs, 100*1024*1024, nil)
+	h := NewFileHandler(repo, fs, 100*1024*1024)
 
 	req, _ := createMultipartRequest(t, validFileMetadata(), nil)
 	rec := httptest.NewRecorder()
@@ -174,7 +174,7 @@ func TestUploadFile_FileTooLarge(t *testing.T) {
 	repo := newMockRepo()
 	fs := newMockFileStore()
 	maxSize := int64(50) // 50 bytes for testing
-	h := NewFileHandler(repo, fs, maxSize, nil)
+	h := NewFileHandler(repo, fs, maxSize)
 
 	// Create a file large enough to exceed MaxBytesReader limit (maxSize + 1MB for metadata)
 	// We need the total multipart body to exceed the limit
@@ -192,7 +192,7 @@ func TestUploadFile_FileTooLarge(t *testing.T) {
 func TestUploadFile_DuplicatePublicID(t *testing.T) {
 	repo := newMockRepo()
 	fs := newMockFileStore()
-	h := NewFileHandler(repo, fs, 100*1024*1024, nil)
+	h := NewFileHandler(repo, fs, 100*1024*1024)
 
 	fileData := []byte("encrypted-file-content")
 
@@ -238,7 +238,7 @@ func seedFileSecret(repo *mockSecretRepo, fs *mockFileStore, publicID, retrieval
 func TestDownloadFile_Success(t *testing.T) {
 	repo := newMockRepo()
 	fs := newMockFileStore()
-	h := NewFileHandler(repo, fs, 100*1024*1024, nil)
+	h := NewFileHandler(repo, fs, 100*1024*1024)
 	seedFileSecret(repo, fs, "file1", "ret-tok", "del-tok", false)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/secrets/file1/file", nil)
@@ -269,7 +269,7 @@ func TestDownloadFile_Success(t *testing.T) {
 func TestDownloadFile_InvalidToken(t *testing.T) {
 	repo := newMockRepo()
 	fs := newMockFileStore()
-	h := NewFileHandler(repo, fs, 100*1024*1024, nil)
+	h := NewFileHandler(repo, fs, 100*1024*1024)
 	seedFileSecret(repo, fs, "file1", "ret-tok", "del-tok", false)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/secrets/file1/file", nil)
@@ -287,7 +287,7 @@ func TestDownloadFile_InvalidToken(t *testing.T) {
 func TestDownloadFile_NotFound(t *testing.T) {
 	repo := newMockRepo()
 	fs := newMockFileStore()
-	h := NewFileHandler(repo, fs, 100*1024*1024, nil)
+	h := NewFileHandler(repo, fs, 100*1024*1024)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/secrets/nonexistent/file", nil)
 	req = withChiURLParam(req, "publicID", "nonexistent")
@@ -304,7 +304,7 @@ func TestDownloadFile_NotFound(t *testing.T) {
 func TestDownloadFile_WrongSecretType(t *testing.T) {
 	repo := newMockRepo()
 	fs := newMockFileStore()
-	h := NewFileHandler(repo, fs, 100*1024*1024, nil)
+	h := NewFileHandler(repo, fs, 100*1024*1024)
 	seedSecret(repo, "text1", "ret-tok", "del-tok", false)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/secrets/text1/file", nil)
@@ -325,7 +325,7 @@ func TestDownloadFile_WrongSecretType(t *testing.T) {
 func TestDownloadFile_BurnAfterRead(t *testing.T) {
 	repo := newMockRepo()
 	fs := newMockFileStore()
-	h := NewFileHandler(repo, fs, 100*1024*1024, nil)
+	h := NewFileHandler(repo, fs, 100*1024*1024)
 	seedFileSecret(repo, fs, "burn-file", "ret-tok", "del-tok", true)
 
 	// First download succeeds
@@ -366,7 +366,7 @@ func TestDownloadFile_BurnAfterRead(t *testing.T) {
 func TestDeleteSecret_FileSecretCleansS3(t *testing.T) {
 	repo := newMockRepo()
 	fs := newMockFileStore()
-	h := NewSecretHandler(repo, fs, nil)
+	h := NewSecretHandler(repo, fs)
 	seedFileSecret(repo, fs, "del-file", "ret-tok", "del-tok", false)
 
 	req := httptest.NewRequest(http.MethodDelete, "/api/v1/secrets/del-file", nil)
@@ -391,7 +391,7 @@ func TestUploadFile_S3PutError(t *testing.T) {
 	repo := newMockRepo()
 	fs := newMockFileStore()
 	fs.putErr = fmt.Errorf("S3 connection refused")
-	h := NewFileHandler(repo, fs, 100*1024*1024, nil)
+	h := NewFileHandler(repo, fs, 100*1024*1024)
 
 	fileData := []byte("encrypted-file-content")
 	req, _ := createMultipartRequest(t, validFileMetadata(), fileData)
@@ -407,7 +407,7 @@ func TestUploadFile_S3PutError(t *testing.T) {
 func TestUploadFile_InvalidMetadataJSON(t *testing.T) {
 	repo := newMockRepo()
 	fs := newMockFileStore()
-	h := NewFileHandler(repo, fs, 100*1024*1024, nil)
+	h := NewFileHandler(repo, fs, 100*1024*1024)
 
 	var buf bytes.Buffer
 	writer := multipart.NewWriter(&buf)
@@ -430,7 +430,7 @@ func TestUploadFile_InvalidMetadataJSON(t *testing.T) {
 func TestUploadFile_MissingRequiredMetadataFields(t *testing.T) {
 	repo := newMockRepo()
 	fs := newMockFileStore()
-	h := NewFileHandler(repo, fs, 100*1024*1024, nil)
+	h := NewFileHandler(repo, fs, 100*1024*1024)
 
 	meta := map[string]any{"public_id": "only-one-field"}
 	req, _ := createMultipartRequest(t, meta, []byte("data"))
@@ -446,7 +446,7 @@ func TestUploadFile_MissingRequiredMetadataFields(t *testing.T) {
 func TestUploadFile_InvalidExpiration(t *testing.T) {
 	repo := newMockRepo()
 	fs := newMockFileStore()
-	h := NewFileHandler(repo, fs, 100*1024*1024, nil)
+	h := NewFileHandler(repo, fs, 100*1024*1024)
 
 	meta := validFileMetadata()
 	meta["expiration"] = "99d"
@@ -464,7 +464,7 @@ func TestUploadFile_DBErrorCleansUpS3(t *testing.T) {
 	repo := newMockRepo()
 	repo.createErr = fmt.Errorf("database timeout")
 	fs := newMockFileStore()
-	h := NewFileHandler(repo, fs, 100*1024*1024, nil)
+	h := NewFileHandler(repo, fs, 100*1024*1024)
 
 	fileData := []byte("encrypted-file-content")
 	req, _ := createMultipartRequest(t, validFileMetadata(), fileData)
@@ -485,7 +485,7 @@ func TestUploadFile_DBErrorCleansUpS3(t *testing.T) {
 func TestDownloadFile_MissingToken(t *testing.T) {
 	repo := newMockRepo()
 	fs := newMockFileStore()
-	h := NewFileHandler(repo, fs, 100*1024*1024, nil)
+	h := NewFileHandler(repo, fs, 100*1024*1024)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/secrets/file1/file", nil)
 	req = withChiURLParam(req, "publicID", "file1")
@@ -501,7 +501,7 @@ func TestDownloadFile_MissingToken(t *testing.T) {
 func TestDownloadFile_MissingPublicID(t *testing.T) {
 	repo := newMockRepo()
 	fs := newMockFileStore()
-	h := NewFileHandler(repo, fs, 100*1024*1024, nil)
+	h := NewFileHandler(repo, fs, 100*1024*1024)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/secrets//file", nil)
 	req.Header.Set("X-Retrieval-Token", "tok")
@@ -517,7 +517,7 @@ func TestDownloadFile_MissingPublicID(t *testing.T) {
 func TestDownloadFile_MissingStorageKey(t *testing.T) {
 	repo := newMockRepo()
 	fs := newMockFileStore()
-	h := NewFileHandler(repo, fs, 100*1024*1024, nil)
+	h := NewFileHandler(repo, fs, 100*1024*1024)
 
 	// Create a file secret with nil StorageKey
 	repo.secrets["no-key"] = &model.Secret{
@@ -547,7 +547,7 @@ func TestDownloadFile_S3GetError(t *testing.T) {
 	repo := newMockRepo()
 	fs := newMockFileStore()
 	fs.getErr = fmt.Errorf("S3 not reachable")
-	h := NewFileHandler(repo, fs, 100*1024*1024, nil)
+	h := NewFileHandler(repo, fs, 100*1024*1024)
 	seedFileSecret(repo, fs, "s3-err", "ret-tok", "del-tok", false)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/secrets/s3-err/file", nil)
@@ -565,7 +565,7 @@ func TestDownloadFile_S3GetError(t *testing.T) {
 func TestDeleteSecret_TextSecretSkipsS3(t *testing.T) {
 	repo := newMockRepo()
 	fs := newMockFileStore()
-	h := NewSecretHandler(repo, fs, nil)
+	h := NewSecretHandler(repo, fs)
 	seedSecret(repo, "text-del", "ret-tok", "del-tok", false)
 
 	req := httptest.NewRequest(http.MethodDelete, "/api/v1/secrets/text-del", nil)

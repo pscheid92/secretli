@@ -29,5 +29,4 @@ type CreateSecretRequest struct {
 	Expiration        string `json:"expiration"`
 	BurnAfterRead     bool   `json:"burn_after_read"`
 	PasswordProtected bool   `json:"password_protected"`
-	Label             string `json:"label"`
 }

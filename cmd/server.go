@@ -50,9 +50,7 @@ func Run(migrationsFS fs.FS) error {
 	worker := cleanup.NewWorker(
 		cfg.CleanupInterval,
 		app.SecretRepo,
-		app.SessionRepo,
 		app.FileStore,
-		app.RateLimiter,
 	)
 
 	// Context for shutdown coordination

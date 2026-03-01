@@ -156,65 +156,6 @@ export function getSecretMetadata(
   });
 }
 
-// --- Auth ---
-
-export interface User {
-  id: number;
-  email: string;
-  display_name: string;
-  created_at: string;
-}
-
-export function register(email: string, password: string, displayName: string): Promise<User> {
-  return request("/api/v1/auth/register", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email, password, display_name: displayName }),
-  });
-}
-
-export function login(email: string, password: string): Promise<User> {
-  return request("/api/v1/auth/login", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email, password }),
-  });
-}
-
-export function logout(): Promise<void> {
-  return request("/api/v1/auth/logout", { method: "POST" });
-}
-
-export function getCurrentUser(): Promise<User> {
-  return request("/api/v1/auth/me", { method: "GET" });
-}
-
-// --- User Secrets ---
-
-export interface SecretSummary {
-  public_id: string;
-  label: string;
-  secret_type: string;
-  burn_after_read: boolean;
-  password_protected: boolean;
-  expires_at: string;
-  created_at: string;
-  retrieved_at: string | null;
-}
-
-export interface UserSecretsResponse {
-  secrets: SecretSummary[];
-  page: number;
-  per_page: number;
-  total: number;
-}
-
-export function getUserSecrets(page = 1, perPage = 20): Promise<UserSecretsResponse> {
-  return request(`/api/v1/user/secrets?page=${page}&per_page=${perPage}`, {
-    method: "GET",
-  });
-}
-
 export function deleteSecret(
   publicID: string,
   retrievalToken: string,
