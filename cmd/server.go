@@ -20,7 +20,10 @@ import (
 )
 
 func Run(migrationsFS fs.FS) error {
-	cfg := config.Load()
+	cfg, err := config.Load()
+	if err != nil {
+		return fmt.Errorf("loading config: %w", err)
+	}
 
 	// Handle migrate subcommand
 	if len(os.Args) > 1 && os.Args[1] == "migrate" {

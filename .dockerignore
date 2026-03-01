@@ -10,4 +10,5 @@ openspec
 !web/frontend/*.md
 .air.toml
 .dockerignore
+docker-compose.yml
 Dockerfile

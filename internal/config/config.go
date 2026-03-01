@@ -1,86 +1,67 @@
 package config
 
 import (
+	"bufio"
 	"os"
-	"strconv"
+	"strings"
 	"time"
+
+	"go-simpler.org/env"
 )
 
 type Config struct {
-	Port            string
-	DatabaseURL     string
-	S3Endpoint      string
-	S3Bucket        string
-	S3AccessKey     string
-	S3SecretKey     string
-	S3UseSSL        bool
-	S3Region        string
-	MaxFileSize     int64
-	CleanupInterval time.Duration
-	SessionMaxAge   time.Duration
-	CookieDomain    string
-	CookieSecure    bool
-	AllowedOrigins  string
+	Port            string        `env:"SERVER_PORT" default:"8080"`
+	DatabaseURL     string        `env:"DATABASE_URL"`
+	S3Endpoint      string        `env:"S3_ENDPOINT"`
+	S3Bucket        string        `env:"S3_BUCKET" default:"secretli"`
+	S3AccessKey     string        `env:"S3_ACCESS_KEY"`
+	S3SecretKey     string        `env:"S3_SECRET_KEY"`
+	S3UseSSL        bool          `env:"S3_USE_SSL" default:"true"`
+	S3Region        string        `env:"S3_REGION" default:"us-east-1"`
+	MaxFileSize     int64         `env:"MAX_FILE_SIZE" default:"104857600"`
+	CleanupInterval time.Duration `env:"CLEANUP_INTERVAL" default:"1m"`
+	SessionMaxAge   time.Duration `env:"SESSION_MAX_AGE" default:"720h"`
+	CookieDomain    string        `env:"COOKIE_DOMAIN"`
+	CookieSecure    bool          `env:"COOKIE_SECURE" default:"true"`
+	AllowedOrigins  string        `env:"ALLOWED_ORIGINS"`
 }
 
-func Load() Config {
-	return Config{
-		Port:            envOrDefault("SERVER_PORT", "8080"),
-		DatabaseURL:     envOrDefault("DATABASE_URL", ""),
-		S3Endpoint:      envOrDefault("S3_ENDPOINT", ""),
-		S3Bucket:        envOrDefault("S3_BUCKET", "secretli"),
-		S3AccessKey:     envOrDefault("S3_ACCESS_KEY", ""),
-		S3SecretKey:     envOrDefault("S3_SECRET_KEY", ""),
-		S3UseSSL:        envOrDefaultBool("S3_USE_SSL", true),
-		S3Region:        envOrDefault("S3_REGION", "us-east-1"),
-		MaxFileSize:     envOrDefaultInt64("MAX_FILE_SIZE", 104857600),
-		CleanupInterval: envOrDefaultDuration("CLEANUP_INTERVAL", time.Minute),
-		SessionMaxAge:   envOrDefaultDuration("SESSION_MAX_AGE", 720*time.Hour),
-		CookieDomain:    envOrDefault("COOKIE_DOMAIN", ""),
-		CookieSecure:    envOrDefaultBool("COOKIE_SECURE", true),
-		AllowedOrigins:  envOrDefault("ALLOWED_ORIGINS", ""),
+func Load() (Config, error) {
+	loadDotEnv(".env")
+	var cfg Config
+	if err := env.Load(&cfg, nil); err != nil {
+		return Config{}, err
 	}
+	return cfg, nil
 }
 
-func envOrDefault(key, fallback string) string {
-	if v := os.Getenv(key); v != "" {
-		return v
-	}
-	return fallback
-}
-
-func envOrDefaultBool(key string, fallback bool) bool {
-	v := os.Getenv(key)
-	if v == "" {
-		return fallback
-	}
-	b, err := strconv.ParseBool(v)
+func loadDotEnv(path string) {
+	f, err := os.Open(path)
 	if err != nil {
-		return fallback
+		return
 	}
-	return b
-}
+	defer f.Close()
 
-func envOrDefaultInt64(key string, fallback int64) int64 {
-	v := os.Getenv(key)
-	if v == "" {
-		return fallback
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		key, value, ok := strings.Cut(line, "=")
+		if !ok {
+			continue
+		}
+		key = strings.TrimSpace(key)
+		value = strings.TrimSpace(value)
+		if len(value) >= 2 {
+			if (value[0] == '"' && value[len(value)-1] == '"') ||
+				(value[0] == '\'' && value[len(value)-1] == '\'') {
+				value = value[1 : len(value)-1]
+			}
+		}
+		if _, exists := os.LookupEnv(key); !exists {
+			os.Setenv(key, value)
+		}
 	}
-	n, err := strconv.ParseInt(v, 10, 64)
-	if err != nil {
-		return fallback
-	}
-	return n
-}
-
-func envOrDefaultDuration(key string, fallback time.Duration) time.Duration {
-	v := os.Getenv(key)
-	if v == "" {
-		return fallback
-	}
-	d, err := time.ParseDuration(v)
-	if err != nil {
-		return fallback
-	}
-	return d
 }

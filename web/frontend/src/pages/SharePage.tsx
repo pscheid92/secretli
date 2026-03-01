@@ -32,10 +32,8 @@ export default function SharePage() {
       const encoded = keySet.getEncoded();
 
       const response = await createSecret({
-        public_id: hasPassword ? encryptKeySet.getEncoded().publicID : encoded.publicID,
-        retrieval_token: hasPassword
-          ? encryptKeySet.getEncoded().retrievalToken
-          : encoded.retrievalToken,
+        public_id: encoded.publicID,
+        retrieval_token: encoded.retrievalToken,
         deletion_token: encoded.deletionToken,
         nonce: encrypted.nonce,
         encrypted_data: encrypted.encrypted_data,
