@@ -18,7 +18,7 @@ export default function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <AuthProvider>
-        <Toaster richColors position="top-right" />
+        <Toaster richColors position="bottom-right" closeButton />
         <BrowserRouter>
           <Routes>
             <Route element={<Layout />}>

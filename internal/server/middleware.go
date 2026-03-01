@@ -1,71 +1,73 @@
 package server
 
 import (
-	"crypto/rand"
 	"encoding/json"
-	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
 	"sync"
 	"time"
 
+	"github.com/go-chi/chi/v5/middleware"
 	"github.com/pscheid92/secretli/internal/handler"
 	"github.com/pscheid92/secretli/internal/store"
 	"golang.org/x/time/rate"
 )
 
-type responseWriter struct {
-	http.ResponseWriter
-	statusCode int
-}
-
-func (rw *responseWriter) WriteHeader(code int) {
-	rw.statusCode = code
-	rw.ResponseWriter.WriteHeader(code)
-}
-
-func recoveryMiddleware(next http.Handler) http.Handler {
+// requestIDResponseHeader copies chi's request ID from context to the X-Request-Id response header.
+func requestIDResponseHeader(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		defer func() {
-			if err := recover(); err != nil {
-				slog.Error("panic recovered",
-					"error", err,
-					"method", r.Method,
-					"path", r.URL.Path,
-				)
-				http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
-			}
-		}()
-		next.ServeHTTP(w, r)
-	})
-}
-
-func requestIDMiddleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		id := r.Header.Get("X-Request-ID")
-		if id == "" {
-			id = generateRequestID()
+		if id := middleware.GetReqID(r.Context()); id != "" {
+			w.Header().Set("X-Request-Id", id)
 		}
-		w.Header().Set("X-Request-ID", id)
 		next.ServeHTTP(w, r)
 	})
 }
 
-func loggingMiddleware(next http.Handler) http.Handler {
+// slogLogger implements chi's middleware.LogFormatter to emit structured slog entries.
+type slogLogger struct{}
+
+func (l *slogLogger) NewLogEntry(r *http.Request) middleware.LogEntry {
+	return &slogEntry{
+		method:    r.Method,
+		path:      r.URL.Path,
+		requestID: middleware.GetReqID(r.Context()),
+		start:     time.Now(),
+	}
+}
+
+type slogEntry struct {
+	method    string
+	path      string
+	requestID string
+	start     time.Time
+}
+
+func (e *slogEntry) Write(status, _ int, _ http.Header, _ time.Duration, _ interface{}) {
+	slog.Info("request",
+		"method", e.method,
+		"path", e.path,
+		"status", status,
+		"duration_ms", time.Since(e.start).Milliseconds(),
+		"request_id", e.requestID,
+	)
+}
+
+func (e *slogEntry) Panic(v interface{}, _ []byte) {
+	slog.Error("panic recovered",
+		"error", v,
+		"method", e.method,
+		"path", e.path,
+	)
+}
+
+func securityHeadersMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		start := time.Now()
-		rw := &responseWriter{ResponseWriter: w, statusCode: http.StatusOK}
-
-		next.ServeHTTP(rw, r)
-
-		slog.Info("request",
-			"method", r.Method,
-			"path", r.URL.Path,
-			"status", rw.statusCode,
-			"duration_ms", time.Since(start).Milliseconds(),
-			"request_id", w.Header().Get("X-Request-ID"),
-		)
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("X-Frame-Options", "DENY")
+		w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'")
+		w.Header().Set("Referrer-Policy", "no-referrer")
+		next.ServeHTTP(w, r)
 	})
 }
 
@@ -132,16 +134,16 @@ func (rl *IPRateLimiter) CleanupStaleEntries(maxAge time.Duration) {
 	})
 }
 
-// RateLimit returns middleware that rate limits by IP at the given requests-per-minute.
-func RateLimit(rl *IPRateLimiter, requestsPerMinute float64) func(http.HandlerFunc) http.HandlerFunc {
+// RateLimit returns chi-compatible middleware that rate limits by IP at the given requests-per-minute.
+func RateLimit(rl *IPRateLimiter, requestsPerMinute float64) func(http.Handler) http.Handler {
 	rps := requestsPerMinute / 60.0
 	burst := int(requestsPerMinute)
 	if burst < 1 {
 		burst = 1
 	}
 
-	return func(next http.HandlerFunc) http.HandlerFunc {
-		return func(w http.ResponseWriter, r *http.Request) {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			ip := clientIP(r)
 			limiter := rl.getLimiter(ip, rps, burst)
 			if !limiter.Allow() {
@@ -151,8 +153,8 @@ func RateLimit(rl *IPRateLimiter, requestsPerMinute float64) func(http.HandlerFu
 				_ = json.NewEncoder(w).Encode(map[string]string{"error": "rate limit exceeded"})
 				return
 			}
-			next(w, r)
-		}
+			next.ServeHTTP(w, r)
+		})
 	}
 }
 
@@ -173,62 +175,4 @@ func clientIP(r *http.Request) string {
 		return r.RemoteAddr
 	}
 	return host
-}
-
-func corsMiddleware(allowedOrigins []string) func(http.Handler) http.Handler {
-	allowed := make(map[string]bool, len(allowedOrigins))
-	for _, o := range allowedOrigins {
-		allowed[o] = true
-	}
-
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if len(allowed) == 0 {
-				next.ServeHTTP(w, r)
-				return
-			}
-
-			origin := r.Header.Get("Origin")
-			if origin != "" && allowed[origin] {
-				w.Header().Set("Access-Control-Allow-Origin", origin)
-				w.Header().Set("Access-Control-Allow-Credentials", "true")
-
-				if r.Method == http.MethodOptions {
-					w.Header().Set("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
-					w.Header().Set("Access-Control-Allow-Headers", "Content-Type, X-Retrieval-Token, X-Deletion-Token")
-					w.Header().Set("Access-Control-Max-Age", "86400")
-					w.WriteHeader(http.StatusNoContent)
-					return
-				}
-			} else if r.Method == http.MethodOptions {
-				w.WriteHeader(http.StatusNoContent)
-				return
-			}
-
-			next.ServeHTTP(w, r)
-		})
-	}
-}
-
-func securityHeadersMiddleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("X-Content-Type-Options", "nosniff")
-		w.Header().Set("X-Frame-Options", "DENY")
-		w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'")
-		w.Header().Set("Referrer-Policy", "no-referrer")
-		next.ServeHTTP(w, r)
-	})
-}
-
-func chain(handler http.Handler, middlewares ...func(http.Handler) http.Handler) http.Handler {
-	for i := len(middlewares) - 1; i >= 0; i-- {
-		handler = middlewares[i](handler)
-	}
-	return handler
-}
-
-func generateRequestID() string {
-	b := make([]byte, 16)
-	_, _ = rand.Read(b)
-	return fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
 }

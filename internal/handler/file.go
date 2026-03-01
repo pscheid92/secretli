@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/pscheid92/secretli/internal/crypto"
 	"github.com/pscheid92/secretli/internal/model"
 	"github.com/pscheid92/secretli/internal/storage"
@@ -137,7 +138,7 @@ func (h *FileHandler) UploadFile(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *FileHandler) DownloadFile(w http.ResponseWriter, r *http.Request) {
-	publicID := r.PathValue("publicID")
+	publicID := chi.URLParam(r, "publicID")
 	if publicID == "" {
 		writeError(w, http.StatusBadRequest, "missing public_id")
 		return

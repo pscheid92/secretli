@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
+import SecretTypeIcon from "../components/SecretTypeIcon";
 import Spinner from "../components/Spinner";
 import {
   ApiError,
@@ -10,6 +11,7 @@ import {
   retrieveSecret,
 } from "../lib/api";
 import { KeySet } from "../lib/encryption";
+import { formatRelativeTime, formatSize } from "../lib/format";
 
 type State =
   | { stage: "prompt" }
@@ -236,9 +238,6 @@ export default function RetrievePage() {
     toast.success("Secret copied to clipboard");
   }
 
-  function formatTimestamp(iso: string): string {
-    return new Date(iso).toLocaleString();
-  }
 
   if (state.stage === "prompt") {
     function handleLinkSubmit(e: React.FormEvent) {
@@ -317,7 +316,7 @@ export default function RetrievePage() {
   if (state.stage === "error") {
     return (
       <div className="space-y-4">
-        <div className="rounded-xl border-l-4 border-red-500 bg-white dark:bg-gray-900 p-5 shadow-sm">
+        <div className="rounded-xl border border-red-200 dark:border-red-800 bg-white dark:bg-gray-900 p-5 shadow-sm">
           <h2 className="text-lg font-semibold text-red-800 dark:text-red-300">
             Unable to retrieve secret
           </h2>
@@ -347,24 +346,41 @@ export default function RetrievePage() {
         </div>
 
         <div className="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-5 shadow-sm divide-y divide-gray-100 dark:divide-gray-800">
-          <div className="flex justify-between py-2.5 first:pt-0 text-sm">
-            <span className="text-gray-500 dark:text-gray-400">Type</span>
+          <div className="flex items-center gap-2 py-2.5 first:pt-0 text-sm">
+            <SecretTypeIcon
+              type={metadata.secret_type}
+              className="h-5 w-5 text-gray-400 dark:text-gray-500"
+            />
             <span className="font-medium text-gray-900 dark:text-gray-100 capitalize">
-              {metadata.secret_type}
+              {metadata.secret_type === "file" ? "File" : "Text"} Secret
             </span>
           </div>
           <div className="flex justify-between py-2.5 text-sm">
             <span className="text-gray-500 dark:text-gray-400">Created</span>
-            <span className="text-gray-900 dark:text-gray-100">
-              {formatTimestamp(metadata.created_at)}
+            <span
+              className="text-gray-900 dark:text-gray-100"
+              title={new Date(metadata.created_at).toLocaleString()}
+            >
+              {formatRelativeTime(metadata.created_at)}
             </span>
           </div>
           <div className="flex justify-between py-2.5 text-sm">
             <span className="text-gray-500 dark:text-gray-400">Expires</span>
-            <span className="text-gray-900 dark:text-gray-100">
-              {formatTimestamp(metadata.expires_at)}
+            <span
+              className="text-gray-900 dark:text-gray-100"
+              title={new Date(metadata.expires_at).toLocaleString()}
+            >
+              {formatRelativeTime(metadata.expires_at)}
             </span>
           </div>
+          {isFile && metadata.file_size != null && (
+            <div className="flex justify-between py-2.5 text-sm">
+              <span className="text-gray-500 dark:text-gray-400">Size</span>
+              <span className="text-gray-900 dark:text-gray-100">
+                {formatSize(metadata.file_size)}
+              </span>
+            </div>
+          )}
           {metadata.password_protected && (
             <div className="flex justify-between py-2.5 last:pb-0 text-sm">
               <span className="text-gray-500 dark:text-gray-400">Password</span>
@@ -374,7 +390,7 @@ export default function RetrievePage() {
         </div>
 
         {metadata.burn_after_read && (
-          <div className="rounded-xl border-l-4 border-amber-500 bg-white dark:bg-gray-900 p-5 shadow-sm">
+          <div className="rounded-xl border border-amber-200 dark:border-amber-800 bg-white dark:bg-gray-900 p-5 shadow-sm">
             <p className="text-sm font-medium text-amber-800 dark:text-amber-300">
               This secret will be permanently destroyed after viewing.
             </p>
@@ -440,7 +456,7 @@ export default function RetrievePage() {
   if (state.stage === "deleted") {
     return (
       <div className="space-y-4">
-        <div className="rounded-xl border-l-4 border-green-500 bg-white dark:bg-gray-900 p-5 shadow-sm">
+        <div className="rounded-xl border border-green-200 dark:border-green-800 bg-white dark:bg-gray-900 p-5 shadow-sm">
           <h2 className="text-lg font-semibold text-green-800 dark:text-green-300">
             Secret deleted
           </h2>
@@ -467,7 +483,7 @@ export default function RetrievePage() {
             The file has been decrypted and saved to your downloads.
           </p>
         </div>
-        <div className="rounded-xl border-l-4 border-green-500 bg-white dark:bg-gray-900 p-5 shadow-sm">
+        <div className="rounded-xl border border-green-200 dark:border-green-800 bg-white dark:bg-gray-900 p-5 shadow-sm">
           <p className="text-sm font-medium text-green-800 dark:text-green-300">{state.filename}</p>
         </div>
         {state.deletionToken && (

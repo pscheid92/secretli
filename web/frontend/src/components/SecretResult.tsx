@@ -13,7 +13,7 @@ export default function SecretResult({ url, expiresAt, burnAfterRead }: SecretRe
   }
 
   return (
-    <div className="rounded-xl border-l-4 border-green-500 bg-white dark:bg-gray-900 p-5 shadow-sm space-y-4">
+    <div className="rounded-xl border border-green-200 dark:border-green-800 bg-white dark:bg-gray-900 p-5 shadow-sm space-y-4">
       <h2 className="text-lg font-semibold text-green-800 dark:text-green-300">Secret created!</h2>
 
       <div>

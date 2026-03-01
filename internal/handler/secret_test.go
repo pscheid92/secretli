@@ -10,10 +10,17 @@ import (
 	"testing"
 	"time"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/pscheid92/secretli/internal/crypto"
 	"github.com/pscheid92/secretli/internal/model"
 	"github.com/pscheid92/secretli/internal/store"
 )
+
+func withChiURLParam(r *http.Request, key, value string) *http.Request {
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add(key, value)
+	return r.WithContext(context.WithValue(r.Context(), chi.RouteCtxKey, rctx))
+}
 
 // mockSecretRepo implements store.SecretRepo for testing
 type mockSecretRepo struct {
@@ -219,7 +226,7 @@ func TestRetrieveSecret_Success(t *testing.T) {
 	seedSecret(repo, "pub1", "retrieval-tok", "deletion-tok", false)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/secrets/pub1", nil)
-	req.SetPathValue("publicID", "pub1")
+	req = withChiURLParam(req, "publicID", "pub1")
 	req.Header.Set("X-Retrieval-Token", "retrieval-tok")
 	rec := httptest.NewRecorder()
 
@@ -245,7 +252,7 @@ func TestRetrieveSecret_InvalidToken(t *testing.T) {
 	seedSecret(repo, "pub1", "retrieval-tok", "deletion-tok", false)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/secrets/pub1", nil)
-	req.SetPathValue("publicID", "pub1")
+	req = withChiURLParam(req, "publicID", "pub1")
 	req.Header.Set("X-Retrieval-Token", "wrong-token")
 	rec := httptest.NewRecorder()
 
@@ -261,7 +268,7 @@ func TestRetrieveSecret_NotFound(t *testing.T) {
 	h := NewSecretHandler(repo, nil, nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/secrets/nonexistent", nil)
-	req.SetPathValue("publicID", "nonexistent")
+	req = withChiURLParam(req, "publicID", "nonexistent")
 	req.Header.Set("X-Retrieval-Token", "some-token")
 	rec := httptest.NewRecorder()
 
@@ -277,7 +284,7 @@ func TestRetrieveSecret_MissingToken(t *testing.T) {
 	h := NewSecretHandler(repo, nil, nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/secrets/pub1", nil)
-	req.SetPathValue("publicID", "pub1")
+	req = withChiURLParam(req, "publicID", "pub1")
 	rec := httptest.NewRecorder()
 
 	h.RetrieveSecret(rec, req)
@@ -294,7 +301,7 @@ func TestRetrieveSecret_BurnAfterRead(t *testing.T) {
 
 	// First retrieval succeeds
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/secrets/burn1", nil)
-	req.SetPathValue("publicID", "burn1")
+	req = withChiURLParam(req, "publicID", "burn1")
 	req.Header.Set("X-Retrieval-Token", "retrieval-tok")
 	rec := httptest.NewRecorder()
 	h.RetrieveSecret(rec, req)
@@ -305,7 +312,7 @@ func TestRetrieveSecret_BurnAfterRead(t *testing.T) {
 
 	// Second retrieval fails
 	req = httptest.NewRequest(http.MethodPost, "/api/v1/secrets/burn1", nil)
-	req.SetPathValue("publicID", "burn1")
+	req = withChiURLParam(req, "publicID", "burn1")
 	req.Header.Set("X-Retrieval-Token", "retrieval-tok")
 	rec = httptest.NewRecorder()
 	h.RetrieveSecret(rec, req)
@@ -321,7 +328,7 @@ func TestDeleteSecret_Success(t *testing.T) {
 	seedSecret(repo, "del1", "retrieval-tok", "deletion-tok", false)
 
 	req := httptest.NewRequest(http.MethodDelete, "/api/v1/secrets/del1", nil)
-	req.SetPathValue("publicID", "del1")
+	req = withChiURLParam(req, "publicID", "del1")
 	req.Header.Set("X-Retrieval-Token", "retrieval-tok")
 	req.Header.Set("X-Deletion-Token", "deletion-tok")
 	rec := httptest.NewRecorder()
@@ -339,7 +346,7 @@ func TestDeleteSecret_InvalidDeletionToken(t *testing.T) {
 	seedSecret(repo, "del1", "retrieval-tok", "deletion-tok", false)
 
 	req := httptest.NewRequest(http.MethodDelete, "/api/v1/secrets/del1", nil)
-	req.SetPathValue("publicID", "del1")
+	req = withChiURLParam(req, "publicID", "del1")
 	req.Header.Set("X-Retrieval-Token", "retrieval-tok")
 	req.Header.Set("X-Deletion-Token", "wrong-token")
 	rec := httptest.NewRecorder()
@@ -356,7 +363,7 @@ func TestDeleteSecret_MissingDeletionToken(t *testing.T) {
 	h := NewSecretHandler(repo, nil, nil)
 
 	req := httptest.NewRequest(http.MethodDelete, "/api/v1/secrets/del1", nil)
-	req.SetPathValue("publicID", "del1")
+	req = withChiURLParam(req, "publicID", "del1")
 	req.Header.Set("X-Retrieval-Token", "retrieval-tok")
 	rec := httptest.NewRecorder()
 
@@ -372,7 +379,7 @@ func TestDeleteSecret_NotFound(t *testing.T) {
 	h := NewSecretHandler(repo, nil, nil)
 
 	req := httptest.NewRequest(http.MethodDelete, "/api/v1/secrets/nonexistent", nil)
-	req.SetPathValue("publicID", "nonexistent")
+	req = withChiURLParam(req, "publicID", "nonexistent")
 	req.Header.Set("X-Retrieval-Token", "tok")
 	req.Header.Set("X-Deletion-Token", "tok")
 	rec := httptest.NewRecorder()
@@ -516,7 +523,7 @@ func TestDeleteSecret_MissingRetrievalToken(t *testing.T) {
 	h := NewSecretHandler(repo, nil, nil)
 
 	req := httptest.NewRequest(http.MethodDelete, "/api/v1/secrets/del1", nil)
-	req.SetPathValue("publicID", "del1")
+	req = withChiURLParam(req, "publicID", "del1")
 	req.Header.Set("X-Deletion-Token", "tok")
 	rec := httptest.NewRecorder()
 
@@ -549,7 +556,7 @@ func TestDeleteSecret_InvalidRetrievalToken(t *testing.T) {
 	seedSecret(repo, "del2", "retrieval-tok", "deletion-tok", false)
 
 	req := httptest.NewRequest(http.MethodDelete, "/api/v1/secrets/del2", nil)
-	req.SetPathValue("publicID", "del2")
+	req = withChiURLParam(req, "publicID", "del2")
 	req.Header.Set("X-Retrieval-Token", "wrong-retrieval")
 	req.Header.Set("X-Deletion-Token", "deletion-tok")
 	rec := httptest.NewRecorder()
@@ -569,7 +576,7 @@ func TestDeleteSecret_S3DeleteError(t *testing.T) {
 	seedFileSecret(repo, fs, "del-s3-err", "ret-tok", "del-tok", false)
 
 	req := httptest.NewRequest(http.MethodDelete, "/api/v1/secrets/del-s3-err", nil)
-	req.SetPathValue("publicID", "del-s3-err")
+	req = withChiURLParam(req, "publicID", "del-s3-err")
 	req.Header.Set("X-Retrieval-Token", "ret-tok")
 	req.Header.Set("X-Deletion-Token", "del-tok")
 	rec := httptest.NewRecorder()

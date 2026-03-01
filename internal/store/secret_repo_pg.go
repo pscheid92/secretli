@@ -22,13 +22,14 @@ func NewPostgresSecretRepo(pool *pgxpool.Pool) *PostgresSecretRepo {
 }
 
 func (r *PostgresSecretRepo) Create(ctx context.Context, secret *model.Secret) error {
-	_, err := r.pool.Exec(ctx, `
+	err := r.pool.QueryRow(ctx, `
 		INSERT INTO secrets (
 			public_id, retrieval_token_hash, deletion_token_hash,
 			encrypted_data, nonce, secret_type,
 			storage_key, encrypted_filename, encrypted_size,
 			burn_after_read, password_protected, expires_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+		RETURNING id`,
 		secret.PublicID,
 		secret.RetrievalTokenHash,
 		secret.DeletionTokenHash,
@@ -41,7 +42,7 @@ func (r *PostgresSecretRepo) Create(ctx context.Context, secret *model.Secret) e
 		secret.BurnAfterRead,
 		secret.PasswordProtected,
 		secret.ExpiresAt,
-	)
+	).Scan(&secret.ID)
 	if err != nil {
 		if isDuplicateKeyError(err) {
 			return ErrDuplicate

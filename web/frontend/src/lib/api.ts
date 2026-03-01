@@ -143,6 +143,7 @@ export interface SecretMetadataResponse {
   password_protected: boolean;
   expires_at: string;
   created_at: string;
+  file_size?: number;
 }
 
 export function getSecretMetadata(

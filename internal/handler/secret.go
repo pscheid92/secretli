@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/pscheid92/secretli/internal/crypto"
 	"github.com/pscheid92/secretli/internal/model"
 	"github.com/pscheid92/secretli/internal/storage"
@@ -88,7 +89,7 @@ func (h *SecretHandler) CreateSecret(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *SecretHandler) RetrieveSecret(w http.ResponseWriter, r *http.Request) {
-	publicID := r.PathValue("publicID")
+	publicID := chi.URLParam(r, "publicID")
 	if publicID == "" {
 		writeError(w, http.StatusBadRequest, "missing public_id")
 		return
@@ -160,7 +161,7 @@ func (h *SecretHandler) RetrieveSecret(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *SecretHandler) SecretMetadata(w http.ResponseWriter, r *http.Request) {
-	publicID := r.PathValue("publicID")
+	publicID := chi.URLParam(r, "publicID")
 	if publicID == "" {
 		writeError(w, http.StatusBadRequest, "missing public_id")
 		return
@@ -194,6 +195,7 @@ func (h *SecretHandler) SecretMetadata(w http.ResponseWriter, r *http.Request) {
 		PasswordProtected bool   `json:"password_protected"`
 		ExpiresAt         string `json:"expires_at"`
 		CreatedAt         string `json:"created_at"`
+		FileSize          *int64 `json:"file_size,omitempty"`
 	}
 
 	writeJSON(w, http.StatusOK, metadataResponse{
@@ -202,11 +204,12 @@ func (h *SecretHandler) SecretMetadata(w http.ResponseWriter, r *http.Request) {
 		PasswordProtected: secret.PasswordProtected,
 		ExpiresAt:         secret.ExpiresAt.UTC().Format(time.RFC3339),
 		CreatedAt:         secret.CreatedAt.UTC().Format(time.RFC3339),
+		FileSize:          secret.EncryptedSize,
 	})
 }
 
 func (h *SecretHandler) DeleteSecret(w http.ResponseWriter, r *http.Request) {
-	publicID := r.PathValue("publicID")
+	publicID := chi.URLParam(r, "publicID")
 	if publicID == "" {
 		writeError(w, http.StatusBadRequest, "missing public_id")
 		return

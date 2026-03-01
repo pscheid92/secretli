@@ -7,6 +7,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/chi/v5/middleware"
+	"github.com/go-chi/cors"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/pscheid92/secretli/internal/config"
 	"github.com/pscheid92/secretli/internal/storage"
@@ -38,7 +41,7 @@ func parseOrigins(origins string) []string {
 }
 
 func New(cfg config.Config, pool *pgxpool.Pool) *App {
-	mux := http.NewServeMux()
+	r := chi.NewRouter()
 
 	// Create S3 file store if configured
 	var fileStore storage.FileStore
@@ -61,25 +64,36 @@ func New(cfg config.Config, pool *pgxpool.Pool) *App {
 	userSecretRepo := store.NewPostgresUserSecretRepo(pool)
 	rateLimiter := NewIPRateLimiter()
 
-	registerRoutes(mux, pool, secretRepo, fileStore, cfg.MaxFileSize, userRepo, sessionRepo, userSecretRepo, cfg, rateLimiter)
+	// Global middleware
+	r.Use(middleware.Recoverer)
+	r.Use(middleware.RequestID)
+	r.Use(requestIDResponseHeader)
+	r.Use(middleware.RequestLogger(&slogLogger{}))
+	r.Use(securityHeadersMiddleware)
+
+	allowedOrigins := parseOrigins(cfg.AllowedOrigins)
+	if len(allowedOrigins) > 0 {
+		r.Use(cors.Handler(cors.Options{
+			AllowedOrigins:   allowedOrigins,
+			AllowedMethods:   []string{"GET", "POST", "DELETE", "OPTIONS"},
+			AllowedHeaders:   []string{"Content-Type", "X-Retrieval-Token", "X-Deletion-Token"},
+			AllowCredentials: true,
+			MaxAge:           86400,
+		}))
+	}
+
+	r.Use(sessionMiddleware(sessionRepo))
+
+	registerRoutes(r, pool, secretRepo, fileStore, cfg.MaxFileSize, userRepo, sessionRepo, userSecretRepo, cfg, rateLimiter)
 
 	// SPA handler as catch-all
 	distFS, _ := fs.Sub(web.DistFS, "frontend/dist")
-	mux.Handle("/", spaHandler(distFS))
-
-	handler := chain(mux,
-		recoveryMiddleware,
-		requestIDMiddleware,
-		loggingMiddleware,
-		securityHeadersMiddleware,
-		corsMiddleware(parseOrigins(cfg.AllowedOrigins)),
-		sessionMiddleware(sessionRepo),
-	)
+	r.NotFound(spaHandler(distFS).ServeHTTP)
 
 	return &App{
 		HTTPServer: &http.Server{
 			Addr:         ":" + cfg.Port,
-			Handler:      handler,
+			Handler:      r,
 			ReadTimeout:  30 * time.Second,
 			WriteTimeout: 60 * time.Second,
 			IdleTimeout:  120 * time.Second,

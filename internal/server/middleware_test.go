@@ -9,18 +9,22 @@ import (
 	"testing/fstest"
 	"time"
 
+	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/chi/v5/middleware"
 	"github.com/pscheid92/secretli/internal/handler"
 	"github.com/pscheid92/secretli/internal/model"
 	"github.com/pscheid92/secretli/internal/store"
 )
 
-func TestRecoveryMiddleware(t *testing.T) {
+func TestRecoverer(t *testing.T) {
 	t.Run("returns 500 on panic", func(t *testing.T) {
-		handler := recoveryMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		r := chi.NewRouter()
+		r.Use(middleware.Recoverer)
+		r.Get("/", func(w http.ResponseWriter, r *http.Request) {
 			panic("test panic")
-		}))
+		})
 		rr := httptest.NewRecorder()
-		handler.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/", nil))
+		r.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/", nil))
 
 		if rr.Code != http.StatusInternalServerError {
 			t.Errorf("expected status 500, got %d", rr.Code)
@@ -28,11 +32,13 @@ func TestRecoveryMiddleware(t *testing.T) {
 	})
 
 	t.Run("passes through on no panic", func(t *testing.T) {
-		handler := recoveryMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		r := chi.NewRouter()
+		r.Use(middleware.Recoverer)
+		r.Get("/", func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusOK)
-		}))
+		})
 		rr := httptest.NewRecorder()
-		handler.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/", nil))
+		r.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/", nil))
 
 		if rr.Code != http.StatusOK {
 			t.Errorf("expected status 200, got %d", rr.Code)
@@ -40,41 +46,47 @@ func TestRecoveryMiddleware(t *testing.T) {
 	})
 }
 
-func TestRequestIDMiddleware(t *testing.T) {
+func TestRequestID(t *testing.T) {
 	t.Run("generates ID when none provided", func(t *testing.T) {
-		handler := requestIDMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+		r := chi.NewRouter()
+		r.Use(middleware.RequestID)
+		r.Use(requestIDResponseHeader)
+		r.Get("/", func(w http.ResponseWriter, r *http.Request) {})
 		rr := httptest.NewRecorder()
-		handler.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/", nil))
+		r.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/", nil))
 
-		id := rr.Header().Get("X-Request-ID")
+		id := rr.Header().Get("X-Request-Id")
 		if id == "" {
-			t.Error("expected X-Request-ID to be set")
+			t.Error("expected X-Request-Id to be set")
 		}
 	})
 
 	t.Run("preserves existing ID", func(t *testing.T) {
-		handler := requestIDMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+		r := chi.NewRouter()
+		r.Use(middleware.RequestID)
+		r.Use(requestIDResponseHeader)
+		r.Get("/", func(w http.ResponseWriter, r *http.Request) {})
 		rr := httptest.NewRecorder()
 		req := httptest.NewRequest(http.MethodGet, "/", nil)
-		req.Header.Set("X-Request-ID", "existing-id")
-		handler.ServeHTTP(rr, req)
+		req.Header.Set("X-Request-Id", "existing-id")
+		r.ServeHTTP(rr, req)
 
-		if got := rr.Header().Get("X-Request-ID"); got != "existing-id" {
+		if got := rr.Header().Get("X-Request-Id"); got != "existing-id" {
 			t.Errorf("expected 'existing-id', got %q", got)
 		}
 	})
 }
 
 func TestSecurityHeadersMiddleware(t *testing.T) {
-	handler := securityHeadersMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	h := securityHeadersMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
 	rr := httptest.NewRecorder()
-	handler.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/", nil))
+	h.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/", nil))
 
 	expected := map[string]string{
-		"X-Content-Type-Options": "nosniff",
-		"X-Frame-Options":       "DENY",
+		"X-Content-Type-Options":  "nosniff",
+		"X-Frame-Options":        "DENY",
 		"Content-Security-Policy": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'",
-		"Referrer-Policy":        "no-referrer",
+		"Referrer-Policy":         "no-referrer",
 	}
 	for header, want := range expected {
 		if got := rr.Header().Get(header); got != want {
@@ -83,85 +95,18 @@ func TestSecurityHeadersMiddleware(t *testing.T) {
 	}
 }
 
-func TestCorsMiddleware(t *testing.T) {
-	noop := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	})
-
-	t.Run("sets CORS headers for allowed origin", func(t *testing.T) {
-		handler := corsMiddleware([]string{"https://example.com"})(noop)
-		rr := httptest.NewRecorder()
-		req := httptest.NewRequest(http.MethodGet, "/", nil)
-		req.Header.Set("Origin", "https://example.com")
-		handler.ServeHTTP(rr, req)
-
-		if got := rr.Header().Get("Access-Control-Allow-Origin"); got != "https://example.com" {
-			t.Errorf("expected Allow-Origin 'https://example.com', got %q", got)
-		}
-		if got := rr.Header().Get("Access-Control-Allow-Credentials"); got != "true" {
-			t.Errorf("expected Allow-Credentials 'true', got %q", got)
-		}
-	})
-
-	t.Run("OPTIONS to allowed origin returns 204 with CORS headers", func(t *testing.T) {
-		handler := corsMiddleware([]string{"https://example.com"})(noop)
-		rr := httptest.NewRecorder()
-		req := httptest.NewRequest(http.MethodOptions, "/", nil)
-		req.Header.Set("Origin", "https://example.com")
-		handler.ServeHTTP(rr, req)
-
-		if rr.Code != http.StatusNoContent {
-			t.Errorf("expected status 204, got %d", rr.Code)
-		}
-		if got := rr.Header().Get("Access-Control-Allow-Origin"); got != "https://example.com" {
-			t.Errorf("expected Allow-Origin set, got %q", got)
-		}
-		if got := rr.Header().Get("Access-Control-Allow-Methods"); got == "" {
-			t.Error("expected Access-Control-Allow-Methods to be set")
-		}
-	})
-
-	t.Run("OPTIONS to disallowed origin returns 204 without CORS Allow-Origin", func(t *testing.T) {
-		handler := corsMiddleware([]string{"https://example.com"})(noop)
-		rr := httptest.NewRecorder()
-		req := httptest.NewRequest(http.MethodOptions, "/", nil)
-		req.Header.Set("Origin", "https://evil.com")
-		handler.ServeHTTP(rr, req)
-
-		if rr.Code != http.StatusNoContent {
-			t.Errorf("expected status 204, got %d", rr.Code)
-		}
-		if got := rr.Header().Get("Access-Control-Allow-Origin"); got != "" {
-			t.Errorf("expected no Allow-Origin header, got %q", got)
-		}
-	})
-
-	t.Run("empty allowed origins skips CORS entirely", func(t *testing.T) {
-		handler := corsMiddleware(nil)(noop)
-		rr := httptest.NewRecorder()
-		req := httptest.NewRequest(http.MethodGet, "/", nil)
-		req.Header.Set("Origin", "https://example.com")
-		handler.ServeHTTP(rr, req)
-
-		if got := rr.Header().Get("Access-Control-Allow-Origin"); got != "" {
-			t.Errorf("expected no CORS headers, got Allow-Origin %q", got)
-		}
-		if rr.Code != http.StatusOK {
-			t.Errorf("expected status 200, got %d", rr.Code)
-		}
-	})
-}
-
 func TestRateLimit(t *testing.T) {
 	t.Run("allows requests under limit", func(t *testing.T) {
 		rl := NewIPRateLimiter()
-		handler := RateLimit(rl, 60)(func(w http.ResponseWriter, r *http.Request) {
+		r := chi.NewRouter()
+		r.Use(RateLimit(rl, 60))
+		r.Get("/", func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusOK)
 		})
 		rr := httptest.NewRecorder()
 		req := httptest.NewRequest(http.MethodGet, "/", nil)
 		req.RemoteAddr = "1.2.3.4:1234"
-		handler.ServeHTTP(rr, req)
+		r.ServeHTTP(rr, req)
 
 		if rr.Code != http.StatusOK {
 			t.Errorf("expected status 200, got %d", rr.Code)
@@ -170,8 +115,9 @@ func TestRateLimit(t *testing.T) {
 
 	t.Run("blocks requests over limit with 429", func(t *testing.T) {
 		rl := NewIPRateLimiter()
-		// 1 request per minute with burst of 1
-		handler := RateLimit(rl, 1)(func(w http.ResponseWriter, r *http.Request) {
+		r := chi.NewRouter()
+		r.Use(RateLimit(rl, 1))
+		r.Get("/", func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusOK)
 		})
 
@@ -179,7 +125,7 @@ func TestRateLimit(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/", nil)
 		req.RemoteAddr = "1.2.3.4:1234"
 		rr := httptest.NewRecorder()
-		handler.ServeHTTP(rr, req)
+		r.ServeHTTP(rr, req)
 
 		if rr.Code != http.StatusOK {
 			t.Errorf("first request: expected status 200, got %d", rr.Code)
@@ -187,7 +133,7 @@ func TestRateLimit(t *testing.T) {
 
 		// Second request should be rate limited
 		rr2 := httptest.NewRecorder()
-		handler.ServeHTTP(rr2, req)
+		r.ServeHTTP(rr2, req)
 
 		if rr2.Code != http.StatusTooManyRequests {
 			t.Errorf("second request: expected status 429, got %d", rr2.Code)
@@ -328,86 +274,16 @@ func TestParseOrigins(t *testing.T) {
 	}
 }
 
-// --- chain tests ---
+// --- slog logger tests ---
 
-func TestChain(t *testing.T) {
-	var order []string
+func TestSlogLogger(t *testing.T) {
+	logger := &slogLogger{}
+	req := httptest.NewRequest(http.MethodGet, "/test", nil)
+	entry := logger.NewLogEntry(req)
 
-	mw1 := func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			order = append(order, "mw1-before")
-			next.ServeHTTP(w, r)
-			order = append(order, "mw1-after")
-		})
-	}
-	mw2 := func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			order = append(order, "mw2-before")
-			next.ServeHTTP(w, r)
-			order = append(order, "mw2-after")
-		})
-	}
-
-	handler := chain(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		order = append(order, "handler")
-	}), mw1, mw2)
-
-	rr := httptest.NewRecorder()
-	handler.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/", nil))
-
-	expected := []string{"mw1-before", "mw2-before", "handler", "mw2-after", "mw1-after"}
-	if len(order) != len(expected) {
-		t.Fatalf("chain order = %v, want %v", order, expected)
-	}
-	for i := range order {
-		if order[i] != expected[i] {
-			t.Errorf("chain order[%d] = %q, want %q", i, order[i], expected[i])
-		}
-	}
-}
-
-// --- loggingMiddleware tests ---
-
-func TestLoggingMiddleware(t *testing.T) {
-	t.Run("captures status code from handler", func(t *testing.T) {
-		inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			w.WriteHeader(http.StatusNotFound)
-		})
-		h := loggingMiddleware(inner)
-		rr := httptest.NewRecorder()
-		h.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/test", nil))
-
-		if rr.Code != http.StatusNotFound {
-			t.Errorf("status = %d, want %d", rr.Code, http.StatusNotFound)
-		}
-	})
-
-	t.Run("defaults to 200 when handler writes body without explicit status", func(t *testing.T) {
-		inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			w.Write([]byte("ok"))
-		})
-		h := loggingMiddleware(inner)
-		rr := httptest.NewRecorder()
-		h.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/test", nil))
-
-		if rr.Code != http.StatusOK {
-			t.Errorf("status = %d, want %d", rr.Code, http.StatusOK)
-		}
-	})
-}
-
-func TestResponseWriter_WriteHeader(t *testing.T) {
-	rr := httptest.NewRecorder()
-	rw := &responseWriter{ResponseWriter: rr, statusCode: http.StatusOK}
-
-	rw.WriteHeader(http.StatusCreated)
-
-	if rw.statusCode != http.StatusCreated {
-		t.Errorf("statusCode = %d, want %d", rw.statusCode, http.StatusCreated)
-	}
-	if rr.Code != http.StatusCreated {
-		t.Errorf("underlying recorder Code = %d, want %d", rr.Code, http.StatusCreated)
-	}
+	// Should not panic
+	entry.Write(200, 0, nil, 0, nil)
+	entry.Panic("test", nil)
 }
 
 // --- sessionMiddleware tests ---
@@ -509,8 +385,8 @@ func TestSessionMiddleware(t *testing.T) {
 
 func TestSpaHandler(t *testing.T) {
 	fsys := fstest.MapFS{
-		"index.html": &fstest.MapFile{Data: []byte("<html>SPA</html>")},
-		"assets/app.js": &fstest.MapFile{Data: []byte("console.log('app')")},
+		"index.html":     &fstest.MapFile{Data: []byte("<html>SPA</html>")},
+		"assets/app.js":  &fstest.MapFile{Data: []byte("console.log('app')")},
 	}
 
 	h := spaHandler(fs.FS(fsys))

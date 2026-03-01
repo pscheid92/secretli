@@ -242,7 +242,7 @@ func TestDownloadFile_Success(t *testing.T) {
 	seedFileSecret(repo, fs, "file1", "ret-tok", "del-tok", false)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/secrets/file1/file", nil)
-	req.SetPathValue("publicID", "file1")
+	req = withChiURLParam(req, "publicID", "file1")
 	req.Header.Set("X-Retrieval-Token", "ret-tok")
 	rec := httptest.NewRecorder()
 
@@ -273,7 +273,7 @@ func TestDownloadFile_InvalidToken(t *testing.T) {
 	seedFileSecret(repo, fs, "file1", "ret-tok", "del-tok", false)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/secrets/file1/file", nil)
-	req.SetPathValue("publicID", "file1")
+	req = withChiURLParam(req, "publicID", "file1")
 	req.Header.Set("X-Retrieval-Token", "wrong-token")
 	rec := httptest.NewRecorder()
 
@@ -290,7 +290,7 @@ func TestDownloadFile_NotFound(t *testing.T) {
 	h := NewFileHandler(repo, fs, 100*1024*1024, nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/secrets/nonexistent/file", nil)
-	req.SetPathValue("publicID", "nonexistent")
+	req = withChiURLParam(req, "publicID", "nonexistent")
 	req.Header.Set("X-Retrieval-Token", "some-tok")
 	rec := httptest.NewRecorder()
 
@@ -308,7 +308,7 @@ func TestDownloadFile_WrongSecretType(t *testing.T) {
 	seedSecret(repo, "text1", "ret-tok", "del-tok", false)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/secrets/text1/file", nil)
-	req.SetPathValue("publicID", "text1")
+	req = withChiURLParam(req, "publicID", "text1")
 	req.Header.Set("X-Retrieval-Token", "ret-tok")
 	rec := httptest.NewRecorder()
 
@@ -330,7 +330,7 @@ func TestDownloadFile_BurnAfterRead(t *testing.T) {
 
 	// First download succeeds
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/secrets/burn-file/file", nil)
-	req.SetPathValue("publicID", "burn-file")
+	req = withChiURLParam(req, "publicID", "burn-file")
 	req.Header.Set("X-Retrieval-Token", "ret-tok")
 	rec := httptest.NewRecorder()
 	h.DownloadFile(rec, req)
@@ -351,7 +351,7 @@ func TestDownloadFile_BurnAfterRead(t *testing.T) {
 
 	// Second download fails
 	req = httptest.NewRequest(http.MethodPost, "/api/v1/secrets/burn-file/file", nil)
-	req.SetPathValue("publicID", "burn-file")
+	req = withChiURLParam(req, "publicID", "burn-file")
 	req.Header.Set("X-Retrieval-Token", "ret-tok")
 	rec = httptest.NewRecorder()
 	h.DownloadFile(rec, req)
@@ -370,7 +370,7 @@ func TestDeleteSecret_FileSecretCleansS3(t *testing.T) {
 	seedFileSecret(repo, fs, "del-file", "ret-tok", "del-tok", false)
 
 	req := httptest.NewRequest(http.MethodDelete, "/api/v1/secrets/del-file", nil)
-	req.SetPathValue("publicID", "del-file")
+	req = withChiURLParam(req, "publicID", "del-file")
 	req.Header.Set("X-Retrieval-Token", "ret-tok")
 	req.Header.Set("X-Deletion-Token", "del-tok")
 	rec := httptest.NewRecorder()
@@ -488,7 +488,7 @@ func TestDownloadFile_MissingToken(t *testing.T) {
 	h := NewFileHandler(repo, fs, 100*1024*1024, nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/secrets/file1/file", nil)
-	req.SetPathValue("publicID", "file1")
+	req = withChiURLParam(req, "publicID", "file1")
 	rec := httptest.NewRecorder()
 
 	h.DownloadFile(rec, req)
@@ -532,7 +532,7 @@ func TestDownloadFile_MissingStorageKey(t *testing.T) {
 	}
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/secrets/no-key/file", nil)
-	req.SetPathValue("publicID", "no-key")
+	req = withChiURLParam(req, "publicID", "no-key")
 	req.Header.Set("X-Retrieval-Token", "ret-tok")
 	rec := httptest.NewRecorder()
 
@@ -551,7 +551,7 @@ func TestDownloadFile_S3GetError(t *testing.T) {
 	seedFileSecret(repo, fs, "s3-err", "ret-tok", "del-tok", false)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/secrets/s3-err/file", nil)
-	req.SetPathValue("publicID", "s3-err")
+	req = withChiURLParam(req, "publicID", "s3-err")
 	req.Header.Set("X-Retrieval-Token", "ret-tok")
 	rec := httptest.NewRecorder()
 
@@ -569,7 +569,7 @@ func TestDeleteSecret_TextSecretSkipsS3(t *testing.T) {
 	seedSecret(repo, "text-del", "ret-tok", "del-tok", false)
 
 	req := httptest.NewRequest(http.MethodDelete, "/api/v1/secrets/text-del", nil)
-	req.SetPathValue("publicID", "text-del")
+	req = withChiURLParam(req, "publicID", "text-del")
 	req.Header.Set("X-Retrieval-Token", "ret-tok")
 	req.Header.Set("X-Deletion-Token", "del-tok")
 	rec := httptest.NewRecorder()
