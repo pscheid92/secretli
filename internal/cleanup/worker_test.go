@@ -57,7 +57,7 @@ func TestRunCycle_Success(t *testing.T) {
 	}
 	fileStore := &mockFileStore{}
 
-	w := NewWorker(time.Minute, secretRepo, fileStore)
+	w := NewWorker(time.Minute, secretRepo, fileStore, nil)
 	w.runCycle(context.Background())
 
 	if secretRepo.deleteExpiredCalled.Load() != 1 {
@@ -81,7 +81,7 @@ func TestRunCycle_RepoErrors(t *testing.T) {
 		deleteExpiredErr: errors.New("db connection lost"),
 	}
 
-	w := NewWorker(time.Minute, secretRepo, nil)
+	w := NewWorker(time.Minute, secretRepo, nil, nil)
 
 	// Should not panic despite repo errors.
 	w.runCycle(context.Background())
@@ -98,7 +98,7 @@ func TestRunCycle_NilFileStore(t *testing.T) {
 	}
 
 	// fileStore is nil — should not panic when storageKeys are returned.
-	w := NewWorker(time.Minute, secretRepo, nil)
+	w := NewWorker(time.Minute, secretRepo, nil, nil)
 	w.runCycle(context.Background())
 
 	if secretRepo.deleteExpiredCalled.Load() != 1 {
@@ -109,7 +109,7 @@ func TestRunCycle_NilFileStore(t *testing.T) {
 func TestRun_ContextCancellation(t *testing.T) {
 	secretRepo := &mockSecretRepo{}
 
-	w := NewWorker(10*time.Millisecond, secretRepo, nil)
+	w := NewWorker(10*time.Millisecond, secretRepo, nil, nil)
 
 	ctx, cancel := context.WithCancel(context.Background())
 

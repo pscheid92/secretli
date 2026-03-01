@@ -1,10 +1,12 @@
 import { useState } from "react";
+import { Link } from "react-router";
 import { Controller, useForm } from "react-hook-form";
 import { toast } from "sonner";
 import ExpirationPicker from "../components/ExpirationPicker";
 import FileUpload from "../components/FileUpload";
 import SecretResult from "../components/SecretResult";
 import Spinner from "../components/Spinner";
+import Toggle from "../components/Toggle";
 import { ApiError, uploadFile } from "../lib/api";
 import { KeySet } from "../lib/encryption";
 
@@ -19,6 +21,23 @@ interface FileResult {
   url: string;
   expiresAt: string;
   burnAfterRead: boolean;
+  deletionToken: string;
+}
+
+function ShareTabBar() {
+  return (
+    <div className="flex border-b border-zinc-200 dark:border-zinc-500/50 mb-6">
+      <Link
+        to="/share"
+        className="px-1 pb-3 mr-6 text-sm text-zinc-600 dark:text-zinc-100 hover:text-zinc-900 dark:hover:text-white border-b-2 border-transparent transition-colors duration-150"
+      >
+        Text
+      </Link>
+      <div className="px-1 pb-3 text-sm font-medium text-zinc-900 dark:text-zinc-100 border-b-2 border-amber-400">
+        File
+      </div>
+    </div>
+  );
 }
 
 export default function FilePage() {
@@ -44,6 +63,7 @@ export default function FilePage() {
   });
 
   const files = watch("files");
+  const burnAfterRead = watch("burnAfterRead");
 
   async function onSubmit(data: FileFormData) {
     setLoading(true);
@@ -91,12 +111,11 @@ export default function FilePage() {
         encryptedBlob,
       );
 
-      const shareUrl = `${window.location.origin}/s#${encoded.shareSecret}!${encoded.deletionToken}`;
-
       setResult({
-        url: shareUrl,
+        url: `${window.location.origin}/s#${encoded.shareSecret}`,
         expiresAt: response.expires_at,
         burnAfterRead: data.burnAfterRead,
+        deletionToken: encoded.deletionToken,
       });
       toast.success(data.files.length > 1 ? "Files uploaded" : "File uploaded");
     } catch (err) {
@@ -110,119 +129,111 @@ export default function FilePage() {
     }
   }
 
-  return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold dark:text-white">Share a File</h1>
-        <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-          Your file is encrypted in your browser before being uploaded. Only the link holder can
-          decrypt it.
-        </p>
+  if (result) {
+    return (
+      <div className="space-y-5">
+        <SecretResult
+          url={result.url}
+          expiresAt={result.expiresAt}
+          burnAfterRead={result.burnAfterRead}
+          deletionToken={result.deletionToken}
+        />
+        <button
+          type="button"
+          onClick={() => {
+            setResult(null);
+            reset();
+          }}
+          className="text-xs text-zinc-500 dark:text-zinc-100 hover:text-amber-500 dark:hover:text-amber-400 transition-colors duration-150"
+        >
+          ← Share another file
+        </button>
       </div>
+    );
+  }
 
-      {result ? (
-        <div className="space-y-4">
-          <SecretResult
-            url={result.url}
-            expiresAt={result.expiresAt}
-            burnAfterRead={result.burnAfterRead}
-          />
-          <button
-            type="button"
-            onClick={() => {
-              setResult(null);
-              reset();
+  return (
+    <div>
+      <ShareTabBar />
+      <form onSubmit={handleSubmit(onSubmit)} className="space-y-5">
+        {/* File upload */}
+        <div>
+          <FileUpload
+            onSelect={(selected) => {
+              setValue("files", selected, { shouldValidate: true });
             }}
-            className="text-sm font-medium text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300 transition-colors duration-150"
-          >
-            Share another file
-          </button>
+          />
+          {errors.files && (
+            <p className="mt-1.5 text-xs text-red-500 dark:text-red-400">{errors.files.message}</p>
+          )}
         </div>
-      ) : (
-        <div className="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-5 shadow-sm">
-          <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
-            <div>
-              <FileUpload
-                onSelect={(selected) => {
-                  setValue("files", selected, { shouldValidate: true });
-                }}
+
+        {/* Expiration */}
+        <div className="space-y-2">
+          <label className="block text-xs tracking-widest uppercase text-zinc-600 dark:text-zinc-100">
+            Expires in
+          </label>
+          <Controller
+            name="expiration"
+            control={control}
+            render={({ field }) => (
+              <ExpirationPicker value={field.value} onChange={field.onChange} />
+            )}
+          />
+        </div>
+
+        {/* Options */}
+        <div className="rounded-lg border border-zinc-200 dark:border-zinc-500 bg-white dark:bg-zinc-900 divide-y divide-zinc-200 dark:divide-zinc-500/60">
+          <div className="px-4 py-3">
+            <Toggle
+              checked={burnAfterRead}
+              onChange={() => setValue("burnAfterRead", !burnAfterRead, { shouldValidate: true })}
+              label="Burn after reading"
+              description="Permanently destroyed after first view"
+            />
+          </div>
+          <div className="px-4 py-3">
+            <Toggle
+              checked={showPassword}
+              onChange={() => {
+                setShowPassword(!showPassword);
+                if (showPassword) setValue("password", "");
+              }}
+              label="Password protection"
+              description="Require a password to decrypt"
+            />
+          </div>
+          {showPassword && (
+            <div className="px-4 py-3">
+              <input
+                type="password"
+                {...register("password", {
+                  validate: (v) => !showPassword || v.length > 0 || "Password is required",
+                })}
+                placeholder="Enter a password..."
+                className="w-full rounded-md border border-zinc-200 dark:border-zinc-500 bg-zinc-50 dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 px-3 py-2.5 text-sm placeholder:text-zinc-500 dark:placeholder:text-zinc-500 focus:outline-none focus:border-amber-400 dark:focus:border-amber-400 focus:ring-1 focus:ring-amber-400/20 transition-colors duration-150"
               />
-              {errors.files && (
-                <p className="mt-1 text-sm text-red-600 dark:text-red-400">
-                  {errors.files.message}
-                </p>
+              {errors.password && (
+                <p className="mt-1.5 text-xs text-red-500 dark:text-red-400">{errors.password.message}</p>
               )}
             </div>
-
-            <div className="flex flex-wrap items-center gap-4">
-              <div>
-                <label
-                  htmlFor="expiration"
-                  className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1"
-                >
-                  Expires in
-                </label>
-                <Controller
-                  name="expiration"
-                  control={control}
-                  render={({ field }) => (
-                    <ExpirationPicker value={field.value} onChange={field.onChange} />
-                  )}
-                />
-              </div>
-
-              <label className="flex items-center gap-2 pt-5 text-sm text-gray-700 dark:text-gray-300 cursor-pointer">
-                <input
-                  type="checkbox"
-                  {...register("burnAfterRead")}
-                  className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                />
-                Burn after reading
-              </label>
-            </div>
-
-            <div>
-              <button
-                type="button"
-                onClick={() => setShowPassword(!showPassword)}
-                className="text-sm font-medium text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300 transition-colors duration-150"
-              >
-                {showPassword ? "Remove password protection" : "Add password protection"}
-              </button>
-              {showPassword && (
-                <>
-                  <input
-                    type="password"
-                    {...register("password", {
-                      validate: (v) => !showPassword || v.length > 0 || "Password is required",
-                    })}
-                    placeholder="Enter a password..."
-                    className="mt-2 w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-800 dark:text-white px-3.5 py-2.5 text-sm placeholder:text-gray-400 focus:bg-white dark:focus:bg-gray-800 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-colors duration-150"
-                  />
-                  {errors.password && (
-                    <p className="mt-1 text-sm text-red-600 dark:text-red-400">
-                      {errors.password.message}
-                    </p>
-                  )}
-                </>
-              )}
-            </div>
-
-            <button
-              type="submit"
-              disabled={loading || files.length === 0}
-              className="flex w-full items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2.5 font-semibold text-white shadow-md hover:bg-blue-700 hover:shadow-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-150"
-            >
-              {loading && <Spinner size="sm" />}
-              {loading
-                ? "Encrypting & uploading..."
-                : files.length > 1
-                  ? "Share Files"
-                  : "Share File"}
-            </button>
-          </form>
+          )}
         </div>
-      )}
+
+        {/* Submit */}
+        <button
+          type="submit"
+          disabled={loading || files.length === 0}
+          className="flex w-full items-center justify-center gap-2 rounded-lg bg-amber-400 px-4 py-3 text-sm font-medium text-zinc-900 hover:bg-amber-300 focus:outline-none focus:ring-2 focus:ring-amber-400/50 disabled:opacity-40 disabled:cursor-not-allowed transition-all duration-150"
+        >
+          {loading && <Spinner size="sm" className="text-zinc-700" />}
+          {loading
+            ? "Encrypting & uploading..."
+            : files.length > 1
+              ? "Encrypt & Share Files"
+              : "Encrypt & Share File"}
+        </button>
+      </form>
     </div>
   );
 }

@@ -9,7 +9,9 @@ export default function QRCode({ url }: QRCodeProps) {
   const [dataUrl, setDataUrl] = useState<string | null>(null);
 
   useEffect(() => {
-    QRCodeLib.toDataURL(url, { errorCorrectionLevel: "M", margin: 2 }).then(setDataUrl);
+    QRCodeLib.toDataURL(url, { errorCorrectionLevel: "M", margin: 2 })
+      .then(setDataUrl)
+      .catch(console.error);
   }, [url]);
 
   if (!dataUrl) return null;

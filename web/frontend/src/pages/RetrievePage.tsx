@@ -17,25 +17,24 @@ import { formatRelativeTime, formatSize } from "../lib/format";
 type State =
   | { stage: "prompt" }
   | { stage: "loading" }
-  | {
-      stage: "confirm";
-      shareSecret: string;
-      deletionToken: string;
-      metadata: SecretMetadataResponse;
-    }
-  | {
-      stage: "password";
-      shareSecret: string;
-      deletionToken: string;
-      secretType: string;
-      nonce: string;
-      encryptedData: string;
-    }
-  | { stage: "decrypted"; text: string; deletionToken: string; shareSecret: string }
+  | { stage: "confirm"; shareSecret: string; deletionToken: string; metadata: SecretMetadataResponse }
+  | { stage: "password"; shareSecret: string; deletionToken: string; secretType: string; nonce: string; encryptedData: string }
+  | { stage: "decrypted"; text: string; shareSecret: string; deletionToken: string }
   | { stage: "downloading" }
-  | { stage: "file-ready"; filename: string; deletionToken: string; shareSecret: string }
+  | { stage: "file-ready"; filename: string; shareSecret: string; deletionToken: string }
   | { stage: "deleted" }
   | { stage: "error"; message: string };
+
+function MetaRow({ label, value, accent }: { label: string; value: string; accent?: boolean }) {
+  return (
+    <div className="flex items-center justify-between py-2.5 text-sm">
+      <span className="text-zinc-600 dark:text-zinc-100">{label}</span>
+      <span className={accent ? "text-amber-600 dark:text-amber-400 font-medium" : "text-zinc-600 dark:text-zinc-100"}>
+        {value}
+      </span>
+    </div>
+  );
+}
 
 export default function RetrievePage() {
   const hash = window.location.hash.slice(1);
@@ -51,44 +50,41 @@ export default function RetrievePage() {
   const [revealing, setRevealing] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
-  const handleFileDownload = useCallback(
-    async (
-      keySet: KeySet,
-      publicID: string,
-      retrievalToken: string,
-      shareSecret: string,
-      deletionToken: string,
-    ) => {
-      setState({ stage: "downloading" });
+  const handleFileDownload = useCallback(async (
+    keySet: KeySet,
+    publicID: string,
+    retrievalToken: string,
+    shareSecret: string,
+    deletionToken: string,
+  ) => {
+    setState({ stage: "downloading" });
 
-      const fileResponse = await downloadFile(publicID, retrievalToken);
+    const fileResponse = await downloadFile(publicID, retrievalToken);
 
-      const decryptedBytes = await keySet.decryptFile(fileResponse.nonce, fileResponse.blob);
-      let filename = "download";
-      if (fileResponse.encryptedFilename) {
-        filename = await keySet.decryptFilename(fileResponse.encryptedFilename);
-      }
+    const decryptedBytes = await keySet.decryptFile(fileResponse.nonce, fileResponse.blob);
+    let filename = "download";
+    if (fileResponse.encryptedFilename) {
+      filename = await keySet.decryptFilename(fileResponse.encryptedFilename);
+    }
 
-      const url = URL.createObjectURL(
-        new Blob([
-          decryptedBytes.buffer.slice(
-            decryptedBytes.byteOffset,
-            decryptedBytes.byteOffset + decryptedBytes.byteLength,
-          ) as ArrayBuffer,
-        ]),
-      );
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = filename;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
+    const url = URL.createObjectURL(
+      new Blob([
+        decryptedBytes.buffer.slice(
+          decryptedBytes.byteOffset,
+          decryptedBytes.byteOffset + decryptedBytes.byteLength,
+        ) as ArrayBuffer,
+      ]),
+    );
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
 
-      setState({ stage: "file-ready", filename, deletionToken, shareSecret });
-    },
-    [],
-  );
+    setState({ stage: "file-ready", filename, shareSecret, deletionToken });
+  }, []);
 
   const fetchMetadata = useCallback(async () => {
     const hash = window.location.hash.slice(1);
@@ -152,18 +148,12 @@ export default function RetrievePage() {
       }
 
       if (response.secret_type === "file") {
-        await handleFileDownload(
-          keySet,
-          encoded.publicID,
-          encoded.retrievalToken,
-          shareSecret,
-          deletionToken,
-        );
+        await handleFileDownload(keySet, encoded.publicID, encoded.retrievalToken, shareSecret, deletionToken);
         return;
       }
 
       const text = await keySet.decrypt(response.nonce, response.encrypted_data);
-      setState({ stage: "decrypted", text, deletionToken, shareSecret });
+      setState({ stage: "decrypted", text, shareSecret, deletionToken });
     } catch (err) {
       if (err instanceof ApiError) {
         if (err.status === 404) {
@@ -189,23 +179,12 @@ export default function RetrievePage() {
       const encoded = keySet.getEncoded();
 
       if (state.secretType === "file") {
-        await handleFileDownload(
-          keySet,
-          encoded.publicID,
-          encoded.retrievalToken,
-          state.shareSecret,
-          state.deletionToken,
-        );
+        await handleFileDownload(keySet, encoded.publicID, encoded.retrievalToken, state.shareSecret, state.deletionToken);
         return;
       }
 
       const text = await keySet.decrypt(state.nonce, state.encryptedData);
-      setState({
-        stage: "decrypted",
-        text,
-        deletionToken: state.deletionToken,
-        shareSecret: state.shareSecret,
-      });
+      setState({ stage: "decrypted", text, shareSecret: state.shareSecret, deletionToken: state.deletionToken });
     } catch {
       setPasswordFormError("password", { message: "Wrong password. Please try again." });
     } finally {
@@ -238,9 +217,10 @@ export default function RetrievePage() {
   async function copyDecryptedText() {
     if (state.stage !== "decrypted") return;
     await navigator.clipboard.writeText(state.text);
-    toast.success("Secret copied to clipboard");
+    toast.success("Copied to clipboard");
   }
 
+  // ── Prompt ────────────────────────────────────────────────────────────────
 
   if (state.stage === "prompt") {
     function handleLinkSubmit(e: React.FormEvent) {
@@ -262,139 +242,133 @@ export default function RetrievePage() {
     return (
       <div className="space-y-6">
         <div>
-          <h1 className="text-2xl font-bold dark:text-white">Retrieve a Secret</h1>
-          <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-            Paste the secret link you received to decrypt and view its contents.
+          <h1 className="font-display text-2xl font-semibold text-zinc-800 dark:text-zinc-100">
+            Retrieve a Secret
+          </h1>
+          <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-100">
+            Paste the link you received to decrypt it.
           </p>
         </div>
-        <div className="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-5 shadow-sm">
-          <form onSubmit={handleLinkSubmit} className="space-y-4">
-            <div>
-              <label
-                htmlFor="secret-link"
-                className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1"
-              >
-                Secret link
-              </label>
-              <input
-                id="secret-link"
-                type="text"
-                value={linkInput}
-                onChange={(e) => setLinkInput(e.target.value)}
-                placeholder="https://secretli.example/s#..."
-                autoFocus
-                className="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-800 dark:text-white px-3.5 py-2.5 text-sm font-mono placeholder:text-gray-400 focus:bg-white dark:focus:bg-gray-800 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-colors duration-150"
-              />
-            </div>
-            <button
-              type="submit"
-              className="flex w-full items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2.5 font-semibold text-white shadow-md hover:bg-blue-700 hover:shadow-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-all duration-150"
-            >
-              Retrieve Secret
-            </button>
-          </form>
-        </div>
+        <form onSubmit={handleLinkSubmit} className="space-y-4">
+          <input
+            id="secret-link"
+            type="text"
+            value={linkInput}
+            onChange={(e) => setLinkInput(e.target.value)}
+            placeholder="https://secretli.example/s#..."
+            autoFocus
+            className="w-full rounded-lg border border-zinc-200 dark:border-zinc-500/50 bg-white dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 px-4 py-3 text-sm font-mono placeholder:text-zinc-500 dark:placeholder:text-zinc-500 focus:outline-none focus:border-amber-400 dark:focus:border-amber-400 focus:ring-1 focus:ring-amber-400/20 transition-colors duration-150"
+          />
+          <button
+            type="submit"
+            className="flex w-full items-center justify-center gap-2 rounded-lg bg-amber-400 px-4 py-3 text-sm font-medium text-zinc-900 hover:bg-amber-300 focus:outline-none focus:ring-2 focus:ring-amber-400/50 transition-all duration-150"
+          >
+            Retrieve Secret
+          </button>
+        </form>
       </div>
     );
   }
+
+  // ── Loading ───────────────────────────────────────────────────────────────
 
   if (state.stage === "loading") {
     return (
-      <div className="flex flex-col items-center justify-center gap-3 py-12">
-        <Spinner size="lg" className="text-blue-600" />
-        <p className="text-gray-500 dark:text-gray-400">Loading secret info...</p>
+      <div className="flex flex-col items-center justify-center gap-3 py-20">
+        <Spinner size="lg" className="text-amber-400" />
+        <p className="text-sm text-zinc-600 dark:text-zinc-100">Loading...</p>
       </div>
     );
   }
+
+  // ── Downloading ───────────────────────────────────────────────────────────
 
   if (state.stage === "downloading") {
     return (
-      <div className="flex flex-col items-center justify-center gap-3 py-12">
-        <Spinner size="lg" className="text-blue-600" />
-        <p className="text-gray-500 dark:text-gray-400">Downloading and decrypting file...</p>
+      <div className="flex flex-col items-center justify-center gap-3 py-20">
+        <Spinner size="lg" className="text-amber-400" />
+        <p className="text-sm text-zinc-600 dark:text-zinc-100">Downloading and decrypting...</p>
       </div>
     );
   }
 
+  // ── Error ─────────────────────────────────────────────────────────────────
+
   if (state.stage === "error") {
     return (
-      <div className="space-y-4">
-        <div className="rounded-xl border border-red-200 dark:border-red-800 bg-white dark:bg-gray-900 p-5 shadow-sm">
-          <h2 className="text-lg font-semibold text-red-800 dark:text-red-300">
-            Unable to retrieve secret
-          </h2>
-          <p className="mt-1 text-sm text-red-700 dark:text-red-400">{state.message}</p>
+      <div className="space-y-5">
+        <div className="rounded-lg border border-red-200 dark:border-red-900/40 bg-red-50 dark:bg-red-900/10 p-5">
+          <div className="flex items-start gap-3">
+            <svg className="h-4 w-4 text-red-500 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+            </svg>
+            <div>
+              <p className="text-sm font-medium text-red-700 dark:text-red-400">Unable to retrieve secret</p>
+              <p className="text-sm text-red-600 dark:text-red-500 mt-0.5">{state.message}</p>
+            </div>
+          </div>
         </div>
         <a
           href="/share"
-          className="inline-block text-sm font-medium text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300 transition-colors duration-150"
+          className="text-xs text-zinc-500 dark:text-zinc-100 hover:text-amber-500 dark:hover:text-amber-400 transition-colors duration-150"
         >
-          Share a new secret
+          ← Share a new secret
         </a>
       </div>
     );
   }
+
+  // ── Confirm ───────────────────────────────────────────────────────────────
 
   if (state.stage === "confirm") {
     const { metadata } = state;
     const isFile = metadata.secret_type === "file";
 
     return (
-      <div className="space-y-4">
+      <div className="space-y-5">
         <div>
-          <h1 className="text-2xl font-bold dark:text-white">Secret Ready</h1>
-          <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-            Review the details below, then reveal the secret.
+          <h1 className="font-display text-2xl font-semibold text-zinc-800 dark:text-zinc-100">
+            Secret Ready
+          </h1>
+          <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-100">
+            Review the details, then reveal.
           </p>
         </div>
 
-        <div className="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-5 shadow-sm divide-y divide-gray-100 dark:divide-gray-800">
-          <div className="flex items-center gap-2 py-2.5 first:pt-0 text-sm">
+        <div className="rounded-lg border border-zinc-200 dark:border-zinc-500/50 divide-y divide-zinc-200 dark:divide-zinc-500/50 overflow-hidden">
+          <div className="flex items-center gap-2.5 px-4 py-3">
             <SecretTypeIcon
               type={metadata.secret_type}
-              className="h-5 w-5 text-gray-400 dark:text-gray-500"
+              className="h-4 w-4 text-zinc-500 dark:text-zinc-100"
             />
-            <span className="font-medium text-gray-900 dark:text-gray-100 capitalize">
-              {metadata.secret_type === "file" ? "File" : "Text"} Secret
+            <span className="text-sm font-medium text-zinc-600 dark:text-zinc-100">
+              {isFile ? "File" : "Text"} secret
             </span>
           </div>
-          <div className="flex justify-between py-2.5 text-sm">
-            <span className="text-gray-500 dark:text-gray-400">Created</span>
-            <span
-              className="text-gray-900 dark:text-gray-100"
-              title={new Date(metadata.created_at).toLocaleString()}
-            >
-              {formatRelativeTime(metadata.created_at)}
-            </span>
+          <div className="px-4">
+            <MetaRow label="Created" value={formatRelativeTime(metadata.created_at)} />
           </div>
-          <div className="flex justify-between py-2.5 text-sm">
-            <span className="text-gray-500 dark:text-gray-400">Expires</span>
-            <span
-              className="text-gray-900 dark:text-gray-100"
-              title={new Date(metadata.expires_at).toLocaleString()}
-            >
-              {formatRelativeTime(metadata.expires_at)}
-            </span>
+          <div className="px-4">
+            <MetaRow label="Expires" value={formatRelativeTime(metadata.expires_at)} />
           </div>
           {isFile && metadata.file_size != null && (
-            <div className="flex justify-between py-2.5 text-sm">
-              <span className="text-gray-500 dark:text-gray-400">Size</span>
-              <span className="text-gray-900 dark:text-gray-100">
-                {formatSize(metadata.file_size)}
-              </span>
+            <div className="px-4">
+              <MetaRow label="Size" value={formatSize(metadata.file_size)} />
             </div>
           )}
           {metadata.password_protected && (
-            <div className="flex justify-between py-2.5 last:pb-0 text-sm">
-              <span className="text-gray-500 dark:text-gray-400">Password</span>
-              <span className="text-amber-600 dark:text-amber-400 font-medium">Required</span>
+            <div className="px-4">
+              <MetaRow label="Password" value="Required" accent />
             </div>
           )}
         </div>
 
         {metadata.burn_after_read && (
-          <div className="rounded-xl border border-amber-200 dark:border-amber-800 bg-white dark:bg-gray-900 p-5 shadow-sm">
-            <p className="text-sm font-medium text-amber-800 dark:text-amber-300">
+          <div className="flex items-start gap-3 rounded-lg border border-amber-200 dark:border-amber-900/40 bg-amber-50 dark:bg-amber-900/10 px-4 py-3">
+            <svg className="h-4 w-4 text-amber-500 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+            </svg>
+            <p className="text-xs text-amber-700 dark:text-amber-400">
               This secret will be permanently destroyed after viewing.
             </p>
           </div>
@@ -404,97 +378,101 @@ export default function RetrievePage() {
           type="button"
           onClick={handleReveal}
           disabled={revealing}
-          className="flex w-full items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2.5 font-semibold text-white shadow-md hover:bg-blue-700 hover:shadow-lg disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-150"
+          className="flex w-full items-center justify-center gap-2 rounded-lg bg-amber-400 px-4 py-3 text-sm font-medium text-zinc-900 hover:bg-amber-300 focus:outline-none focus:ring-2 focus:ring-amber-400/50 disabled:opacity-40 disabled:cursor-not-allowed transition-all duration-150"
         >
-          {revealing && <Spinner size="sm" />}
-          {revealing
-            ? "Revealing..."
-            : isFile
-              ? "Download & Decrypt"
-              : "Reveal Secret"}
+          {revealing && <Spinner size="sm" className="text-zinc-700" />}
+          {revealing ? "Decrypting..." : isFile ? "Download & Decrypt" : "Reveal Secret"}
         </button>
       </div>
     );
   }
 
+  // ── Password ──────────────────────────────────────────────────────────────
+
   if (state.stage === "password") {
     return (
-      <div className="space-y-4">
+      <div className="space-y-5">
         <div>
-          <h1 className="text-2xl font-bold dark:text-white">Password Required</h1>
-          <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-            This secret is password-protected. Enter the password to decrypt it.
+          <h1 className="font-display text-2xl font-semibold text-zinc-800 dark:text-zinc-100">
+            Password Required
+          </h1>
+          <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-100">
+            This secret is password-protected.
           </p>
         </div>
-        <div className="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-5 shadow-sm">
-          <form onSubmit={handlePasswordFormSubmit(handlePasswordSubmit)} className="space-y-3">
-            <input
-              type="password"
-              {...registerPassword("password", { required: "Password is required" })}
-              placeholder="Enter password..."
-              autoFocus
-              className="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-800 dark:text-white px-3.5 py-2.5 text-sm placeholder:text-gray-400 focus:bg-white dark:focus:bg-gray-800 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-colors duration-150"
-            />
-            {passwordErrors.password && (
-              <p className="text-sm text-red-600 dark:text-red-400">
-                {passwordErrors.password.message}
-              </p>
-            )}
-            <button
-              type="submit"
-              disabled={passwordLoading}
-              className="flex w-full items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2.5 font-semibold text-white shadow-md hover:bg-blue-700 hover:shadow-lg disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-150"
-            >
-              {passwordLoading && <Spinner size="sm" />}
-              {passwordLoading ? "Decrypting..." : "Decrypt"}
-            </button>
-          </form>
-        </div>
+        <form onSubmit={handlePasswordFormSubmit(handlePasswordSubmit)} className="space-y-4">
+          <input
+            type="password"
+            {...registerPassword("password", { required: "Password is required" })}
+            placeholder="Enter password..."
+            autoFocus
+            className="w-full rounded-lg border border-zinc-200 dark:border-zinc-500/50 bg-white dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 px-4 py-3 text-sm placeholder:text-zinc-500 dark:placeholder:text-zinc-500 focus:outline-none focus:border-amber-400 dark:focus:border-amber-400 focus:ring-1 focus:ring-amber-400/20 transition-colors duration-150"
+          />
+          {passwordErrors.password && (
+            <p className="text-xs text-red-500 dark:text-red-400">{passwordErrors.password.message}</p>
+          )}
+          <button
+            type="submit"
+            disabled={passwordLoading}
+            className="flex w-full items-center justify-center gap-2 rounded-lg bg-amber-400 px-4 py-3 text-sm font-medium text-zinc-900 hover:bg-amber-300 focus:outline-none focus:ring-2 focus:ring-amber-400/50 disabled:opacity-40 disabled:cursor-not-allowed transition-all duration-150"
+          >
+            {passwordLoading && <Spinner size="sm" className="text-zinc-700" />}
+            {passwordLoading ? "Decrypting..." : "Decrypt"}
+          </button>
+        </form>
       </div>
     );
   }
 
+  // ── Deleted ───────────────────────────────────────────────────────────────
+
   if (state.stage === "deleted") {
     return (
-      <div className="space-y-4">
-        <div className="rounded-xl border border-green-200 dark:border-green-800 bg-white dark:bg-gray-900 p-5 shadow-sm">
-          <h2 className="text-lg font-semibold text-green-800 dark:text-green-300">
-            Secret deleted
-          </h2>
-          <p className="mt-1 text-sm text-green-700 dark:text-green-400">
+      <div className="space-y-5">
+        <div className="flex items-center gap-2.5">
+          <div className="w-2 h-2 rounded-full bg-emerald-400" />
+          <span className="text-sm font-medium text-zinc-600 dark:text-zinc-100">Secret deleted</span>
+        </div>
+        <div className="rounded-lg border border-zinc-200 dark:border-zinc-500/50 px-4 py-4">
+          <p className="text-sm text-zinc-600 dark:text-zinc-100">
             The secret has been permanently destroyed.
           </p>
         </div>
         <a
-          href="/share"
-          className="inline-block text-sm font-medium text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300 transition-colors duration-150"
+          href="/"
+          className="text-xs text-zinc-500 dark:text-zinc-100 hover:text-amber-500 dark:hover:text-amber-400 transition-colors duration-150"
         >
-          Share a new secret
+          ← Share a new secret
         </a>
       </div>
     );
   }
 
+  // ── File ready ────────────────────────────────────────────────────────────
+
   if (state.stage === "file-ready") {
     return (
-      <div className="space-y-4">
+      <div className="space-y-5">
         <div>
-          <h1 className="text-2xl font-bold dark:text-white">File Downloaded</h1>
-          <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-            The file has been decrypted and saved to your downloads.
+          <h1 className="font-display text-2xl font-semibold text-zinc-800 dark:text-zinc-100">
+            File Downloaded
+          </h1>
+          <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-100">
+            Decrypted and saved to your downloads.
           </p>
         </div>
-        <div className="rounded-xl border border-green-200 dark:border-green-800 bg-white dark:bg-gray-900 p-5 shadow-sm">
-          <p className="text-sm font-medium text-green-800 dark:text-green-300">{state.filename}</p>
+        <div className="rounded-lg border border-zinc-200 dark:border-zinc-500/50 px-4 py-4 flex items-center gap-3">
+          <div className="w-2 h-2 rounded-full bg-emerald-400 flex-shrink-0" />
+          <span className="text-sm font-medium text-zinc-600 dark:text-zinc-100 font-mono">{state.filename}</span>
         </div>
         {state.deletionToken && (
           <button
             type="button"
             onClick={handleDelete}
             disabled={deleting}
-            className="flex items-center gap-2 rounded-lg bg-red-600 px-4 py-2.5 font-semibold text-white shadow-md hover:bg-red-700 hover:shadow-lg disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-150"
+            className="flex items-center gap-2 rounded-lg border border-red-200 dark:border-red-900/40 px-4 py-2.5 text-sm text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/10 focus:outline-none focus:ring-2 focus:ring-red-500/20 disabled:opacity-40 disabled:cursor-not-allowed transition-all duration-150"
           >
-            {deleting && <Spinner size="sm" />}
+            {deleting && <Spinner size="sm" className="text-red-500" />}
             {deleting ? "Deleting..." : "Delete this secret"}
           </button>
         )}
@@ -502,39 +480,43 @@ export default function RetrievePage() {
     );
   }
 
-  // stage === 'decrypted'
+  // ── Decrypted ─────────────────────────────────────────────────────────────
+
   return (
-    <div className="space-y-4">
+    <div className="space-y-5">
       <div>
-        <h1 className="text-2xl font-bold dark:text-white">Secret</h1>
-        <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-          This secret was shared with you. Copy the contents below.
+        <h1 className="font-display text-2xl font-semibold text-zinc-800 dark:text-zinc-100">
+          Secret
+        </h1>
+        <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-100">
+          Decrypted successfully. Copy the contents below.
         </p>
       </div>
 
-      <div className="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-5 shadow-sm">
-        <div className="flex items-start justify-between gap-2">
-          <pre className="flex-1 whitespace-pre-wrap break-words text-sm text-gray-900 dark:text-gray-100">
-            {state.text}
-          </pre>
+      <div className="rounded-lg border border-zinc-200 dark:border-zinc-500/50 overflow-hidden">
+        <div className="flex items-center justify-between px-4 py-2 bg-zinc-50 dark:bg-zinc-900/50 border-b border-zinc-200 dark:border-zinc-500/50">
+          <span className="text-xs tracking-widest uppercase text-zinc-500 dark:text-zinc-100">Plaintext</span>
           <button
             type="button"
             onClick={copyDecryptedText}
-            className="shrink-0 rounded-lg bg-gray-100 dark:bg-gray-700 px-3 py-1.5 text-xs font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors duration-150"
+            className="text-xs font-medium text-amber-600 dark:text-amber-400 hover:text-amber-500 dark:hover:text-amber-300 transition-colors duration-150"
           >
             Copy
           </button>
         </div>
+        <pre className="px-4 py-4 whitespace-pre-wrap break-words text-sm text-zinc-800 dark:text-zinc-100 bg-white dark:bg-zinc-800 leading-relaxed">
+          {(state as { stage: "decrypted"; text: string }).text}
+        </pre>
       </div>
 
-      {state.deletionToken && (
+      {(state as { stage: "decrypted"; deletionToken: string }).deletionToken && (
         <button
           type="button"
           onClick={handleDelete}
           disabled={deleting}
-          className="flex items-center gap-2 rounded-lg bg-red-600 px-4 py-2.5 font-semibold text-white shadow-md hover:bg-red-700 hover:shadow-lg disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-150"
+          className="flex items-center gap-2 rounded-lg border border-red-200 dark:border-red-900/40 px-4 py-2.5 text-sm text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/10 focus:outline-none focus:ring-2 focus:ring-red-500/20 disabled:opacity-40 disabled:cursor-not-allowed transition-all duration-150"
         >
-          {deleting && <Spinner size="sm" />}
+          {deleting && <Spinner size="sm" className="text-red-500" />}
           {deleting ? "Deleting..." : "Delete this secret"}
         </button>
       )}

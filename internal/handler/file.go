@@ -11,6 +11,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/pscheid92/secretli/internal/crypto"
+	"github.com/pscheid92/secretli/internal/metrics"
 	"github.com/pscheid92/secretli/internal/model"
 	"github.com/pscheid92/secretli/internal/storage"
 	"github.com/pscheid92/secretli/internal/store"
@@ -20,10 +21,11 @@ type FileHandler struct {
 	repo        store.SecretRepo
 	fileStore   storage.FileStore
 	MaxFileSize int64
+	metrics     *metrics.SecretMetrics
 }
 
-func NewFileHandler(repo store.SecretRepo, fileStore storage.FileStore, maxFileSize int64) *FileHandler {
-	return &FileHandler{repo: repo, fileStore: fileStore, MaxFileSize: maxFileSize}
+func NewFileHandler(repo store.SecretRepo, fileStore storage.FileStore, maxFileSize int64, m *metrics.SecretMetrics) *FileHandler {
+	return &FileHandler{repo: repo, fileStore: fileStore, MaxFileSize: maxFileSize, metrics: m}
 }
 
 func (h *FileHandler) UploadFile(w http.ResponseWriter, r *http.Request) {
@@ -110,6 +112,10 @@ func (h *FileHandler) UploadFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if h.metrics != nil {
+		h.metrics.SecretsCreated.WithLabelValues("file").Inc()
+	}
+
 	writeJSON(w, http.StatusCreated, map[string]string{
 		"expires_at": expiresAt.UTC().Format(time.RFC3339),
 	})
@@ -180,6 +186,10 @@ func (h *FileHandler) DownloadFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if h.metrics != nil {
+		h.metrics.SecretsRetrieved.Inc()
+	}
+
 	// Handle burn-after-read: delete after streaming
 	if secret.BurnAfterRead {
 		if err := h.repo.Delete(r.Context(), publicID); err != nil {
@@ -187,6 +197,9 @@ func (h *FileHandler) DownloadFile(w http.ResponseWriter, r *http.Request) {
 		}
 		if err := h.fileStore.Delete(r.Context(), *secret.StorageKey); err != nil {
 			slog.Error("failed to delete burned S3 object", "error", err)
+		}
+		if h.metrics != nil {
+			h.metrics.SecretsDeleted.WithLabelValues("burn").Inc()
 		}
 	} else {
 		if secret.RetrievedAt == nil {

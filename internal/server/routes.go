@@ -8,6 +8,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/httprate"
 	"github.com/pscheid92/secretli/internal/handler"
+	"github.com/pscheid92/secretli/internal/metrics"
 	"github.com/pscheid92/secretli/internal/storage"
 	"github.com/pscheid92/secretli/internal/store"
 )
@@ -30,20 +31,21 @@ func registerRoutes(
 	secretRepo store.SecretRepo,
 	fileStore storage.FileStore,
 	maxFileSize int64,
+	secretMetrics *metrics.SecretMetrics,
 ) {
 	// Health (not rate limited)
 	r.Get("/api/v1/health/live", handler.Liveness)
 	r.Method("GET", "/api/v1/health/ready", handler.ReadinessWithDB(pinger))
 
 	// Secrets
-	sh := handler.NewSecretHandler(secretRepo, fileStore)
+	sh := handler.NewSecretHandler(secretRepo, fileStore, secretMetrics)
 	r.Route("/api/v1/secrets", func(r chi.Router) {
 		// Create (10/min)
 		r.Group(func(r chi.Router) {
 			r.Use(rateLimitHandler(10, time.Minute))
 			r.Post("/", sh.CreateSecret)
 			if fileStore != nil {
-				fh := handler.NewFileHandler(secretRepo, fileStore, maxFileSize)
+				fh := handler.NewFileHandler(secretRepo, fileStore, maxFileSize, secretMetrics)
 				r.Post("/file", fh.UploadFile)
 			}
 		})
@@ -54,7 +56,7 @@ func registerRoutes(
 			r.Post("/{publicID}", sh.RetrieveSecret)
 			r.Get("/{publicID}/meta", sh.SecretMetadata)
 			if fileStore != nil {
-				fh := handler.NewFileHandler(secretRepo, fileStore, maxFileSize)
+				fh := handler.NewFileHandler(secretRepo, fileStore, maxFileSize, secretMetrics)
 				r.Post("/{publicID}/file", fh.DownloadFile)
 			}
 		})

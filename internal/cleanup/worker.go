@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/pscheid92/secretli/internal/metrics"
 	"github.com/pscheid92/secretli/internal/storage"
 	"github.com/pscheid92/secretli/internal/store"
 )
@@ -14,6 +15,7 @@ type Worker struct {
 	interval   time.Duration
 	secretRepo store.SecretRepo
 	fileStore  storage.FileStore
+	metrics    *metrics.SecretMetrics
 }
 
 // NewWorker creates a new cleanup worker.
@@ -21,11 +23,13 @@ func NewWorker(
 	interval time.Duration,
 	secretRepo store.SecretRepo,
 	fileStore storage.FileStore,
+	m *metrics.SecretMetrics,
 ) *Worker {
 	return &Worker{
 		interval:   interval,
 		secretRepo: secretRepo,
 		fileStore:  fileStore,
+		metrics:    m,
 	}
 }
 
@@ -51,8 +55,14 @@ func (w *Worker) runCycle(ctx context.Context) {
 	count, storageKeys, err := w.secretRepo.DeleteExpired(ctx)
 	if err != nil {
 		slog.Error("cleanup: failed to delete expired secrets", "error", err)
+		if w.metrics != nil {
+			w.metrics.CleanupErrors.Inc()
+		}
 	} else if count > 0 {
 		slog.Info("cleanup: deleted expired secrets", "count", count)
+		if w.metrics != nil {
+			w.metrics.SecretsDeleted.WithLabelValues("cleanup").Add(float64(count))
+		}
 	}
 
 	// Delete S3 objects for file secrets
@@ -66,6 +76,9 @@ func (w *Worker) runCycle(ctx context.Context) {
 		}
 		if s3Errors > 0 {
 			slog.Warn("cleanup: some S3 deletions failed", "failed", s3Errors, "total", len(storageKeys))
+			if w.metrics != nil {
+				w.metrics.CleanupErrors.Add(float64(s3Errors))
+			}
 		}
 	}
 }

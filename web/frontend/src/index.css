@@ -1,3 +1,18 @@
+@import url('https://fonts.googleapis.com/css2?family=Syne:wght@600;700;800&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
 @import "tailwindcss";
 
 @custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --font-display: "Syne", system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", "Fira Code", ui-monospace, monospace;
+  --font-sans: "IBM Plex Mono", "Fira Code", ui-monospace, monospace;
+}
+
+@layer base {
+  html {
+    font-family: "IBM Plex Mono", "Fira Code", ui-monospace, monospace;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+}

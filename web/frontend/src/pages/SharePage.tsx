@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Link } from "react-router";
 import { toast } from "sonner";
 import SecretForm, { type SecretFormData } from "../components/SecretForm";
 import SecretResult from "../components/SecretResult";
@@ -9,6 +10,23 @@ interface ShareResult {
   url: string;
   expiresAt: string;
   burnAfterRead: boolean;
+  deletionToken: string;
+}
+
+function ShareTabBar() {
+  return (
+    <div className="flex border-b border-zinc-200 dark:border-zinc-500/50 mb-6">
+      <div className="px-1 pb-3 mr-6 text-sm font-medium text-zinc-900 dark:text-zinc-100 border-b-2 border-amber-400">
+        Text
+      </div>
+      <Link
+        to="/file"
+        className="px-1 pb-3 text-sm text-zinc-600 dark:text-zinc-100 hover:text-zinc-900 dark:hover:text-white border-b-2 border-transparent transition-colors duration-150"
+      >
+        File
+      </Link>
+    </div>
+  );
 }
 
 export default function SharePage() {
@@ -42,12 +60,11 @@ export default function SharePage() {
         password_protected: hasPassword,
       });
 
-      const shareUrl = `${window.location.origin}/s#${encoded.shareSecret}!${encoded.deletionToken}`;
-
       setResult({
-        url: shareUrl,
+        url: `${window.location.origin}/s#${encoded.shareSecret}`,
         expiresAt: response.expires_at,
         burnAfterRead: data.burnAfterRead,
+        deletionToken: encoded.deletionToken,
       });
       toast.success("Secret created");
     } catch (err) {
@@ -61,34 +78,30 @@ export default function SharePage() {
     }
   }
 
-  return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold dark:text-white">Share a Secret</h1>
-        <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-          Your secret is encrypted in your browser before being sent to the server. Only the link
-          holder can decrypt it.
-        </p>
+  if (result) {
+    return (
+      <div className="space-y-5">
+        <SecretResult
+          url={result.url}
+          expiresAt={result.expiresAt}
+          burnAfterRead={result.burnAfterRead}
+          deletionToken={result.deletionToken}
+        />
+        <button
+          type="button"
+          onClick={() => setResult(null)}
+          className="text-xs text-zinc-500 dark:text-zinc-100 hover:text-amber-500 dark:hover:text-amber-400 transition-colors duration-150"
+        >
+          ← Share another secret
+        </button>
       </div>
+    );
+  }
 
-      {result ? (
-        <div className="space-y-4">
-          <SecretResult
-            url={result.url}
-            expiresAt={result.expiresAt}
-            burnAfterRead={result.burnAfterRead}
-          />
-          <button
-            type="button"
-            onClick={() => setResult(null)}
-            className="text-sm font-medium text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300 transition-colors duration-150"
-          >
-            Share another secret
-          </button>
-        </div>
-      ) : (
-        <SecretForm onSubmit={handleSubmit} loading={loading} />
-      )}
+  return (
+    <div>
+      <ShareTabBar />
+      <SecretForm onSubmit={handleSubmit} loading={loading} />
     </div>
   );
 }

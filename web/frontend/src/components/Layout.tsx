@@ -5,67 +5,23 @@ import { useTheme } from "../hooks/useTheme";
 function ThemeIcon({ theme }: { theme: string }) {
   if (theme === "dark") {
     return (
-      <svg
-        className="h-5 w-5"
-        fill="none"
-        viewBox="0 0 24 24"
-        stroke="currentColor"
-        strokeWidth={2}
-        aria-hidden="true"
-      >
-        <path
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"
-        />
+      <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5} aria-hidden="true">
+        <path strokeLinecap="round" strokeLinejoin="round" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" />
       </svg>
     );
   }
   if (theme === "light") {
     return (
-      <svg
-        className="h-5 w-5"
-        fill="none"
-        viewBox="0 0 24 24"
-        stroke="currentColor"
-        strokeWidth={2}
-        aria-hidden="true"
-      >
-        <path
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z"
-        />
+      <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5} aria-hidden="true">
+        <path strokeLinecap="round" strokeLinejoin="round" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" />
       </svg>
     );
   }
-  // system
   return (
-    <svg
-      className="h-5 w-5"
-      fill="none"
-      viewBox="0 0 24 24"
-      stroke="currentColor"
-      strokeWidth={2}
-      aria-hidden="true"
-    >
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"
-      />
+    <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5} aria-hidden="true">
+      <path strokeLinecap="round" strokeLinejoin="round" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
     </svg>
   );
-}
-
-function navLinkClass(currentPath: string, linkPath: string): string {
-  const isActive = currentPath === linkPath;
-  return [
-    "pb-0.5 transition-colors duration-150",
-    isActive
-      ? "text-blue-600 dark:text-blue-400 border-b-2 border-blue-600 dark:border-blue-400"
-      : "hover:text-blue-600 dark:hover:text-blue-400",
-  ].join(" ");
 }
 
 export default function Layout() {
@@ -73,58 +29,68 @@ export default function Layout() {
   const [menuOpen, setMenuOpen] = useState(false);
   const location = useLocation();
 
+  const isShareActive = location.pathname === "/share" || location.pathname === "/file";
+  const isRetrieveActive = location.pathname === "/s";
+
   return (
-    <div className="min-h-screen flex flex-col bg-gray-50 dark:bg-gray-950 text-gray-900 dark:text-gray-100">
-      <header className="bg-white/80 dark:bg-gray-900/80 backdrop-blur-md sticky top-0 z-50 border-b border-gray-200 dark:border-gray-800">
-        <nav className="mx-auto flex max-w-4xl items-center justify-between px-6 py-4">
-          <Link
-            to="/"
-            className="text-xl font-bold tracking-tight bg-gradient-to-r from-blue-600 to-violet-600 bg-clip-text text-transparent"
-          >
-            Secretli
+    <div className="min-h-screen flex flex-col bg-zinc-50 dark:bg-zinc-950 text-zinc-800 dark:text-zinc-100">
+      <header className="sticky top-0 z-50 border-b border-zinc-200 dark:border-zinc-500/50 bg-white/90 dark:bg-zinc-950/90 backdrop-blur-md">
+        <nav className="mx-auto flex max-w-2xl items-center justify-between px-4 sm:px-6 py-4">
+          <Link to="/" className="flex items-center gap-2 group">
+            <span className="font-display text-sm font-semibold tracking-[0.2em] uppercase text-zinc-800 dark:text-zinc-100">
+              Secretli
+            </span>
+            <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
           </Link>
 
           {/* Desktop nav */}
-          <div className="hidden md:flex items-center gap-6 text-sm font-medium">
-            <Link to="/share" className={navLinkClass(location.pathname, "/share")}>
-              Text
+          <div className="hidden md:flex items-center gap-8">
+            <Link
+              to="/share"
+              className={`text-sm tracking-wide transition-colors duration-150 ${
+                isShareActive
+                  ? "text-amber-500 dark:text-amber-400"
+                  : "text-zinc-700 dark:text-zinc-100 hover:text-zinc-900 dark:hover:text-white"
+              }`}
+            >
+              Share
             </Link>
-            <Link to="/file" className={navLinkClass(location.pathname, "/file")}>
-              File
+            <Link
+              to="/s"
+              className={`text-sm tracking-wide transition-colors duration-150 ${
+                isRetrieveActive
+                  ? "text-amber-500 dark:text-amber-400"
+                  : "text-zinc-700 dark:text-zinc-100 hover:text-zinc-900 dark:hover:text-white"
+              }`}
+            >
+              Retrieve
             </Link>
             <button
               type="button"
               onClick={cycle}
-              className="rounded-lg p-1.5 text-gray-500 hover:bg-gray-100 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-200 transition-colors duration-150"
               title={`Theme: ${theme}`}
+              className="text-zinc-600 dark:text-zinc-100 hover:text-zinc-900 dark:hover:text-white transition-colors duration-150"
             >
               <ThemeIcon theme={theme} />
             </button>
           </div>
 
-          {/* Mobile buttons */}
+          {/* Mobile */}
           <div className="flex md:hidden items-center gap-3">
             <button
               type="button"
               onClick={cycle}
-              className="rounded-lg p-1.5 text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-800 transition-colors duration-150"
               title={`Theme: ${theme}`}
+              className="text-zinc-600 dark:text-zinc-100 hover:text-zinc-900 dark:hover:text-white transition-colors duration-150"
             >
               <ThemeIcon theme={theme} />
             </button>
             <button
               type="button"
               onClick={() => setMenuOpen(!menuOpen)}
-              className="rounded-lg p-1.5 text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-800 transition-colors duration-150"
+              className="text-zinc-600 dark:text-zinc-100 hover:text-zinc-900 dark:hover:text-white transition-colors duration-150"
             >
-              <svg
-                className="h-6 w-6"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-                strokeWidth={2}
-                aria-hidden="true"
-              >
+              <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5} aria-hidden="true">
                 {menuOpen ? (
                   <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
                 ) : (
@@ -135,33 +101,34 @@ export default function Layout() {
           </div>
         </nav>
 
-        {/* Mobile menu dropdown */}
         {menuOpen && (
-          <div className="md:hidden border-t border-gray-200 dark:border-gray-800 bg-white/80 dark:bg-gray-900/80 backdrop-blur-md px-6 py-3 space-y-1 text-sm font-medium">
+          <div className="md:hidden border-t border-zinc-200 dark:border-zinc-500/50 bg-white/90 dark:bg-zinc-950/90 backdrop-blur-md px-4 sm:px-6 py-3 space-y-0.5">
             <Link
               to="/share"
               onClick={() => setMenuOpen(false)}
-              className="block rounded-lg px-2 py-2 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors duration-150"
+              className="block rounded-md px-2 py-2.5 text-sm text-zinc-600 dark:text-zinc-100 hover:text-amber-500 dark:hover:text-amber-400 hover:bg-zinc-100 dark:hover:bg-zinc-900 transition-colors duration-150"
             >
-              Text
+              Share
             </Link>
             <Link
-              to="/file"
+              to="/s"
               onClick={() => setMenuOpen(false)}
-              className="block rounded-lg px-2 py-2 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors duration-150"
+              className="block rounded-md px-2 py-2.5 text-sm text-zinc-600 dark:text-zinc-100 hover:text-amber-500 dark:hover:text-amber-400 hover:bg-zinc-100 dark:hover:bg-zinc-900 transition-colors duration-150"
             >
-              File
+              Retrieve
             </Link>
           </div>
         )}
       </header>
 
-      <main className="mx-auto w-full max-w-4xl flex-1 px-6 py-8">
+      <main className="mx-auto w-full max-w-2xl flex-1 px-4 sm:px-6 py-10">
         <Outlet />
       </main>
 
-      <footer className="py-6 text-center text-xs text-gray-400">
-        Secretli &mdash; Zero-knowledge secret sharing
+      <footer className="py-8 text-center">
+        <p className="text-xs tracking-[0.15em] uppercase text-zinc-600 dark:text-zinc-100">
+          Zero-knowledge secret sharing
+        </p>
       </footer>
     </div>
   );

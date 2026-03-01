@@ -9,6 +9,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/pscheid92/secretli/internal/crypto"
+	"github.com/pscheid92/secretli/internal/metrics"
 	"github.com/pscheid92/secretli/internal/model"
 	"github.com/pscheid92/secretli/internal/storage"
 	"github.com/pscheid92/secretli/internal/store"
@@ -17,10 +18,11 @@ import (
 type SecretHandler struct {
 	repo      store.SecretRepo
 	fileStore storage.FileStore
+	metrics   *metrics.SecretMetrics
 }
 
-func NewSecretHandler(repo store.SecretRepo, fileStore storage.FileStore) *SecretHandler {
-	return &SecretHandler{repo: repo, fileStore: fileStore}
+func NewSecretHandler(repo store.SecretRepo, fileStore storage.FileStore, m *metrics.SecretMetrics) *SecretHandler {
+	return &SecretHandler{repo: repo, fileStore: fileStore, metrics: m}
 }
 
 func (h *SecretHandler) CreateSecret(w http.ResponseWriter, r *http.Request) {
@@ -63,6 +65,10 @@ func (h *SecretHandler) CreateSecret(w http.ResponseWriter, r *http.Request) {
 		slog.Error("failed to create secret", "error", err)
 		writeError(w, http.StatusInternalServerError, "internal server error")
 		return
+	}
+
+	if h.metrics != nil {
+		h.metrics.SecretsCreated.WithLabelValues("text").Inc()
 	}
 
 	writeJSON(w, http.StatusCreated, map[string]string{
@@ -113,11 +119,18 @@ func (h *SecretHandler) RetrieveSecret(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, "internal server error")
 			return
 		}
+		if h.metrics != nil {
+			h.metrics.SecretsDeleted.WithLabelValues("burn").Inc()
+		}
 	} else {
 		// Set retrieved_at on first retrieval
 		if secret.RetrievedAt == nil {
 			_ = h.repo.SetRetrievedAt(r.Context(), publicID)
 		}
+	}
+
+	if h.metrics != nil {
+		h.metrics.SecretsRetrieved.Inc()
 	}
 
 	type retrieveResponse struct {
@@ -242,6 +255,10 @@ func (h *SecretHandler) DeleteSecret(w http.ResponseWriter, r *http.Request) {
 		slog.Error("failed to delete secret", "error", err)
 		writeError(w, http.StatusInternalServerError, "internal server error")
 		return
+	}
+
+	if h.metrics != nil {
+		h.metrics.SecretsDeleted.WithLabelValues("api").Inc()
 	}
 
 	w.WriteHeader(http.StatusNoContent)

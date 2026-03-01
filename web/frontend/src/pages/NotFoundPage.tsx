@@ -2,14 +2,14 @@ import { Link } from "react-router";
 
 export default function NotFoundPage() {
   return (
-    <div className="text-center py-24">
-      <h1 className="text-6xl font-extrabold text-gray-300 dark:text-gray-700 mb-4">404</h1>
-      <p className="text-gray-500 dark:text-gray-400 mb-6">Page not found.</p>
+    <div className="flex flex-col items-center justify-center py-24 text-center">
+      <p className="font-display text-7xl font-bold text-zinc-200 dark:text-zinc-800 mb-4">404</p>
+      <p className="text-sm text-zinc-600 dark:text-zinc-100 mb-6">This page doesn't exist.</p>
       <Link
         to="/"
-        className="font-medium text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300 transition-colors duration-150"
+        className="text-xs text-zinc-500 dark:text-zinc-100 hover:text-amber-500 dark:hover:text-amber-400 transition-colors duration-150"
       >
-        Go back home
+        ← Go home
       </Link>
     </div>
   );

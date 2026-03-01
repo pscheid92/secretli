@@ -11,7 +11,9 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/pscheid92/secretli/internal/config"
+	"github.com/pscheid92/secretli/internal/metrics"
 	"github.com/pscheid92/secretli/internal/storage"
 	"github.com/pscheid92/secretli/internal/store"
 	"github.com/pscheid92/secretli/web"
@@ -19,9 +21,10 @@ import (
 
 // App holds the HTTP server and dependencies needed by the cleanup worker.
 type App struct {
-	HTTPServer *http.Server
-	SecretRepo store.SecretRepo
-	FileStore  storage.FileStore
+	HTTPServer    *http.Server
+	SecretRepo    store.SecretRepo
+	FileStore     storage.FileStore
+	SecretMetrics *metrics.SecretMetrics
 }
 
 func parseOrigins(origins string) []string {
@@ -38,8 +41,11 @@ func parseOrigins(origins string) []string {
 	return result
 }
 
-func New(cfg config.Config, pool *pgxpool.Pool) *App {
+func New(cfg config.Config, pool *pgxpool.Pool, reg *prometheus.Registry) *App {
 	r := chi.NewRouter()
+
+	httpMetrics := metrics.NewHTTPMetrics(reg)
+	secretMetrics := metrics.NewSecretMetrics(reg)
 
 	// Create S3 file store if configured
 	var fileStore storage.FileStore
@@ -62,6 +68,7 @@ func New(cfg config.Config, pool *pgxpool.Pool) *App {
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.RequestID)
 	r.Use(requestIDResponseHeader)
+	r.Use(httpMetrics.Middleware)
 	r.Use(middleware.RequestLogger(&slogLogger{}))
 	r.Use(securityHeadersMiddleware)
 
@@ -76,7 +83,8 @@ func New(cfg config.Config, pool *pgxpool.Pool) *App {
 		}))
 	}
 
-	registerRoutes(r, pool, secretRepo, fileStore, cfg.MaxFileSize)
+	r.Handle("/metrics", metrics.Handler(reg))
+	registerRoutes(r, pool, secretRepo, fileStore, cfg.MaxFileSize, secretMetrics)
 
 	// SPA handler as catch-all
 	distFS, _ := fs.Sub(web.DistFS, "frontend/dist")
@@ -90,8 +98,9 @@ func New(cfg config.Config, pool *pgxpool.Pool) *App {
 			WriteTimeout: 60 * time.Second,
 			IdleTimeout:  120 * time.Second,
 		},
-		SecretRepo: secretRepo,
-		FileStore:  fileStore,
+		SecretRepo:    secretRepo,
+		FileStore:     fileStore,
+		SecretMetrics: secretMetrics,
 	}
 }
 

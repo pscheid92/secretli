@@ -61,7 +61,7 @@ export class KeySet {
           name: "PBKDF2",
           hash: "SHA-512",
           salt: toBuffer(shareSecretBytes),
-          iterations: 100_000,
+          iterations: 210_000,
         },
         passwordKey,
         256,

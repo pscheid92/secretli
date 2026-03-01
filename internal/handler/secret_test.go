@@ -110,7 +110,7 @@ func validCreateBody() map[string]any {
 
 func TestCreateSecret_Success(t *testing.T) {
 	repo := newMockRepo()
-	h := NewSecretHandler(repo, nil)
+	h := NewSecretHandler(repo, nil, nil)
 
 	body, _ := json.Marshal(validCreateBody())
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/secrets", bytes.NewReader(body))
@@ -131,7 +131,7 @@ func TestCreateSecret_Success(t *testing.T) {
 
 func TestCreateSecret_MissingFields(t *testing.T) {
 	repo := newMockRepo()
-	h := NewSecretHandler(repo, nil)
+	h := NewSecretHandler(repo, nil, nil)
 
 	body, _ := json.Marshal(map[string]string{"public_id": "test"})
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/secrets", bytes.NewReader(body))
@@ -146,7 +146,7 @@ func TestCreateSecret_MissingFields(t *testing.T) {
 
 func TestCreateSecret_InvalidExpiration(t *testing.T) {
 	repo := newMockRepo()
-	h := NewSecretHandler(repo, nil)
+	h := NewSecretHandler(repo, nil, nil)
 
 	b := validCreateBody()
 	b["expiration"] = "99d"
@@ -163,7 +163,7 @@ func TestCreateSecret_InvalidExpiration(t *testing.T) {
 
 func TestCreateSecret_DuplicatePublicID(t *testing.T) {
 	repo := newMockRepo()
-	h := NewSecretHandler(repo, nil)
+	h := NewSecretHandler(repo, nil, nil)
 
 	body, _ := json.Marshal(validCreateBody())
 
@@ -200,7 +200,7 @@ func seedSecret(repo *mockSecretRepo, publicID, retrievalToken, deletionToken st
 
 func TestRetrieveSecret_Success(t *testing.T) {
 	repo := newMockRepo()
-	h := NewSecretHandler(repo, nil)
+	h := NewSecretHandler(repo, nil, nil)
 	seedSecret(repo, "pub1", "retrieval-tok", "deletion-tok", false)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/secrets/pub1", nil)
@@ -226,7 +226,7 @@ func TestRetrieveSecret_Success(t *testing.T) {
 
 func TestRetrieveSecret_InvalidToken(t *testing.T) {
 	repo := newMockRepo()
-	h := NewSecretHandler(repo, nil)
+	h := NewSecretHandler(repo, nil, nil)
 	seedSecret(repo, "pub1", "retrieval-tok", "deletion-tok", false)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/secrets/pub1", nil)
@@ -243,7 +243,7 @@ func TestRetrieveSecret_InvalidToken(t *testing.T) {
 
 func TestRetrieveSecret_NotFound(t *testing.T) {
 	repo := newMockRepo()
-	h := NewSecretHandler(repo, nil)
+	h := NewSecretHandler(repo, nil, nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/secrets/nonexistent", nil)
 	req = withChiURLParam(req, "publicID", "nonexistent")
@@ -259,7 +259,7 @@ func TestRetrieveSecret_NotFound(t *testing.T) {
 
 func TestRetrieveSecret_MissingToken(t *testing.T) {
 	repo := newMockRepo()
-	h := NewSecretHandler(repo, nil)
+	h := NewSecretHandler(repo, nil, nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/secrets/pub1", nil)
 	req = withChiURLParam(req, "publicID", "pub1")
@@ -274,7 +274,7 @@ func TestRetrieveSecret_MissingToken(t *testing.T) {
 
 func TestRetrieveSecret_BurnAfterRead(t *testing.T) {
 	repo := newMockRepo()
-	h := NewSecretHandler(repo, nil)
+	h := NewSecretHandler(repo, nil, nil)
 	seedSecret(repo, "burn1", "retrieval-tok", "deletion-tok", true)
 
 	// First retrieval succeeds
@@ -302,7 +302,7 @@ func TestRetrieveSecret_BurnAfterRead(t *testing.T) {
 
 func TestDeleteSecret_Success(t *testing.T) {
 	repo := newMockRepo()
-	h := NewSecretHandler(repo, nil)
+	h := NewSecretHandler(repo, nil, nil)
 	seedSecret(repo, "del1", "retrieval-tok", "deletion-tok", false)
 
 	req := httptest.NewRequest(http.MethodDelete, "/api/v1/secrets/del1", nil)
@@ -320,7 +320,7 @@ func TestDeleteSecret_Success(t *testing.T) {
 
 func TestDeleteSecret_InvalidDeletionToken(t *testing.T) {
 	repo := newMockRepo()
-	h := NewSecretHandler(repo, nil)
+	h := NewSecretHandler(repo, nil, nil)
 	seedSecret(repo, "del1", "retrieval-tok", "deletion-tok", false)
 
 	req := httptest.NewRequest(http.MethodDelete, "/api/v1/secrets/del1", nil)
@@ -338,7 +338,7 @@ func TestDeleteSecret_InvalidDeletionToken(t *testing.T) {
 
 func TestDeleteSecret_MissingDeletionToken(t *testing.T) {
 	repo := newMockRepo()
-	h := NewSecretHandler(repo, nil)
+	h := NewSecretHandler(repo, nil, nil)
 
 	req := httptest.NewRequest(http.MethodDelete, "/api/v1/secrets/del1", nil)
 	req = withChiURLParam(req, "publicID", "del1")
@@ -354,7 +354,7 @@ func TestDeleteSecret_MissingDeletionToken(t *testing.T) {
 
 func TestDeleteSecret_NotFound(t *testing.T) {
 	repo := newMockRepo()
-	h := NewSecretHandler(repo, nil)
+	h := NewSecretHandler(repo, nil, nil)
 
 	req := httptest.NewRequest(http.MethodDelete, "/api/v1/secrets/nonexistent", nil)
 	req = withChiURLParam(req, "publicID", "nonexistent")
@@ -405,7 +405,7 @@ func TestParseExpiration(t *testing.T) {
 
 func TestCreateSecret_InvalidJSON(t *testing.T) {
 	repo := newMockRepo()
-	h := NewSecretHandler(repo, nil)
+	h := NewSecretHandler(repo, nil, nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/secrets", bytes.NewReader([]byte("{invalid json")))
 	rec := httptest.NewRecorder()
@@ -419,7 +419,7 @@ func TestCreateSecret_InvalidJSON(t *testing.T) {
 
 func TestCreateSecret_EncryptedDataTooLarge(t *testing.T) {
 	repo := newMockRepo()
-	h := NewSecretHandler(repo, nil)
+	h := NewSecretHandler(repo, nil, nil)
 
 	b := validCreateBody()
 	// Create encrypted_data that exceeds 1MB
@@ -442,7 +442,7 @@ func TestCreateSecret_EncryptedDataTooLarge(t *testing.T) {
 func TestCreateSecret_RepoError(t *testing.T) {
 	repo := newMockRepo()
 	repo.createErr = errors.New("database connection lost")
-	h := NewSecretHandler(repo, nil)
+	h := NewSecretHandler(repo, nil, nil)
 
 	body, _ := json.Marshal(validCreateBody())
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/secrets", bytes.NewReader(body))
@@ -457,7 +457,7 @@ func TestCreateSecret_RepoError(t *testing.T) {
 
 func TestRetrieveSecret_MissingPublicID(t *testing.T) {
 	repo := newMockRepo()
-	h := NewSecretHandler(repo, nil)
+	h := NewSecretHandler(repo, nil, nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/secrets/", nil)
 	// No path value set
@@ -473,7 +473,7 @@ func TestRetrieveSecret_MissingPublicID(t *testing.T) {
 
 func TestDeleteSecret_MissingRetrievalToken(t *testing.T) {
 	repo := newMockRepo()
-	h := NewSecretHandler(repo, nil)
+	h := NewSecretHandler(repo, nil, nil)
 
 	req := httptest.NewRequest(http.MethodDelete, "/api/v1/secrets/del1", nil)
 	req = withChiURLParam(req, "publicID", "del1")
@@ -489,7 +489,7 @@ func TestDeleteSecret_MissingRetrievalToken(t *testing.T) {
 
 func TestDeleteSecret_MissingPublicID(t *testing.T) {
 	repo := newMockRepo()
-	h := NewSecretHandler(repo, nil)
+	h := NewSecretHandler(repo, nil, nil)
 
 	req := httptest.NewRequest(http.MethodDelete, "/api/v1/secrets/", nil)
 	req.Header.Set("X-Retrieval-Token", "tok")
@@ -505,7 +505,7 @@ func TestDeleteSecret_MissingPublicID(t *testing.T) {
 
 func TestDeleteSecret_InvalidRetrievalToken(t *testing.T) {
 	repo := newMockRepo()
-	h := NewSecretHandler(repo, nil)
+	h := NewSecretHandler(repo, nil, nil)
 	seedSecret(repo, "del2", "retrieval-tok", "deletion-tok", false)
 
 	req := httptest.NewRequest(http.MethodDelete, "/api/v1/secrets/del2", nil)
@@ -525,7 +525,7 @@ func TestDeleteSecret_S3DeleteError(t *testing.T) {
 	repo := newMockRepo()
 	fs := newMockFileStore()
 	fs.deleteErr = errors.New("S3 connection failed")
-	h := NewSecretHandler(repo, fs)
+	h := NewSecretHandler(repo, fs, nil)
 	seedFileSecret(repo, fs, "del-s3-err", "ret-tok", "del-tok", false)
 
 	req := httptest.NewRequest(http.MethodDelete, "/api/v1/secrets/del-s3-err", nil)

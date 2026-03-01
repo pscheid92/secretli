@@ -15,6 +15,7 @@ import (
 
 	"github.com/pscheid92/secretli/internal/cleanup"
 	"github.com/pscheid92/secretli/internal/config"
+	"github.com/pscheid92/secretli/internal/metrics"
 	"github.com/pscheid92/secretli/internal/server"
 	"github.com/pscheid92/secretli/internal/store"
 )
@@ -25,11 +26,7 @@ func Run(migrationsFS fs.FS) error {
 		return fmt.Errorf("loading config: %w", err)
 	}
 
-	// Connect to database
 	ctx := context.Background()
-	if cfg.DatabaseURL == "" {
-		return fmt.Errorf("DATABASE_URL is required")
-	}
 
 	// Run migrations automatically on startup (advisory-locked for safety)
 	slog.Info("running database migrations")
@@ -44,13 +41,15 @@ func Run(migrationsFS fs.FS) error {
 	}
 	defer pool.Close()
 
-	app := server.New(cfg, pool)
+	reg := metrics.NewRegistry()
+	app := server.New(cfg, pool, reg)
 
 	// Create cleanup worker
 	worker := cleanup.NewWorker(
 		cfg.CleanupInterval,
 		app.SecretRepo,
 		app.FileStore,
+		app.SecretMetrics,
 	)
 
 	// Context for shutdown coordination
