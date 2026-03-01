@@ -25,7 +25,7 @@ type State =
   | { stage: "password"; shareSecret: string; deletionToken: string; meta: DecryptedMeta }
   | { stage: "decrypted"; text: string; shareSecret: string; deletionToken: string }
   | { stage: "downloading" }
-  | { stage: "file-ready"; filename: string; shareSecret: string; deletionToken: string }
+  | { stage: "file-ready"; files: Array<{ name: string; blob: Blob }>; shareSecret: string; deletionToken: string }
   | { stage: "deleted" }
   | { stage: "error"; message: string };
 
@@ -150,24 +150,34 @@ export default function RetrievePage() {
 
     if (clientMeta.type === "file") {
       const filename = clientMeta.filename ?? "download";
+      const rawBuffer = decrypted.buffer.slice(
+        decrypted.byteOffset,
+        decrypted.byteOffset + decrypted.byteLength,
+      ) as ArrayBuffer;
 
-      const url = URL.createObjectURL(
-        new Blob([
-          decrypted.buffer.slice(
-            decrypted.byteOffset,
-            decrypted.byteOffset + decrypted.byteLength,
-          ) as ArrayBuffer,
-        ]),
-      );
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = filename;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
+      if (filename === "multiple.zip") {
+        const JSZip = (await import("jszip")).default;
+        const zip = await JSZip.loadAsync(rawBuffer);
+        const files: Array<{ name: string; blob: Blob }> = [];
+        for (const [name, entry] of Object.entries(zip.files)) {
+          if (entry.dir) continue;
+          const data = await entry.async("blob");
+          files.push({ name, blob: data });
+        }
+        setState({ stage: "file-ready", files, shareSecret, deletionToken });
+      } else {
+        const blob = new Blob([rawBuffer]);
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
 
-      setState({ stage: "file-ready", filename, shareSecret, deletionToken });
+        setState({ stage: "file-ready", files: [{ name: filename, blob }], shareSecret, deletionToken });
+      }
     } else {
       const text = new TextDecoder().decode(decrypted);
       setState({ stage: "decrypted", text, shareSecret, deletionToken });
@@ -450,20 +460,69 @@ export default function RetrievePage() {
   // -- File ready --
 
   if (state.stage === "file-ready") {
+    const { files } = state;
+    const isMulti = files.length > 1;
+
+    function downloadFile(file: { name: string; blob: Blob }) {
+      const url = URL.createObjectURL(file.blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = file.name;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    }
+
+    function downloadAll() {
+      for (const file of files) {
+        downloadFile(file);
+      }
+    }
+
     return (
       <div className="space-y-5">
         <div>
           <h1 className="font-display text-2xl font-semibold text-zinc-800 dark:text-zinc-100">
-            File Downloaded
+            {isMulti ? "Files Decrypted" : "File Downloaded"}
           </h1>
           <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-100">
-            Decrypted and saved to your downloads.
+            {isMulti
+              ? "Decrypted successfully. Download individual files below."
+              : "Decrypted and saved to your downloads."}
           </p>
         </div>
-        <div className="rounded-lg border border-zinc-200 dark:border-zinc-500/50 px-4 py-4 flex items-center gap-3">
-          <div className="w-2 h-2 rounded-full bg-emerald-400 flex-shrink-0" />
-          <span className="text-sm font-medium text-zinc-600 dark:text-zinc-100 font-mono">{state.filename}</span>
+        <div className="rounded-lg border border-zinc-200 dark:border-zinc-500/50 divide-y divide-zinc-200 dark:divide-zinc-500/50 overflow-hidden">
+          {state.files.map((file) => (
+            <div key={file.name} className="flex items-center gap-3 px-4 py-3">
+              <div className="w-2 h-2 rounded-full bg-emerald-400 flex-shrink-0" />
+              <div className="flex-1 min-w-0">
+                <span className="text-sm font-medium text-zinc-600 dark:text-zinc-100 font-mono truncate block">
+                  {file.name}
+                </span>
+                <span className="text-xs text-zinc-500 dark:text-zinc-400">
+                  {formatSize(file.blob.size)}
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => downloadFile(file)}
+                className="flex-shrink-0 text-xs font-medium text-amber-600 dark:text-amber-400 hover:text-amber-500 dark:hover:text-amber-300 transition-colors duration-150"
+              >
+                Download
+              </button>
+            </div>
+          ))}
         </div>
+        {isMulti && (
+          <button
+            type="button"
+            onClick={downloadAll}
+            className="flex w-full items-center justify-center gap-2 rounded-lg bg-amber-400 px-4 py-3 text-sm font-medium text-zinc-900 hover:bg-amber-300 focus:outline-none focus:ring-2 focus:ring-amber-400/50 transition-all duration-150"
+          >
+            Download All
+          </button>
+        )}
         {state.deletionToken && (
           <button
             type="button"
