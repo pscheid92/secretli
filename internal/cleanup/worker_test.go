@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pscheid92/secretli/internal/model"
+	"github.com/pscheid92/secretli/internal/domain"
 )
 
 // --- Mock implementations ---
@@ -20,11 +20,11 @@ type mockSecretRepo struct {
 	deleteExpiredCalled atomic.Int32
 }
 
-func (m *mockSecretRepo) Create(_ context.Context, _ *model.Secret) error { return nil }
-func (m *mockSecretRepo) GetByPublicID(_ context.Context, _ string) (*model.Secret, error) {
+func (m *mockSecretRepo) Create(_ context.Context, _ *domain.Secret) error { return nil }
+func (m *mockSecretRepo) GetByPublicID(_ context.Context, _ string) (*domain.Secret, error) {
 	return nil, nil
 }
-func (m *mockSecretRepo) GetAndDeleteByPublicID(_ context.Context, _ string) (*model.Secret, error) {
+func (m *mockSecretRepo) GetAndDeleteByPublicID(_ context.Context, _ string) (*domain.Secret, error) {
 	return nil, nil
 }
 func (m *mockSecretRepo) SetRetrievedAt(_ context.Context, _ string) error { return nil }

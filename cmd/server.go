@@ -4,105 +4,107 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io/fs"
 	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
-	"sync"
 	"syscall"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
+	"golang.org/x/sync/errgroup"
+
+	"github.com/pscheid92/secretli/internal/adapter/httpserver"
+	"github.com/pscheid92/secretli/internal/adapter/metrics"
+	"github.com/pscheid92/secretli/internal/adapter/postgres"
+	"github.com/pscheid92/secretli/internal/adapter/s3"
 	"github.com/pscheid92/secretli/internal/cleanup"
-	"github.com/pscheid92/secretli/internal/config"
-	"github.com/pscheid92/secretli/internal/metrics"
-	"github.com/pscheid92/secretli/internal/server"
-	"github.com/pscheid92/secretli/internal/store"
+	"github.com/pscheid92/secretli/internal/platform/config"
+	"github.com/pscheid92/secretli/internal/platform/correlation"
 )
 
-func Run(migrationsFS fs.FS) error {
+func Run() error {
+	// Set up correlated logger: injects request_id into every log record.
+	baseHandler := slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo})
+	slog.SetDefault(slog.New(correlation.NewHandler(baseHandler)))
+
 	cfg, err := config.Load()
 	if err != nil {
 		return fmt.Errorf("loading config: %w", err)
 	}
 
-	ctx := context.Background()
-
-	// Run migrations automatically on startup (advisory-locked for safety)
-	slog.Info("running database migrations")
-	if err := store.RunMigrations(ctx, cfg.DatabaseURL, migrationsFS); err != nil {
-		return fmt.Errorf("migrations failed: %w", err)
-	}
-	slog.Info("migrations complete")
-
-	pool, err := store.NewPool(ctx, cfg.DatabaseURL)
+	pool, err := setupDatabase(cfg)
 	if err != nil {
-		return fmt.Errorf("database connection failed: %w", err)
+		return err
 	}
 	defer pool.Close()
 
-	reg := metrics.NewRegistry()
-	app := server.New(cfg, pool, reg)
+	secretRepo := postgres.NewSecretRepo(pool)
 
-	// Create cleanup worker
+	fileStore, err := s3.NewClient(cfg.S3)
+	if err != nil {
+		return fmt.Errorf("create S3 client: %w", err)
+	}
+
+	reg := metrics.NewRegistry()
+	app := httpserver.New(cfg, pool, secretRepo, fileStore, reg)
+
 	worker := cleanup.NewWorker(
 		cfg.CleanupInterval,
-		app.SecretRepo,
-		app.FileStore,
+		secretRepo,
+		fileStore,
 		app.SecretMetrics,
 	)
 
-	// Context for shutdown coordination
-	shutdownCtx, shutdownCancel := context.WithCancel(context.Background())
-	defer shutdownCancel()
+	return runGracefulShutdown(app, worker)
+}
 
-	var wg sync.WaitGroup
+func setupDatabase(cfg config.Config) (*pgxpool.Pool, error) {
+	ctx := context.Background()
 
-	// Start cleanup worker
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		worker.Run(shutdownCtx)
-	}()
+	pool, err := postgres.NewPool(ctx, cfg.DatabaseURL)
+	if err != nil {
+		return nil, fmt.Errorf("database connection failed: %w", err)
+	}
 
-	// Start HTTP server
-	errCh := make(chan error, 1)
-	go func() {
-		slog.Info("server starting", "port", cfg.Port)
+	slog.Info("running database migrations")
+	if err := postgres.RunMigrations(ctx, pool); err != nil {
+		pool.Close()
+		return nil, fmt.Errorf("migrations failed: %w", err)
+	}
+	slog.Info("migrations complete")
+
+	return pool, nil
+}
+
+func runGracefulShutdown(app *httpserver.App, worker *cleanup.Worker) error {
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
+	g, ctx := errgroup.WithContext(ctx)
+
+	g.Go(func() error {
+		slog.Info("server starting", "port", app.HTTPServer.Addr)
 		if err := app.HTTPServer.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
-			errCh <- err
+			return err
 		}
-		close(errCh)
-	}()
+		return nil
+	})
 
-	// Wait for interrupt signal
-	quit := make(chan os.Signal, 1)
-	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	g.Go(func() error {
+		<-ctx.Done()
+		slog.Info("shutting down server")
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		return app.HTTPServer.Shutdown(shutdownCtx)
+	})
 
-	select {
-	case sig := <-quit:
-		slog.Info("received shutdown signal", "signal", sig.String())
-	case err := <-errCh:
-		slog.Error("server error", "error", err)
-		return err
-	}
+	g.Go(func() error {
+		worker.Run(ctx)
+		return nil
+	})
 
-	// Stop cleanup worker
-	shutdownCancel()
-
-	// Graceful HTTP shutdown with 30s timeout
-	httpCtx, httpCancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer httpCancel()
-
-	slog.Info("shutting down server")
-	if err := app.HTTPServer.Shutdown(httpCtx); err != nil {
-		slog.Error("server shutdown error", "error", err)
-		return err
-	}
-
-	// Wait for cleanup worker to finish
-	wg.Wait()
-
+	err := g.Wait()
 	slog.Info("server stopped")
-	return nil
+	return err
 }
