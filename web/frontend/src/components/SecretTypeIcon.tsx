@@ -1,7 +1,4 @@
-export default function SecretTypeIcon({
-  type,
-  className,
-}: { type: string; className?: string }) {
+export default function SecretTypeIcon({ type, className }: { type: string; className?: string }) {
   if (type === "file") {
     return (
       <svg

@@ -157,13 +157,7 @@ export class KeySet {
   }
 
   private async importKey(usage: "encrypt" | "decrypt"): Promise<CryptoKey> {
-    return crypto.subtle.importKey(
-      "raw",
-      toBuffer(this.encryptionKey),
-      "AES-GCM",
-      false,
-      [usage],
-    );
+    return crypto.subtle.importKey("raw", toBuffer(this.encryptionKey), "AES-GCM", false, [usage]);
   }
 }
 

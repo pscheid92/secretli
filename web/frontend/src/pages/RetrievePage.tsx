@@ -5,10 +5,10 @@ import SecretTypeIcon from "../components/SecretTypeIcon";
 import Spinner from "../components/Spinner";
 import {
   ApiError,
-  type SecretMetadataResponse,
   deleteSecret,
   getSecretMetadata,
   retrieveSecret,
+  type SecretMetadataResponse,
 } from "../lib/api";
 import { KeySet, type SecretMeta } from "../lib/encryption";
 import { formatRelativeTime, formatSize } from "../lib/format";
@@ -25,7 +25,12 @@ type State =
   | { stage: "password"; shareSecret: string; deletionToken: string; meta: DecryptedMeta }
   | { stage: "decrypted"; text: string; shareSecret: string; deletionToken: string }
   | { stage: "downloading" }
-  | { stage: "file-ready"; files: Array<{ name: string; blob: Blob }>; shareSecret: string; deletionToken: string }
+  | {
+      stage: "file-ready";
+      files: Array<{ name: string; blob: Blob }>;
+      shareSecret: string;
+      deletionToken: string;
+    }
   | { stage: "deleted" }
   | { stage: "error"; message: string };
 
@@ -33,7 +38,13 @@ function MetaRow({ label, value, accent }: { label: string; value: string; accen
   return (
     <div className="flex items-center justify-between py-2.5 text-sm">
       <span className="text-zinc-600 dark:text-zinc-100">{label}</span>
-      <span className={accent ? "text-amber-600 dark:text-amber-400 font-medium" : "text-zinc-600 dark:text-zinc-100"}>
+      <span
+        className={
+          accent
+            ? "text-amber-600 dark:text-amber-400 font-medium"
+            : "text-zinc-600 dark:text-zinc-100"
+        }
+      >
         {value}
       </span>
     </div>
@@ -176,7 +187,12 @@ export default function RetrievePage() {
         document.body.removeChild(a);
         URL.revokeObjectURL(url);
 
-        setState({ stage: "file-ready", files: [{ name: filename, blob }], shareSecret, deletionToken });
+        setState({
+          stage: "file-ready",
+          files: [{ name: filename, blob }],
+          shareSecret,
+          deletionToken,
+        });
       }
     } else {
       const text = new TextDecoder().decode(decrypted);
@@ -303,11 +319,24 @@ export default function RetrievePage() {
       <div className="space-y-5">
         <div className="rounded-lg border border-red-200 dark:border-red-900/40 bg-red-50 dark:bg-red-900/10 p-5">
           <div className="flex items-start gap-3">
-            <svg className="h-4 w-4 text-red-500 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+            <svg
+              className="h-4 w-4 text-red-500 flex-shrink-0 mt-0.5"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+              strokeWidth={2}
+              aria-hidden="true"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+              />
             </svg>
             <div>
-              <p className="text-sm font-medium text-red-700 dark:text-red-400">Unable to retrieve secret</p>
+              <p className="text-sm font-medium text-red-700 dark:text-red-400">
+                Unable to retrieve secret
+              </p>
               <p className="text-sm text-red-600 dark:text-red-500 mt-0.5">{state.message}</p>
             </div>
           </div>
@@ -369,8 +398,19 @@ export default function RetrievePage() {
 
         {serverMeta.burn_after_read && (
           <div className="flex items-start gap-3 rounded-lg border border-amber-200 dark:border-amber-900/40 bg-amber-50 dark:bg-amber-900/10 px-4 py-3">
-            <svg className="h-4 w-4 text-amber-500 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+            <svg
+              className="h-4 w-4 text-amber-500 flex-shrink-0 mt-0.5"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+              strokeWidth={2}
+              aria-hidden="true"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+              />
             </svg>
             <p className="text-xs text-amber-700 dark:text-amber-400">
               This secret will be permanently destroyed after viewing.
@@ -418,7 +458,9 @@ export default function RetrievePage() {
             className="w-full rounded-lg border border-zinc-200 dark:border-zinc-500/50 bg-white dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 px-4 py-3 text-sm placeholder:text-zinc-500 dark:placeholder:text-zinc-500 focus:outline-none focus:border-amber-400 dark:focus:border-amber-400 focus:ring-1 focus:ring-amber-400/20 transition-colors duration-150"
           />
           {passwordErrors.password && (
-            <p className="text-xs text-red-500 dark:text-red-400">{passwordErrors.password.message}</p>
+            <p className="text-xs text-red-500 dark:text-red-400">
+              {passwordErrors.password.message}
+            </p>
           )}
           <button
             type="submit"
@@ -440,7 +482,9 @@ export default function RetrievePage() {
       <div className="space-y-5">
         <div className="flex items-center gap-2.5">
           <div className="w-2 h-2 rounded-full bg-emerald-400" />
-          <span className="text-sm font-medium text-zinc-600 dark:text-zinc-100">Secret deleted</span>
+          <span className="text-sm font-medium text-zinc-600 dark:text-zinc-100">
+            Secret deleted
+          </span>
         </div>
         <div className="rounded-lg border border-zinc-200 dark:border-zinc-500/50 px-4 py-4">
           <p className="text-sm text-zinc-600 dark:text-zinc-100">
@@ -553,7 +597,9 @@ export default function RetrievePage() {
 
       <div className="rounded-lg border border-zinc-200 dark:border-zinc-500/50 overflow-hidden">
         <div className="flex items-center justify-between px-4 py-2 bg-zinc-50 dark:bg-zinc-900/50 border-b border-zinc-200 dark:border-zinc-500/50">
-          <span className="text-xs tracking-widest uppercase text-zinc-500 dark:text-zinc-100">Plaintext</span>
+          <span className="text-xs tracking-widest uppercase text-zinc-500 dark:text-zinc-100">
+            Plaintext
+          </span>
           <button
             type="button"
             onClick={copyDecryptedText}

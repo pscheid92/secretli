@@ -60,15 +60,13 @@ export default function SecretForm({ onSubmit, loading }: SecretFormProps) {
 
       {/* Expiration */}
       <div className="space-y-2">
-        <label className="block text-xs tracking-widest uppercase text-zinc-600 dark:text-zinc-100">
+        <span className="block text-xs tracking-widest uppercase text-zinc-600 dark:text-zinc-100">
           Expires in
-        </label>
+        </span>
         <Controller
           name="expiration"
           control={control}
-          render={({ field }) => (
-            <ExpirationPicker value={field.value} onChange={field.onChange} />
-          )}
+          render={({ field }) => <ExpirationPicker value={field.value} onChange={field.onChange} />}
         />
       </div>
 
@@ -110,7 +108,9 @@ export default function SecretForm({ onSubmit, loading }: SecretFormProps) {
               className="w-full rounded-md border border-zinc-200 dark:border-zinc-500 bg-zinc-50 dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 px-3 py-2.5 text-sm placeholder:text-zinc-500 dark:placeholder:text-zinc-500 focus:outline-none focus:border-amber-400 dark:focus:border-amber-400 focus:ring-1 focus:ring-amber-400/20 transition-colors duration-150"
             />
             {errors.password && (
-              <p className="mt-1.5 text-xs text-red-500 dark:text-red-400">{errors.password.message}</p>
+              <p className="mt-1.5 text-xs text-red-500 dark:text-red-400">
+                {errors.password.message}
+              </p>
             )}
           </div>
         )}

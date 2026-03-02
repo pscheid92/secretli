@@ -12,7 +12,12 @@ export default function Toggle({ checked, onChange, label, description }: Toggle
       aria-checked={checked}
       tabIndex={0}
       onClick={onChange}
-      onKeyDown={(e) => { if (e.key === " " || e.key === "Enter") { e.preventDefault(); onChange(); } }}
+      onKeyDown={(e) => {
+        if (e.key === " " || e.key === "Enter") {
+          e.preventDefault();
+          onChange();
+        }
+      }}
       className="flex items-center justify-between gap-4 cursor-pointer select-none"
     >
       <div>

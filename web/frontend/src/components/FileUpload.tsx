@@ -151,7 +151,8 @@ export default function FileUpload({ onSelect }: FileUploadProps) {
             </div>
             <div>
               <p className="text-sm text-zinc-600 dark:text-zinc-100">
-                Drop files here, or <span className="text-amber-500 dark:text-amber-400">click to select</span>
+                Drop files here, or{" "}
+                <span className="text-amber-500 dark:text-amber-400">click to select</span>
               </p>
               <p className="text-xs text-zinc-500 dark:text-zinc-100 mt-1">Max 100MB total</p>
             </div>
@@ -159,6 +160,7 @@ export default function FileUpload({ onSelect }: FileUploadProps) {
         </div>
       ) : (
         <div
+          role="region"
           onDragOver={(e) => {
             e.preventDefault();
             setDragOver(true);
@@ -202,6 +204,7 @@ export default function FileUpload({ onSelect }: FileUploadProps) {
                     viewBox="0 0 24 24"
                     stroke="currentColor"
                     strokeWidth={2}
+                    aria-hidden="true"
                   >
                     <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
                   </svg>

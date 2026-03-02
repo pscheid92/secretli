@@ -79,7 +79,9 @@ describe("KeySet", () => {
 
     it("rejects invalid envelope format", async () => {
       const ks = await KeySet.generateRandom();
-      await expect(ks.decryptMeta("bad-format")).rejects.toThrow("invalid metadata envelope format");
+      await expect(ks.decryptMeta("bad-format")).rejects.toThrow(
+        "invalid metadata envelope format",
+      );
     });
   });
 

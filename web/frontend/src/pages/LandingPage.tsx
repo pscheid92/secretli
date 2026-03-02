@@ -45,7 +45,10 @@ export default function LandingPage() {
           "No account required",
           "Password protection",
         ].map((feature) => (
-          <span key={feature} className="inline-flex items-center gap-1.5 text-xs text-zinc-500 dark:text-zinc-100">
+          <span
+            key={feature}
+            className="inline-flex items-center gap-1.5 text-xs text-zinc-500 dark:text-zinc-100"
+          >
             <span className="w-1 h-1 rounded-full bg-zinc-300 dark:bg-zinc-700" />
             {feature}
           </span>

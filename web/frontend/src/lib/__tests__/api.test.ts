@@ -1,10 +1,10 @@
 import {
   ApiError,
+  type CreateSecretParams,
   createSecret,
-  retrieveSecret,
   deleteSecret,
   getSecretMetadata,
-  type CreateSecretParams,
+  retrieveSecret,
 } from "../api";
 
 describe("ApiError", () => {
@@ -71,9 +71,7 @@ describe("request helper (via deleteSecret)", () => {
   });
 
   it("returns undefined for 204 responses", async () => {
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      new Response(null, { status: 204 }),
-    );
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(null, { status: 204 }));
 
     const result = await deleteSecret("pub-id", "ret-tok", "del-tok");
     expect(result).toBeUndefined();
@@ -96,9 +94,11 @@ describe("createSecret", () => {
     };
     const blob = new Blob(["encrypted-data"]);
 
-    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      new Response(JSON.stringify({ expires_at: "2026-02-26T00:05:00Z" }), { status: 200 }),
-    );
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(
+        new Response(JSON.stringify({ expires_at: "2026-02-26T00:05:00Z" }), { status: 200 }),
+      );
 
     const result = await createSecret(params, blob);
     expect(result.expires_at).toBe("2026-02-26T00:05:00Z");
@@ -198,15 +198,18 @@ describe("deleteSecret", () => {
   });
 
   it("sends DELETE with token headers", async () => {
-    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      new Response(null, { status: 204 }),
-    );
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(new Response(null, { status: 204 }));
 
     const result = await deleteSecret("pub-id", "ret-tok", "del-tok");
     expect(result).toBeUndefined();
 
-    expect(fetchSpy).toHaveBeenCalledWith("/api/v1/secrets/pub-id", expect.objectContaining({
-      method: "DELETE",
-    }));
+    expect(fetchSpy).toHaveBeenCalledWith(
+      "/api/v1/secrets/pub-id",
+      expect.objectContaining({
+        method: "DELETE",
+      }),
+    );
   });
 });
