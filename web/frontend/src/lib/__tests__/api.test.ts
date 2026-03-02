@@ -107,7 +107,12 @@ describe("createSecret", () => {
     expect(call[0]).toBe("/api/v1/secrets");
     const body = call[1]?.body as FormData;
     expect(body).toBeInstanceOf(FormData);
-    expect(body.get("metadata")).toBe(JSON.stringify(params));
+    expect(body.get("public_id")).toBe(params.public_id);
+    expect(body.get("retrieval_token")).toBe(params.retrieval_token);
+    expect(body.get("deletion_token")).toBe(params.deletion_token);
+    expect(body.get("encrypted_meta")).toBe(params.encrypted_meta);
+    expect(body.get("expiration")).toBe(params.expiration);
+    expect(body.get("burn_after_read")).toBe(String(params.burn_after_read));
     expect(body.get("file")).toBeInstanceOf(Blob);
   });
 });
