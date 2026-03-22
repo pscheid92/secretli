@@ -10,14 +10,14 @@ dev-api:
 
 # Frontend Vite dev server with proxy to Go backend
 dev-frontend:
-	cd web/frontend && npm run dev
+	cd web/frontend && pnpm dev
 
 # Production build
 build: build-frontend build-go
 
 # Build frontend
 build-frontend:
-	cd web/frontend && npm ci && npm run build
+	cd web/frontend && pnpm install --frozen-lockfile && pnpm build
 
 # Build Go binary (requires frontend to be built first)
 build-go:
@@ -26,17 +26,17 @@ build-go:
 # Fast unit tests only (no containers)
 test-short:
 	go test -short -cover ./...
-	cd web/frontend && npm test -- --run
+	cd web/frontend && pnpm test --run
 
 # Full test suite including integration tests
 test:
 	go test -cover ./...
-	cd web/frontend && npm test -- --run
+	cd web/frontend && pnpm test --run
 
 # Generate coverage reports
 test-coverage:
 	go test -coverprofile=coverage.out ./... && go tool cover -func=coverage.out
-	cd web/frontend && npm run test:coverage
+	cd web/frontend && pnpm test:coverage
 
 # Lint all
 lint: lint-go lint-frontend

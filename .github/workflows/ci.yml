@@ -24,8 +24,10 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24
-          cache: npm
-          cache-dependency-path: web/frontend/package-lock.json
+
+      - uses: pnpm/action-setup@v4
+        with:
+          run_install: false
 
       - name: Create frontend dist stub
         run: mkdir -p web/frontend/dist && touch web/frontend/dist/.gitkeep
@@ -38,8 +40,8 @@ jobs:
       - name: Frontend lint
         working-directory: web/frontend
         run: |
-          npm ci
-          npx biome check .
+          pnpm install --frozen-lockfile
+          pnpm biome check .
 
   test:
     runs-on: ubuntu-latest
@@ -53,8 +55,10 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24
-          cache: npm
-          cache-dependency-path: web/frontend/package-lock.json
+
+      - uses: pnpm/action-setup@v4
+        with:
+          run_install: false
 
       - name: Go tests
         run: |
@@ -64,8 +68,8 @@ jobs:
       - name: Frontend tests
         working-directory: web/frontend
         run: |
-          npm ci
-          npm run test:coverage
+          pnpm install --frozen-lockfile
+          pnpm test:coverage
 
   build-and-publish:
     needs: [lint, test]
