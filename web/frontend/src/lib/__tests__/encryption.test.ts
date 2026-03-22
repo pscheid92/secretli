@@ -1,3 +1,9 @@
+import { hkdf } from "@noble/hashes/hkdf.js";
+import { sha512 } from "@noble/hashes/sha2.js";
+
+const enc = new TextEncoder();
+
+import { base64UrlDecode, base64UrlEncode } from "../base64";
 import { KeySet } from "../encryption";
 
 describe("KeySet", () => {
@@ -43,12 +49,12 @@ describe("KeySet", () => {
       expect(decrypted).toEqual(data);
     });
 
-    it("produces blob larger than input (nonce + auth tag)", async () => {
+    it("produces blob larger than input (version + nonce + auth tag)", async () => {
       const ks = await KeySet.generateRandom();
       const data = new Uint8Array(100);
       const blob = await ks.encryptBlob(data);
-      // 12 byte nonce + 100 byte data + 16 byte GCM auth tag = 128
-      expect(blob.size).toBe(128);
+      // 1 byte version + 24 byte nonce + 100 byte data + 16 byte Poly1305 tag = 141
+      expect(blob.size).toBe(141);
     });
   });
 
@@ -69,12 +75,12 @@ describe("KeySet", () => {
       expect(decrypted).toEqual(meta);
     });
 
-    it("produces v1$nonce$ciphertext format", async () => {
+    it("produces v2$nonce$ciphertext format", async () => {
       const ks = await KeySet.generateRandom();
       const envelope = await ks.encryptMeta({ type: "text", password_protected: false });
       const parts = envelope.split("$");
       expect(parts).toHaveLength(3);
-      expect(parts[0]).toBe("v1");
+      expect(parts[0]).toBe("v2");
     });
 
     it("rejects invalid envelope format", async () => {
@@ -119,7 +125,7 @@ describe("KeySet", () => {
     });
   });
 
-  describe("fromShareSecret with password", () => {
+  describe("fromShareSecret with password (v2 Argon2id)", () => {
     it("derives keys with password and can decrypt own data", async () => {
       const original = await KeySet.generateRandom();
       const shareSecret = original.getEncoded().shareSecret;
@@ -167,7 +173,6 @@ describe("KeySet", () => {
 
   describe("password-protected workflow", () => {
     it("metadata encrypted with base key, data with password key", async () => {
-      // This simulates the actual create/retrieve workflow
       const keySet = await KeySet.generateRandom();
       const shareSecret = keySet.getEncoded().shareSecret;
 
@@ -190,6 +195,161 @@ describe("KeySet", () => {
       // Wrong password fails
       const wrongPw = await KeySet.fromShareSecret(shareSecret, "wrong");
       await expect(wrongPw.decryptBlob(blob)).rejects.toThrow();
+    });
+  });
+
+  describe("AAD enforcement", () => {
+    it("rejects decryption with a different KeySet (different publicID)", async () => {
+      const ksA = await KeySet.generateRandom();
+      const ksB = await KeySet.generateRandom();
+
+      const meta = { type: "text" as const, password_protected: false };
+      const envelope = await ksA.encryptMeta(meta);
+      await expect(ksB.decryptMeta(envelope)).rejects.toThrow();
+    });
+
+    it("rejects blob decryption with a different KeySet", async () => {
+      const ksA = await KeySet.generateRandom();
+      const ksB = await KeySet.generateRandom();
+
+      const blob = await ksA.encryptBlob(new TextEncoder().encode("data"));
+      await expect(ksB.decryptBlob(blob)).rejects.toThrow();
+    });
+
+    it("rejects meta ciphertext used as blob (wrong AAD purpose)", async () => {
+      const ks = await KeySet.generateRandom();
+      const meta = { type: "text" as const, password_protected: false };
+      const envelope = await ks.encryptMeta(meta);
+
+      // Extract nonce and ciphertext from the v2 envelope
+      const parts = envelope.split("$");
+      const nonce = base64UrlDecode(parts[1]);
+      const ciphertext = base64UrlDecode(parts[2]);
+
+      // Construct a v2 blob with the meta's nonce and ciphertext
+      const fakeBlob = new Blob([
+        new Uint8Array([0x02]),
+        new Uint8Array(nonce),
+        new Uint8Array(ciphertext),
+      ]);
+
+      // Decryption should fail because AAD is "blob" not "meta"
+      await expect(ks.decryptBlob(fakeBlob)).rejects.toThrow();
+    });
+  });
+
+  describe("v1 backwards compatibility", () => {
+    // Helper to create v1-formatted encrypted meta using Web Crypto AES-GCM
+    async function createV1Meta(
+      encryptionKey: Uint8Array,
+      meta: { type: string; password_protected: boolean },
+    ): Promise<string> {
+      const nonce = crypto.getRandomValues(new Uint8Array(12));
+      const plaintext = new TextEncoder().encode(JSON.stringify(meta));
+      const keyBuf = new ArrayBuffer(encryptionKey.length);
+      new Uint8Array(keyBuf).set(encryptionKey);
+      const key = await crypto.subtle.importKey("raw", keyBuf, "AES-GCM", false, ["encrypt"]);
+      const ciphertext = await crypto.subtle.encrypt(
+        { name: "AES-GCM", iv: nonce },
+        key,
+        plaintext,
+      );
+      return `v1$${base64UrlEncode(nonce)}$${base64UrlEncode(new Uint8Array(ciphertext))}`;
+    }
+
+    // Helper to create v1-formatted encrypted blob using Web Crypto AES-GCM
+    async function createV1Blob(encryptionKey: Uint8Array, data: Uint8Array): Promise<Blob> {
+      const nonce = crypto.getRandomValues(new Uint8Array(12));
+      const keyBuf = new ArrayBuffer(encryptionKey.length);
+      new Uint8Array(keyBuf).set(encryptionKey);
+      const key = await crypto.subtle.importKey("raw", keyBuf, "AES-GCM", false, ["encrypt"]);
+      const dataBuf = data.buffer.slice(
+        data.byteOffset,
+        data.byteOffset + data.byteLength,
+      ) as ArrayBuffer;
+      const ciphertext = await crypto.subtle.encrypt({ name: "AES-GCM", iv: nonce }, key, dataBuf);
+      return new Blob([nonce, ciphertext]);
+    }
+
+    it("decrypts v1-encrypted meta", async () => {
+      const shareSecret = crypto.getRandomValues(new Uint8Array(32));
+      const encryptionKey = hkdf(
+        sha512,
+        shareSecret,
+        undefined,
+        enc.encode("share_item_encryption_key"),
+        32,
+      );
+
+      const meta = { type: "text" as const, password_protected: false };
+      const v1Envelope = await createV1Meta(encryptionKey, meta);
+      expect(v1Envelope.startsWith("v1$")).toBe(true);
+
+      const ks = await KeySet.fromShareSecret(base64UrlEncode(shareSecret));
+      const decrypted = await ks.decryptMeta(v1Envelope);
+      expect(decrypted).toEqual(meta);
+    });
+
+    it("decrypts v1-encrypted blob", async () => {
+      const shareSecret = crypto.getRandomValues(new Uint8Array(32));
+      const encryptionKey = hkdf(
+        sha512,
+        shareSecret,
+        undefined,
+        enc.encode("share_item_encryption_key"),
+        32,
+      );
+
+      const data = new TextEncoder().encode("v1 encrypted data");
+      const v1Blob = await createV1Blob(encryptionKey, data);
+
+      const ks = await KeySet.fromShareSecret(base64UrlEncode(shareSecret));
+      const decrypted = await ks.decryptBlob(v1Blob);
+      expect(new TextDecoder().decode(decrypted)).toBe("v1 encrypted data");
+    });
+
+    it("decrypts v1 password-protected data with kdfVersion v1", async () => {
+      const shareSecret = crypto.getRandomValues(new Uint8Array(32));
+      const password = "test-password";
+
+      // Derive key material using PBKDF2 (the v1 way)
+      const passwordKey = await crypto.subtle.importKey(
+        "raw",
+        new TextEncoder().encode(password),
+        "PBKDF2",
+        false,
+        ["deriveBits"],
+      );
+      const shareSecretBuf = new ArrayBuffer(shareSecret.length);
+      new Uint8Array(shareSecretBuf).set(shareSecret);
+      const masterBits = await crypto.subtle.deriveBits(
+        {
+          name: "PBKDF2",
+          hash: "SHA-512",
+          salt: shareSecretBuf,
+          iterations: 210_000,
+        },
+        passwordKey,
+        256,
+      );
+      const keyMaterial = new Uint8Array(masterBits);
+      const encryptionKey = hkdf(
+        sha512,
+        keyMaterial,
+        undefined,
+        enc.encode("share_item_encryption_key"),
+        32,
+      );
+
+      // Create v1 blob encrypted with the PBKDF2-derived key
+      const data = new TextEncoder().encode("password-protected v1 data");
+      const v1Blob = await createV1Blob(encryptionKey, data);
+
+      // Decrypt using the new code with kdfVersion: "v1"
+      const encoded = base64UrlEncode(shareSecret);
+      const ks = await KeySet.fromShareSecret(encoded, password, { kdfVersion: "v1" });
+      const decrypted = await ks.decryptBlob(v1Blob);
+      expect(new TextDecoder().decode(decrypted)).toBe("password-protected v1 data");
     });
   });
 });

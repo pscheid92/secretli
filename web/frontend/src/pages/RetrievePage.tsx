@@ -137,7 +137,10 @@ export default function RetrievePage() {
     setPasswordLoading(true);
 
     try {
-      const keySet = await KeySet.fromShareSecret(state.shareSecret, data.password);
+      const kdfVersion = state.meta.serverMeta.encrypted_meta.startsWith("v2$") ? "v2" : "v1";
+      const keySet = await KeySet.fromShareSecret(state.shareSecret, data.password, {
+        kdfVersion,
+      });
       await revealWithKeySet(keySet, state.shareSecret, state.deletionToken, state.meta.clientMeta);
     } catch {
       setPasswordFormError("password", { message: "Wrong password. Please try again." });
