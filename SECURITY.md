@@ -18,12 +18,12 @@ You should receive a response within 48 hours. If the issue is confirmed, a fix 
 
 Secretli uses a zero-knowledge architecture:
 
-- All encryption and decryption happens client-side in the browser using the Web Crypto API
+- All encryption and decryption happens client-side in the browser using [@noble/ciphers](https://github.com/paulmillr/noble-ciphers) and [@noble/hashes](https://github.com/paulmillr/noble-hashes)
 - The server only stores opaque, encrypted blobs and never has access to plaintext data or encryption keys
 - Encryption keys are transported via URL fragments (`#`), which are never sent to the server
-- AES-256-GCM is used for encryption with unique nonces per operation
+- XChaCha20-Poly1305 is used for authenticated encryption with AAD binding per secret and purpose
 - HKDF-SHA512 derives separate encryption keys, public IDs, and retrieval tokens from a single master secret
-- Password protection uses PBKDF2-SHA512 with 210,000 iterations
+- Password protection uses scrypt (N=2^14, r=8, p=1) for key derivation
 
 ## Supported Versions
 
