@@ -388,6 +388,49 @@ func TestCreateSecret_FileTooLarge(t *testing.T) {
 	}
 }
 
+func TestCreateSecret_FilePartExceedsMaxFileSize(t *testing.T) {
+	repo := newMockRepo()
+	fs := newMockFileStore()
+	maxSize := int64(50)
+	h := NewSecretHandler(repo, fs, maxSize, testMetrics())
+
+	req := createMultipartRequest(t, validCreateMetadata(), bytes.Repeat([]byte("a"), int(maxSize)+1))
+	rec := httptest.NewRecorder()
+	c := newEchoContext(req, rec)
+
+	callHandler(c, h.CreateSecret)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want %d. body: %s", rec.Code, http.StatusBadRequest, rec.Body.String())
+	}
+	if _, ok := fs.objects["secrets/test-public-id"]; ok {
+		t.Error("oversized blob should not be stored")
+	}
+	if _, ok := repo.secrets["test-public-id"]; ok {
+		t.Error("oversized blob should not create DB record")
+	}
+}
+
+func TestCreateSecret_FilePartAtMaxFileSizeSucceeds(t *testing.T) {
+	repo := newMockRepo()
+	fs := newMockFileStore()
+	maxSize := int64(50)
+	h := NewSecretHandler(repo, fs, maxSize, testMetrics())
+
+	req := createMultipartRequest(t, validCreateMetadata(), bytes.Repeat([]byte("a"), int(maxSize)))
+	rec := httptest.NewRecorder()
+	c := newEchoContext(req, rec)
+
+	callHandler(c, h.CreateSecret)
+
+	if rec.Code != http.StatusCreated {
+		t.Errorf("status = %d, want %d. body: %s", rec.Code, http.StatusCreated, rec.Body.String())
+	}
+	if got := repo.secrets["test-public-id"].BlobSize; got != maxSize {
+		t.Errorf("blob size = %d, want %d", got, maxSize)
+	}
+}
+
 func TestCreateSecret_RepoError(t *testing.T) {
 	repo := newMockRepo()
 	repo.createErr = errors.New("database connection lost")

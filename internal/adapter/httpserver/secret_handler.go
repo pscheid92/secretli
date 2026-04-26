@@ -69,6 +69,10 @@ func (h *SecretHandler) CreateSecret(c echo.Context) error {
 	}
 	defer func() { _ = file.Close() }()
 
+	if header.Size > h.maxFileSize {
+		return apperrors.BadRequestError("file exceeds maximum size limit")
+	}
+
 	secret := &domain.Secret{
 		PublicID:       meta.PublicID,
 		RetrievalToken: meta.RetrievalToken,
