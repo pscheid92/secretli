@@ -23,6 +23,7 @@ type Config struct {
 	MaxFileSize     int64         `env:"MAX_FILE_SIZE" default:"104857600"`
 	CleanupInterval time.Duration `env:"CLEANUP_INTERVAL" default:"1m"`
 	AllowedOrigins  string        `env:"ALLOWED_ORIGINS"`
+	MetricsToken    string        `env:"METRICS_TOKEN"`
 }
 
 func Load() (Config, error) {

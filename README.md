@@ -90,6 +90,7 @@ Configuration is done via environment variables. See [`.env.example`](.env.examp
 | `MAX_FILE_SIZE` | Upload size limit in bytes | `104857600` (100 MB) |
 | `CLEANUP_INTERVAL` | Expired secret cleanup frequency | `1m` |
 | `ALLOWED_ORIGINS` | CORS allowed origins | — |
+| `METRICS_TOKEN` | Optional bearer token required for `/metrics` | — |
 
 ## Deployment
 

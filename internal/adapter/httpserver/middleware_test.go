@@ -104,6 +104,45 @@ func TestParseOrigins(t *testing.T) {
 	}
 }
 
+func TestMetricsAuth(t *testing.T) {
+	tests := []struct {
+		name       string
+		authHeader string
+		wantStatus int
+	}{
+		{name: "missing token", wantStatus: http.StatusUnauthorized},
+		{name: "wrong scheme", authHeader: "Basic metrics-secret", wantStatus: http.StatusUnauthorized},
+		{name: "wrong token", authHeader: "Bearer wrong", wantStatus: http.StatusUnauthorized},
+		{name: "valid token", authHeader: "Bearer metrics-secret", wantStatus: http.StatusOK},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			e := echo.New()
+			req := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+			if tt.authHeader != "" {
+				req.Header.Set(echo.HeaderAuthorization, tt.authHeader)
+			}
+			rec := httptest.NewRecorder()
+			c := e.NewContext(req, rec)
+
+			handler := metricsAuth("metrics-secret")(func(c echo.Context) error {
+				return c.NoContent(http.StatusOK)
+			})
+
+			if err := handler(c); err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if rec.Code != tt.wantStatus {
+				t.Errorf("status = %d, want %d", rec.Code, tt.wantStatus)
+			}
+			if tt.wantStatus == http.StatusUnauthorized && rec.Header().Get(echo.HeaderWWWAuthenticate) == "" {
+				t.Error("missing WWW-Authenticate header")
+			}
+		})
+	}
+}
+
 // --- spaHandler tests ---
 
 func TestSpaHandler(t *testing.T) {

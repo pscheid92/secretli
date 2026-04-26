@@ -29,7 +29,12 @@ func (a *App) registerRoutes() *metrics.SecretMetrics {
 	}
 
 	// Metrics
-	e.GET("/metrics", echo.WrapHandler(metrics.Handler(a.reg)))
+	metricsHandler := echo.WrapHandler(metrics.Handler(a.reg))
+	if a.cfg.MetricsToken != "" {
+		e.GET("/metrics", metricsHandler, metricsAuth(a.cfg.MetricsToken))
+	} else {
+		e.GET("/metrics", metricsHandler)
+	}
 
 	// Health (not rate limited)
 	e.GET("/api/v1/health/live", Liveness)

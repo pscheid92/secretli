@@ -182,7 +182,9 @@ func (h *SecretHandler) DeleteSecret(c echo.Context) error {
 	publicID := c.Param("publicID")
 
 	sk := storageKey(publicID)
-	_ = h.fileStore.Delete(ctx, sk)
+	if err := h.fileStore.Delete(ctx, sk); err != nil {
+		return apperrors.InternalError("failed to delete blob from S3", err)
+	}
 
 	if err := h.repo.Delete(ctx, publicID); err != nil {
 		return apperrors.InternalError("failed to delete secret", err)

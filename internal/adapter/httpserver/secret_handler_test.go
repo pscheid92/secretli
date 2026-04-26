@@ -905,9 +905,14 @@ func TestDeleteSecret_S3DeleteError(t *testing.T) {
 
 	callHandler(c, h.DeleteSecret)
 
-	// Should still succeed - S3 error is logged but doesn't block deletion
-	if rec.Code != http.StatusNoContent {
-		t.Errorf("status = %d, want %d", rec.Code, http.StatusNoContent)
+	if rec.Code != http.StatusInternalServerError {
+		t.Errorf("status = %d, want %d", rec.Code, http.StatusInternalServerError)
+	}
+	if _, ok := repo.secrets["del-s3-err"]; !ok {
+		t.Error("secret row should remain when S3 delete fails")
+	}
+	if _, ok := fs.objects["secrets/del-s3-err"]; !ok {
+		t.Error("S3 object should remain when delete fails")
 	}
 }
 

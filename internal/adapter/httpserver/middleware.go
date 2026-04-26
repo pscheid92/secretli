@@ -12,6 +12,7 @@ import (
 	"golang.org/x/time/rate"
 
 	"github.com/pscheid92/secretli/internal/platform/correlation"
+	"github.com/pscheid92/secretli/internal/platform/crypto"
 	apperrors "github.com/pscheid92/secretli/internal/platform/errors"
 )
 
@@ -106,6 +107,21 @@ func corsMiddleware(origins []string) echo.MiddlewareFunc {
 		AllowCredentials: true,
 		MaxAge:           86400,
 	})
+}
+
+func metricsAuth(token string) echo.MiddlewareFunc {
+	const prefix = "Bearer "
+
+	return func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c echo.Context) error {
+			auth := c.Request().Header.Get(echo.HeaderAuthorization)
+			if !strings.HasPrefix(auth, prefix) || !crypto.TokensEqual(strings.TrimPrefix(auth, prefix), token) {
+				c.Response().Header().Set(echo.HeaderWWWAuthenticate, `Bearer realm="metrics"`)
+				return c.NoContent(http.StatusUnauthorized)
+			}
+			return next(c)
+		}
+	}
 }
 
 func rateLimiter(limit int, window time.Duration) echo.MiddlewareFunc {

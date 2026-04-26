@@ -40,6 +40,9 @@ func TestLoadDefaults(t *testing.T) {
 	if cfg.CleanupInterval != time.Minute {
 		t.Errorf("CleanupInterval = %v, want %v", cfg.CleanupInterval, time.Minute)
 	}
+	if cfg.MetricsToken != "" {
+		t.Errorf("MetricsToken = %q, want empty", cfg.MetricsToken)
+	}
 }
 
 func TestLoadFromEnv(t *testing.T) {
@@ -49,6 +52,7 @@ func TestLoadFromEnv(t *testing.T) {
 	t.Setenv("S3_USE_SSL", "false")
 	t.Setenv("MAX_FILE_SIZE", "5242880")
 	t.Setenv("CLEANUP_INTERVAL", "5m")
+	t.Setenv("METRICS_TOKEN", "metrics-secret")
 
 	cfg, err := Load()
 	if err != nil {
@@ -69,6 +73,9 @@ func TestLoadFromEnv(t *testing.T) {
 	}
 	if cfg.CleanupInterval != 5*time.Minute {
 		t.Errorf("CleanupInterval = %v, want %v", cfg.CleanupInterval, 5*time.Minute)
+	}
+	if cfg.MetricsToken != "metrics-secret" {
+		t.Errorf("MetricsToken = %q, want %q", cfg.MetricsToken, "metrics-secret")
 	}
 }
 
