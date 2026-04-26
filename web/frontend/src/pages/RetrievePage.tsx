@@ -359,6 +359,15 @@ export default function RetrievePage() {
   if (state.stage === "confirm") {
     const { serverMeta, clientMeta } = state.meta;
     const isFile = clientMeta.type === "file";
+    const revealLabel = clientMeta.password_protected
+      ? "Enter Password"
+      : serverMeta.burn_after_read
+        ? isFile
+          ? "Download & Burn"
+          : "Reveal & Burn"
+        : isFile
+          ? "Download & Decrypt"
+          : "Reveal Secret";
 
     return (
       <div className="space-y-5">
@@ -416,7 +425,8 @@ export default function RetrievePage() {
               />
             </svg>
             <p className="text-xs text-amber-700 dark:text-amber-400">
-              This secret will be permanently destroyed after viewing.
+              This secret will be permanently consumed when reveal starts. If the download is
+              interrupted after that, the link may not work again.
             </p>
           </div>
         )}
@@ -428,7 +438,7 @@ export default function RetrievePage() {
           className="flex w-full items-center justify-center gap-2 rounded-lg bg-amber-400 px-4 py-3 text-sm font-medium text-zinc-900 hover:bg-amber-300 focus:outline-none focus:ring-2 focus:ring-amber-400/50 disabled:opacity-40 disabled:cursor-not-allowed transition-all duration-150"
         >
           {revealing && <Spinner size="sm" className="text-zinc-700" />}
-          {revealing ? "Decrypting..." : isFile ? "Download & Decrypt" : "Reveal Secret"}
+          {revealing ? "Decrypting..." : revealLabel}
         </button>
       </div>
     );
@@ -437,6 +447,14 @@ export default function RetrievePage() {
   // -- Password --
 
   if (state.stage === "password") {
+    const isBurnAfterRead = state.meta.serverMeta.burn_after_read;
+    const isFile = state.meta.clientMeta.type === "file";
+    const submitLabel = isBurnAfterRead
+      ? isFile
+        ? "Download & Burn"
+        : "Reveal & Burn"
+      : "Decrypt";
+
     return (
       <div className="space-y-5">
         <div>
@@ -465,13 +483,34 @@ export default function RetrievePage() {
               {passwordErrors.password.message}
             </p>
           )}
+          {isBurnAfterRead && (
+            <div className="flex items-start gap-3 rounded-lg border border-amber-200 dark:border-amber-900/40 bg-amber-50 dark:bg-amber-900/10 px-4 py-3">
+              <svg
+                className="h-4 w-4 text-amber-500 flex-shrink-0 mt-0.5"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                strokeWidth={2}
+                aria-hidden="true"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+                />
+              </svg>
+              <p className="text-xs text-amber-700 dark:text-amber-400">
+                Submitting the password starts retrieval and permanently consumes this secret.
+              </p>
+            </div>
+          )}
           <button
             type="submit"
             disabled={passwordLoading}
             className="flex w-full items-center justify-center gap-2 rounded-lg bg-amber-400 px-4 py-3 text-sm font-medium text-zinc-900 hover:bg-amber-300 focus:outline-none focus:ring-2 focus:ring-amber-400/50 disabled:opacity-40 disabled:cursor-not-allowed transition-all duration-150"
           >
             {passwordLoading && <Spinner size="sm" className="text-zinc-700" />}
-            {passwordLoading ? "Decrypting..." : "Decrypt"}
+            {passwordLoading ? "Decrypting..." : submitLabel}
           </button>
         </form>
       </div>

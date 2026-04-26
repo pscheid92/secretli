@@ -41,7 +41,7 @@ export default function LandingPage() {
         {[
           "AES-256-GCM encryption",
           "Auto-expires",
-          "Burn after reading",
+          "Burn after reveal",
           "No account required",
           "Password protection",
         ].map((feature) => (

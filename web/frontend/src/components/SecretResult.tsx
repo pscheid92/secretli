@@ -93,7 +93,8 @@ export default function SecretResult({
             />
           </svg>
           <p className="text-xs text-amber-700 dark:text-amber-400 leading-relaxed">
-            This secret will be permanently destroyed after it is viewed once.
+            This secret is consumed when the recipient starts reveal or download. If their download
+            is interrupted after that, the link may not work again.
           </p>
         </div>
       )}

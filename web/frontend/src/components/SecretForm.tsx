@@ -77,7 +77,7 @@ export default function SecretForm({ onSubmit, loading }: SecretFormProps) {
             checked={burnAfterRead}
             onChange={() => setValue("burnAfterRead", !burnAfterRead, { shouldValidate: true })}
             label="Burn after reading"
-            description="Permanently destroyed after first view"
+            description="Consumed when the recipient starts reveal"
           />
         </div>
         <div className="px-4 py-3">
