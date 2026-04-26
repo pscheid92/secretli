@@ -29,8 +29,8 @@ func (m *mockSecretRepo) Create(_ context.Context, _ *domain.Secret) error { ret
 func (m *mockSecretRepo) GetByPublicID(_ context.Context, _ string) (*domain.Secret, error) {
 	return nil, nil
 }
-func (m *mockSecretRepo) SetRetrievedAt(_ context.Context, _ string) error { return nil }
-func (m *mockSecretRepo) Delete(_ context.Context, _ string) error        { return nil }
+func (m *mockSecretRepo) ClaimBurnAfterRead(_ context.Context, _, _ string) error { return nil }
+func (m *mockSecretRepo) Delete(_ context.Context, _ string) error                { return nil }
 func (m *mockSecretRepo) DeleteExpired(_ context.Context, beforeDelete func(string) error) (int64, error) {
 	m.deleteExpiredCalled.Add(1)
 	if m.deleteExpiredErr != nil {

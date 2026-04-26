@@ -13,9 +13,13 @@ SELECT public_id, retrieval_token, deletion_token,
 FROM secrets
 WHERE public_id = $1 AND expires_at > NOW();
 
--- name: SetSecretRetrievedAt :exec
+-- name: ClaimBurnAfterRead :execrows
 UPDATE secrets SET retrieved_at = NOW()
-WHERE public_id = $1 AND retrieved_at IS NULL;
+WHERE public_id = $1
+  AND retrieval_token = $2
+  AND burn_after_read = true
+  AND retrieved_at IS NULL
+  AND expires_at > NOW();
 
 -- name: DeleteSecret :execrows
 DELETE FROM secrets WHERE public_id = $1;

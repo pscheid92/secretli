@@ -116,6 +116,16 @@ func (h *SecretHandler) RetrieveSecret(c echo.Context) error {
 	}
 	defer func() { _ = obj.Close() }()
 
+	if secret.BurnAfterRead {
+		token := c.Request().Header.Get(HeaderRetrievalToken)
+		if err := h.repo.ClaimBurnAfterRead(ctx, publicID, token); err != nil {
+			if errors.Is(err, domain.ErrNotFound) {
+				return apperrors.NotFoundError("secret not found")
+			}
+			return apperrors.InternalError("failed to claim burn-after-read secret", err)
+		}
+	}
+
 	resp := c.Response()
 	resp.Header().Set("Content-Type", "application/octet-stream")
 	resp.Header().Set("Content-Length", strconv.FormatInt(secret.BlobSize, 10))
@@ -128,12 +138,6 @@ func (h *SecretHandler) RetrieveSecret(c echo.Context) error {
 	}
 
 	h.metrics.SecretsRetrieved.Inc()
-
-	if secret.RetrievedAt == nil {
-		if err := h.repo.SetRetrievedAt(ctx, publicID); err != nil {
-			slog.ErrorContext(ctx, "failed to set retrieved_at", "error", err)
-		}
-	}
 
 	return nil
 }

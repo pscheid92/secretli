@@ -3,22 +3,31 @@ package postgres_test
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
 	pgadapter "github.com/pscheid92/secretli/internal/adapter/postgres"
 	"github.com/pscheid92/secretli/internal/domain"
 )
 
 func newTestSecret(publicID string, expiresAt time.Time) *domain.Secret {
 	return &domain.Secret{
-		PublicID:          publicID,
-		RetrievalToken:    "retrieval-token-" + publicID,
-		DeletionToken:     "deletion-token-" + publicID,
-		EncryptedMeta:     "v1$nonce$meta-" + publicID,
-		BlobSize:          1024,
-		BurnAfterRead: false,
-		ExpiresAt:     expiresAt,
+		PublicID:       publicID,
+		RetrievalToken: "retrieval-token-" + publicID,
+		DeletionToken:  "deletion-token-" + publicID,
+		EncryptedMeta:  "v1$nonce$meta-" + publicID,
+		BlobSize:       1024,
+		BurnAfterRead:  false,
+		ExpiresAt:      expiresAt,
+	}
+}
+
+func markRetrieved(t *testing.T, pool *pgxpool.Pool, publicID string) {
+	t.Helper()
+	if _, err := pool.Exec(context.Background(), "UPDATE secrets SET retrieved_at = NOW() WHERE public_id = $1", publicID); err != nil {
+		t.Fatalf("mark retrieved %s: %v", publicID, err)
 	}
 }
 
@@ -87,29 +96,118 @@ func TestSecretRepo_GetExpired(t *testing.T) {
 	}
 }
 
-func TestSecretRepo_SetRetrievedAt(t *testing.T) {
+func TestSecretRepo_ClaimBurnAfterRead(t *testing.T) {
 	pool := setupTestDB(t)
 	repo := pgadapter.NewSecretRepo(pool)
 	ctx := context.Background()
 
-	secret := newTestSecret("retr-001", time.Now().Add(1*time.Hour))
+	secret := newTestSecret("claim-001", time.Now().Add(1*time.Hour))
+	secret.BurnAfterRead = true
 	if err := repo.Create(ctx, secret); err != nil {
 		t.Fatalf("create: %v", err)
 	}
 
-	if err := repo.SetRetrievedAt(ctx, "retr-001"); err != nil {
-		t.Fatalf("set retrieved_at: %v", err)
+	if err := repo.ClaimBurnAfterRead(ctx, "claim-001", "retrieval-token-claim-001"); err != nil {
+		t.Fatalf("claim burn-after-read: %v", err)
 	}
 
-	got, err := repo.GetByPublicID(ctx, "retr-001")
+	got, err := repo.GetByPublicID(ctx, "claim-001")
 	if err != nil {
-		t.Fatalf("get after set retrieved_at: %v", err)
+		t.Fatalf("get after claim: %v", err)
 	}
 	if got.RetrievedAt == nil {
 		t.Fatal("expected retrieved_at to be set")
 	}
 	if got.RetrievedAt.IsZero() {
 		t.Error("expected non-zero retrieved_at")
+	}
+
+	err = repo.ClaimBurnAfterRead(ctx, "claim-001", "retrieval-token-claim-001")
+	if err != domain.ErrNotFound {
+		t.Fatalf("expected ErrNotFound on second claim, got %v", err)
+	}
+}
+
+func TestSecretRepo_ClaimBurnAfterRead_InvalidInputs(t *testing.T) {
+	pool := setupTestDB(t)
+	repo := pgadapter.NewSecretRepo(pool)
+	ctx := context.Background()
+
+	burn := newTestSecret("claim-invalid-burn", time.Now().Add(1*time.Hour))
+	burn.BurnAfterRead = true
+	regular := newTestSecret("claim-invalid-regular", time.Now().Add(1*time.Hour))
+	expired := newTestSecret("claim-invalid-expired", time.Now().Add(-1*time.Hour))
+	expired.BurnAfterRead = true
+
+	for _, s := range []*domain.Secret{burn, regular, expired} {
+		if err := repo.Create(ctx, s); err != nil {
+			t.Fatalf("create %s: %v", s.PublicID, err)
+		}
+	}
+
+	tests := []struct {
+		name           string
+		publicID       string
+		retrievalToken string
+	}{
+		{name: "wrong token", publicID: "claim-invalid-burn", retrievalToken: "wrong-token"},
+		{name: "regular secret", publicID: "claim-invalid-regular", retrievalToken: "retrieval-token-claim-invalid-regular"},
+		{name: "expired secret", publicID: "claim-invalid-expired", retrievalToken: "retrieval-token-claim-invalid-expired"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := repo.ClaimBurnAfterRead(ctx, tt.publicID, tt.retrievalToken)
+			if err != domain.ErrNotFound {
+				t.Fatalf("expected ErrNotFound, got %v", err)
+			}
+		})
+	}
+}
+
+func TestSecretRepo_ClaimBurnAfterRead_ConcurrentOnlyOneSucceeds(t *testing.T) {
+	pool := setupTestDB(t)
+	repo := pgadapter.NewSecretRepo(pool)
+	ctx := context.Background()
+
+	secret := newTestSecret("claim-concurrent", time.Now().Add(1*time.Hour))
+	secret.BurnAfterRead = true
+	if err := repo.Create(ctx, secret); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	const claims = 12
+	var wg sync.WaitGroup
+	errs := make(chan error, claims)
+
+	for range claims {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			errs <- repo.ClaimBurnAfterRead(ctx, "claim-concurrent", "retrieval-token-claim-concurrent")
+		}()
+	}
+
+	wg.Wait()
+	close(errs)
+
+	var success, notFound int
+	for err := range errs {
+		switch err {
+		case nil:
+			success++
+		case domain.ErrNotFound:
+			notFound++
+		default:
+			t.Fatalf("unexpected error: %v", err)
+		}
+	}
+
+	if success != 1 {
+		t.Errorf("successful claims = %d, want 1", success)
+	}
+	if notFound != claims-1 {
+		t.Errorf("not found claims = %d, want %d", notFound, claims-1)
 	}
 }
 
@@ -176,18 +274,14 @@ func TestSecretRepo_DeleteExpired_BurnAfterRead(t *testing.T) {
 	if err := repo.Create(ctx, burnRetrieved); err != nil {
 		t.Fatalf("create burn-retrieved: %v", err)
 	}
-	if err := repo.SetRetrievedAt(ctx, "burn-retr-001"); err != nil {
-		t.Fatalf("set retrieved_at: %v", err)
-	}
+	markRetrieved(t, pool, "burn-retr-001")
 
 	// 2. Retrieved regular secret — should NOT be deleted
 	regularRetrieved := newTestSecret("reg-retr-001", time.Now().Add(1*time.Hour))
 	if err := repo.Create(ctx, regularRetrieved); err != nil {
 		t.Fatalf("create regular-retrieved: %v", err)
 	}
-	if err := repo.SetRetrievedAt(ctx, "reg-retr-001"); err != nil {
-		t.Fatalf("set retrieved_at: %v", err)
-	}
+	markRetrieved(t, pool, "reg-retr-001")
 
 	// 3. Unretrieved burn-after-read secret — should NOT be deleted
 	burnUnretrieved := newTestSecret("burn-unretr-001", time.Now().Add(1*time.Hour))

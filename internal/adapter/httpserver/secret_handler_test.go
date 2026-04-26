@@ -10,6 +10,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 	"time"
 
@@ -37,6 +38,7 @@ func callHandler(c echo.Context, handler echo.HandlerFunc) {
 
 // mockSecretRepo implements domain.SecretRepo for testing
 type mockSecretRepo struct {
+	mu        sync.Mutex
 	secrets   map[string]*domain.Secret
 	createErr error
 }
@@ -46,17 +48,24 @@ func newMockRepo() *mockSecretRepo {
 }
 
 func (m *mockSecretRepo) Create(_ context.Context, s *domain.Secret) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	if m.createErr != nil {
 		return m.createErr
 	}
 	if _, exists := m.secrets[s.PublicID]; exists {
 		return domain.ErrDuplicate
 	}
-	m.secrets[s.PublicID] = s
+	secret := *s
+	m.secrets[s.PublicID] = &secret
 	return nil
 }
 
 func (m *mockSecretRepo) GetByPublicID(_ context.Context, publicID string) (*domain.Secret, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	s, ok := m.secrets[publicID]
 	if !ok {
 		return nil, domain.ErrNotFound
@@ -64,18 +73,34 @@ func (m *mockSecretRepo) GetByPublicID(_ context.Context, publicID string) (*dom
 	if s.ExpiresAt.Before(time.Now()) {
 		return nil, domain.ErrNotFound
 	}
-	return s, nil
+	secret := *s
+	return &secret, nil
 }
 
-func (m *mockSecretRepo) SetRetrievedAt(_ context.Context, publicID string) error {
-	if s, ok := m.secrets[publicID]; ok {
-		now := time.Now()
-		s.RetrievedAt = &now
+func (m *mockSecretRepo) ClaimBurnAfterRead(_ context.Context, publicID, retrievalToken string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	s, ok := m.secrets[publicID]
+	if !ok {
+		return domain.ErrNotFound
 	}
+	if s.ExpiresAt.Before(time.Now()) ||
+		s.RetrievalToken != retrievalToken ||
+		!s.BurnAfterRead ||
+		s.RetrievedAt != nil {
+		return domain.ErrNotFound
+	}
+
+	now := time.Now()
+	s.RetrievedAt = &now
 	return nil
 }
 
 func (m *mockSecretRepo) Delete(_ context.Context, publicID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	if _, ok := m.secrets[publicID]; !ok {
 		return domain.ErrNotFound
 	}
@@ -84,6 +109,9 @@ func (m *mockSecretRepo) Delete(_ context.Context, publicID string) error {
 }
 
 func (m *mockSecretRepo) DeleteExpired(_ context.Context, beforeDelete func(string) error) (int64, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	var count int64
 	for id, s := range m.secrets {
 		expired := s.ExpiresAt.Before(time.Now())
@@ -428,6 +456,29 @@ func TestRetrieveSecret_InvalidToken(t *testing.T) {
 	}
 }
 
+func TestRetrieveSecret_BurnAfterRead_InvalidTokenDoesNotClaim(t *testing.T) {
+	repo := newMockRepo()
+	fs := newMockFileStore()
+	h := NewSecretHandler(repo, fs, 100*1024*1024, testMetrics())
+	seedSecret(repo, fs, "burn-invalid", "retrieval-tok", "deletion-tok", true)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/secrets/burn-invalid", nil)
+	req.Header.Set(HeaderRetrievalToken, "wrong-token")
+	rec := httptest.NewRecorder()
+	c := newEchoContext(req, rec)
+	c.SetParamNames("publicID")
+	c.SetParamValues("burn-invalid")
+
+	callHandler(c, h.RetrieveSecret)
+
+	if rec.Code != http.StatusForbidden {
+		t.Errorf("status = %d, want %d", rec.Code, http.StatusForbidden)
+	}
+	if repo.secrets["burn-invalid"].RetrievedAt != nil {
+		t.Error("retrieved_at should not be set for invalid retrieval token")
+	}
+}
+
 func TestRetrieveSecret_NotFound(t *testing.T) {
 	repo := newMockRepo()
 	fs := newMockFileStore()
@@ -511,6 +562,56 @@ func TestRetrieveSecret_BurnAfterRead(t *testing.T) {
 	}
 }
 
+func TestRetrieveSecret_BurnAfterRead_ConcurrentRevealOnlyOneSucceeds(t *testing.T) {
+	repo := newMockRepo()
+	fs := newMockFileStore()
+	h := NewSecretHandler(repo, fs, 100*1024*1024, testMetrics())
+	seedSecret(repo, fs, "burn-concurrent", "retrieval-tok", "deletion-tok", true)
+
+	const requests = 8
+	var wg sync.WaitGroup
+	statuses := make(chan int, requests)
+
+	for range requests {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+
+			req := httptest.NewRequest(http.MethodPost, "/api/v1/secrets/burn-concurrent", nil)
+			req.Header.Set(HeaderRetrievalToken, "retrieval-tok")
+			rec := httptest.NewRecorder()
+			c := newEchoContext(req, rec)
+			c.SetParamNames("publicID")
+			c.SetParamValues("burn-concurrent")
+
+			callHandler(c, h.RetrieveSecret)
+			statuses <- rec.Code
+		}()
+	}
+
+	wg.Wait()
+	close(statuses)
+
+	var okCount, notFoundCount int
+	for status := range statuses {
+		switch status {
+		case http.StatusOK:
+			okCount++
+		case http.StatusNotFound:
+			notFoundCount++
+		default:
+			t.Fatalf("unexpected status %d", status)
+		}
+	}
+
+	if okCount != 1 {
+		t.Errorf("successful retrievals = %d, want 1", okCount)
+	}
+	if notFoundCount != requests-1 {
+		t.Errorf("not found retrievals = %d, want %d", notFoundCount, requests-1)
+	}
+}
+
 func TestSecretMetadata_BurnAfterRead_AlreadyRetrieved(t *testing.T) {
 	repo := newMockRepo()
 	fs := newMockFileStore()
@@ -570,6 +671,30 @@ func TestRetrieveSecret_S3GetError(t *testing.T) {
 
 	if rec.Code != http.StatusInternalServerError {
 		t.Errorf("status = %d, want %d", rec.Code, http.StatusInternalServerError)
+	}
+}
+
+func TestRetrieveSecret_BurnAfterRead_S3GetErrorDoesNotClaim(t *testing.T) {
+	repo := newMockRepo()
+	fs := newMockFileStore()
+	fs.getErr = fmt.Errorf("S3 not reachable")
+	h := NewSecretHandler(repo, fs, 100*1024*1024, testMetrics())
+	seedSecret(repo, fs, "burn-s3-err", "ret-tok", "del-tok", true)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/secrets/burn-s3-err", nil)
+	req.Header.Set(HeaderRetrievalToken, "ret-tok")
+	rec := httptest.NewRecorder()
+	c := newEchoContext(req, rec)
+	c.SetParamNames("publicID")
+	c.SetParamValues("burn-s3-err")
+
+	callHandler(c, h.RetrieveSecret)
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Errorf("status = %d, want %d", rec.Code, http.StatusInternalServerError)
+	}
+	if repo.secrets["burn-s3-err"].RetrievedAt != nil {
+		t.Error("retrieved_at should not be set when S3 object cannot be opened")
 	}
 }
 

@@ -56,9 +56,16 @@ func (r *SecretRepo) GetByPublicID(ctx context.Context, publicID string) (*domai
 	return secretFromRow(row), nil
 }
 
-func (r *SecretRepo) SetRetrievedAt(ctx context.Context, publicID string) error {
-	if err := r.q.SetSecretRetrievedAt(ctx, publicID); err != nil {
-		return fmt.Errorf("set retrieved_at: %w", err)
+func (r *SecretRepo) ClaimBurnAfterRead(ctx context.Context, publicID, retrievalToken string) error {
+	n, err := r.q.ClaimBurnAfterRead(ctx, dbsqlc.ClaimBurnAfterReadParams{
+		PublicID:       publicID,
+		RetrievalToken: retrievalToken,
+	})
+	if err != nil {
+		return fmt.Errorf("claim burn-after-read: %w", err)
+	}
+	if n == 0 {
+		return domain.ErrNotFound
 	}
 	return nil
 }
