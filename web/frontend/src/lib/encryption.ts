@@ -24,6 +24,9 @@ const DERIVATION_PREFIX = `secretli:derivation:${DERIVATION_VERSION}`;
 const V1_NONCE_LENGTH = 12;
 const V2_NONCE_LENGTH = 24;
 const BLOB_V2_TAG = 0x02;
+const POLY1305_TAG_LENGTH = 16;
+
+export const ENCRYPTED_BLOB_OVERHEAD_BYTES = 1 + V2_NONCE_LENGTH + POLY1305_TAG_LENGTH;
 
 function toBuffer(bytes: Uint8Array): ArrayBuffer {
   return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;

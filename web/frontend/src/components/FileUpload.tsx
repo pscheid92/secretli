@@ -1,7 +1,6 @@
 import { useCallback, useRef, useState } from "react";
 import { formatSize } from "../lib/format";
-
-const MAX_TOTAL_SIZE = 100 * 1024 * 1024; // 100MB
+import { MAX_FILE_UPLOAD_BYTES, MAX_UPLOAD_LABEL } from "../lib/uploadLimits";
 
 interface FileUploadProps {
   onSelect: (files: File[]) => void;
@@ -55,8 +54,8 @@ export default function FileUpload({ onSelect }: FileUploadProps) {
     (files: File[]) => {
       setError("");
       const total = files.reduce((sum, f) => sum + f.size, 0);
-      if (total > MAX_TOTAL_SIZE) {
-        setError("Total file size exceeds 100MB limit.");
+      if (total > MAX_FILE_UPLOAD_BYTES) {
+        setError(`Total file size exceeds the ${MAX_UPLOAD_LABEL} upload limit.`);
         return;
       }
       setSelectedFiles(files);
@@ -106,7 +105,7 @@ export default function FileUpload({ onSelect }: FileUploadProps) {
   }
 
   const totalSize = selectedFiles.reduce((s, f) => s + f.size, 0);
-  const usagePercent = Math.min((totalSize / MAX_TOTAL_SIZE) * 100, 100);
+  const usagePercent = Math.min((totalSize / MAX_FILE_UPLOAD_BYTES) * 100, 100);
 
   return (
     <div>
@@ -154,7 +153,9 @@ export default function FileUpload({ onSelect }: FileUploadProps) {
                 Drop files here, or{" "}
                 <span className="text-amber-500 dark:text-amber-400">click to select</span>
               </p>
-              <p className="text-xs text-zinc-500 dark:text-zinc-100 mt-1">Max 100MB total</p>
+              <p className="text-xs text-zinc-500 dark:text-zinc-100 mt-1">
+                Max {MAX_UPLOAD_LABEL} total
+              </p>
             </div>
           </div>
         </div>
@@ -219,7 +220,9 @@ export default function FileUpload({ onSelect }: FileUploadProps) {
               <span>
                 {selectedFiles.length} {selectedFiles.length === 1 ? "file" : "files"}
               </span>
-              <span>{formatSize(totalSize)} / 100 MB</span>
+              <span>
+                {formatSize(totalSize)} / {MAX_UPLOAD_LABEL}
+              </span>
             </div>
             <div className="h-1 rounded-full bg-zinc-200 dark:bg-zinc-700 overflow-hidden">
               <div
