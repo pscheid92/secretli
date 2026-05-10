@@ -3,6 +3,8 @@ package httpserver
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -194,13 +196,29 @@ func createMultipartRequest(t *testing.T, fields map[string]string, fileContent 
 	return req
 }
 
+func testPublicID(label string) string {
+	sum := sha256.Sum256([]byte("public_id:" + label))
+	return base64.RawURLEncoding.EncodeToString(sum[:16])
+}
+
+func testToken(label string) string {
+	sum := sha256.Sum256([]byte("token:" + label))
+	return base64.RawURLEncoding.EncodeToString(sum[:])
+}
+
+func testEncryptedMetaV1() string {
+	nonce := base64.RawURLEncoding.EncodeToString([]byte("123456789012"))
+	ciphertext := base64.RawURLEncoding.EncodeToString([]byte("ciphertext"))
+	return "v1$" + nonce + "$" + ciphertext
+}
+
 func validCreateMetadata() map[string]string {
 	return map[string]string{
-		"public_id":       "test-public-id",
-		"metadata_token":  "dGVzdG1ldGFkYXRhdG9rZW4",
-		"blob_token":      "dGVzdGJsb2J0b2tlbg",
-		"deletion_token":  "dGVzdGRlbGV0aW9udG9rZW4",
-		"encrypted_meta":  "v1$bm9uY2U$Y2lwaGVydGV4dA",
+		"public_id":       testPublicID("create"),
+		"metadata_token":  testToken("create metadata"),
+		"blob_token":      testToken("create blob"),
+		"deletion_token":  testToken("create deletion"),
+		"encrypted_meta":  testEncryptedMetaV1(),
 		"expiration":      "7d",
 		"burn_after_read": "false",
 	}
@@ -217,7 +235,7 @@ func seedSecretWithTokens(repo *mockSecretRepo, fs *mockFileStore, publicID, met
 		MetadataTokenHash: tokencrypto.TokenHash(metadataToken),
 		BlobTokenHash:     tokencrypto.TokenHash(blobToken),
 		DeletionTokenHash: tokencrypto.TokenHash(deletionToken),
-		EncryptedMeta:     "v1$bm9uY2U$Y2lwaGVydGV4dA",
+		EncryptedMeta:     testEncryptedMetaV1(),
 		BlobSize:          int64(len(blobData)),
 		BurnAfterRead:     burnAfterRead,
 		ExpiresAt:         time.Now().Add(time.Hour),
@@ -250,12 +268,12 @@ func TestCreateSecret_Success(t *testing.T) {
 	}
 
 	// Verify S3 object was stored
-	if _, ok := fs.objects["secrets/test-public-id"]; !ok {
+	if _, ok := fs.objects[storageKey(testPublicID("create"))]; !ok {
 		t.Error("blob not stored in S3")
 	}
 
 	// Verify DB record
-	secret, ok := repo.secrets["test-public-id"]
+	secret, ok := repo.secrets[testPublicID("create")]
 	if !ok {
 		t.Fatal("secret not created in DB")
 	}
@@ -277,7 +295,7 @@ func TestCreateSecret_MissingFields(t *testing.T) {
 	h := NewSecretHandler(repo, fs, 100*1024*1024, testMetrics())
 
 	// Only public_id provided — other required fields missing
-	meta := map[string]string{"public_id": "only-one-field"}
+	meta := map[string]string{"public_id": testPublicID("missing fields")}
 	req := createMultipartRequest(t, meta, []byte("data"))
 	rec := httptest.NewRecorder()
 	c := newEchoContext(req, rec)
@@ -321,6 +339,48 @@ func TestCreateSecret_InvalidExpiration(t *testing.T) {
 
 	if rec.Code != http.StatusBadRequest {
 		t.Errorf("status = %d, want %d", rec.Code, http.StatusBadRequest)
+	}
+}
+
+func TestCreateSecret_RejectsMalformedProtectedFields(t *testing.T) {
+	tests := []struct {
+		name  string
+		field string
+		value string
+	}{
+		{name: "public id", field: "public_id", value: "short"},
+		{name: "metadata token", field: "metadata_token", value: "short"},
+		{name: "blob token", field: "blob_token", value: "short"},
+		{name: "deletion token", field: "deletion_token", value: "short"},
+		{name: "encrypted meta", field: "encrypted_meta", value: "v1$bad$bad"},
+		{name: "oversized encrypted meta", field: "encrypted_meta", value: string(bytes.Repeat([]byte("A"), domain.EncryptedMetaMaxBytes+1))},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := newMockRepo()
+			fs := newMockFileStore()
+			h := NewSecretHandler(repo, fs, 100*1024*1024, testMetrics())
+
+			meta := validCreateMetadata()
+			meta[tt.field] = tt.value
+
+			req := createMultipartRequest(t, meta, []byte("data"))
+			rec := httptest.NewRecorder()
+			c := newEchoContext(req, rec)
+
+			callHandler(c, h.CreateSecret)
+
+			if rec.Code != http.StatusBadRequest {
+				t.Errorf("status = %d, want %d. body: %s", rec.Code, http.StatusBadRequest, rec.Body.String())
+			}
+			if len(repo.secrets) != 0 {
+				t.Error("malformed request should not create DB record")
+			}
+			if len(fs.objects) != 0 {
+				t.Error("malformed request should not store blob")
+			}
+		})
 	}
 }
 
@@ -383,7 +443,7 @@ func TestCreateSecret_DBErrorCleansUpS3(t *testing.T) {
 	}
 
 	// Verify S3 object was cleaned up
-	if _, ok := fs.objects["secrets/test-public-id"]; ok {
+	if _, ok := fs.objects[storageKey(testPublicID("create"))]; ok {
 		t.Error("S3 object should have been cleaned up after DB error")
 	}
 }
@@ -421,10 +481,10 @@ func TestCreateSecret_FilePartExceedsMaxFileSize(t *testing.T) {
 	if rec.Code != http.StatusBadRequest {
 		t.Errorf("status = %d, want %d. body: %s", rec.Code, http.StatusBadRequest, rec.Body.String())
 	}
-	if _, ok := fs.objects["secrets/test-public-id"]; ok {
+	if _, ok := fs.objects[storageKey(testPublicID("create"))]; ok {
 		t.Error("oversized blob should not be stored")
 	}
-	if _, ok := repo.secrets["test-public-id"]; ok {
+	if _, ok := repo.secrets[testPublicID("create")]; ok {
 		t.Error("oversized blob should not create DB record")
 	}
 }
@@ -444,7 +504,7 @@ func TestCreateSecret_FilePartAtMaxFileSizeSucceeds(t *testing.T) {
 	if rec.Code != http.StatusCreated {
 		t.Errorf("status = %d, want %d. body: %s", rec.Code, http.StatusCreated, rec.Body.String())
 	}
-	if got := repo.secrets["test-public-id"].BlobSize; got != maxSize {
+	if got := repo.secrets[testPublicID("create")].BlobSize; got != maxSize {
 		t.Errorf("blob size = %d, want %d", got, maxSize)
 	}
 }
@@ -472,14 +532,17 @@ func TestRetrieveSecret_Success(t *testing.T) {
 	repo := newMockRepo()
 	fs := newMockFileStore()
 	h := NewSecretHandler(repo, fs, 100*1024*1024, testMetrics())
-	seedSecret(repo, fs, "pub1", "retrieval-tok", "deletion-tok", false)
+	publicID := testPublicID("retrieve success")
+	blobToken := testToken("retrieve blob")
+	deletionToken := testToken("retrieve deletion")
+	seedSecret(repo, fs, publicID, blobToken, deletionToken, false)
 
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/secrets/pub1", nil)
-	req.Header.Set(HeaderBlobToken, "retrieval-tok")
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/secrets/"+publicID, nil)
+	req.Header.Set(HeaderBlobToken, blobToken)
 	rec := httptest.NewRecorder()
 	c := newEchoContext(req, rec)
 	c.SetParamNames("publicID")
-	c.SetParamValues("pub1")
+	c.SetParamValues(publicID)
 
 	callHandler(c, h.RetrieveSecret)
 
@@ -501,14 +564,17 @@ func TestRetrieveSecret_InvalidToken(t *testing.T) {
 	repo := newMockRepo()
 	fs := newMockFileStore()
 	h := NewSecretHandler(repo, fs, 100*1024*1024, testMetrics())
-	seedSecret(repo, fs, "pub1", "retrieval-tok", "deletion-tok", false)
+	publicID := testPublicID("retrieve invalid token")
+	blobToken := testToken("retrieve blob")
+	deletionToken := testToken("retrieve deletion")
+	seedSecret(repo, fs, publicID, blobToken, deletionToken, false)
 
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/secrets/pub1", nil)
-	req.Header.Set(HeaderBlobToken, "wrong-token")
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/secrets/"+publicID, nil)
+	req.Header.Set(HeaderBlobToken, testToken("wrong blob"))
 	rec := httptest.NewRecorder()
 	c := newEchoContext(req, rec)
 	c.SetParamNames("publicID")
-	c.SetParamValues("pub1")
+	c.SetParamValues(publicID)
 
 	callHandler(c, h.RetrieveSecret)
 
@@ -521,14 +587,18 @@ func TestRetrieveSecret_MetadataTokenCannotFetchBlob(t *testing.T) {
 	repo := newMockRepo()
 	fs := newMockFileStore()
 	h := NewSecretHandler(repo, fs, 100*1024*1024, testMetrics())
-	seedSecretWithTokens(repo, fs, "split-token", "metadata-tok", "blob-tok", "deletion-tok", false)
+	publicID := testPublicID("retrieve split")
+	metadataToken := testToken("split metadata")
+	blobToken := testToken("split blob")
+	deletionToken := testToken("split deletion")
+	seedSecretWithTokens(repo, fs, publicID, metadataToken, blobToken, deletionToken, false)
 
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/secrets/split-token", nil)
-	req.Header.Set(HeaderBlobToken, "metadata-tok")
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/secrets/"+publicID, nil)
+	req.Header.Set(HeaderBlobToken, metadataToken)
 	rec := httptest.NewRecorder()
 	c := newEchoContext(req, rec)
 	c.SetParamNames("publicID")
-	c.SetParamValues("split-token")
+	c.SetParamValues(publicID)
 
 	callHandler(c, h.RetrieveSecret)
 
@@ -541,21 +611,24 @@ func TestRetrieveSecret_BurnAfterRead_InvalidTokenDoesNotClaim(t *testing.T) {
 	repo := newMockRepo()
 	fs := newMockFileStore()
 	h := NewSecretHandler(repo, fs, 100*1024*1024, testMetrics())
-	seedSecret(repo, fs, "burn-invalid", "retrieval-tok", "deletion-tok", true)
+	publicID := testPublicID("burn invalid token")
+	blobToken := testToken("burn invalid blob")
+	deletionToken := testToken("burn invalid deletion")
+	seedSecret(repo, fs, publicID, blobToken, deletionToken, true)
 
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/secrets/burn-invalid", nil)
-	req.Header.Set(HeaderBlobToken, "wrong-token")
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/secrets/"+publicID, nil)
+	req.Header.Set(HeaderBlobToken, testToken("wrong blob"))
 	rec := httptest.NewRecorder()
 	c := newEchoContext(req, rec)
 	c.SetParamNames("publicID")
-	c.SetParamValues("burn-invalid")
+	c.SetParamValues(publicID)
 
 	callHandler(c, h.RetrieveSecret)
 
 	if rec.Code != http.StatusForbidden {
 		t.Errorf("status = %d, want %d", rec.Code, http.StatusForbidden)
 	}
-	if repo.secrets["burn-invalid"].RetrievedAt != nil {
+	if repo.secrets[publicID].RetrievedAt != nil {
 		t.Error("retrieved_at should not be set for invalid blob token")
 	}
 }
@@ -564,13 +637,14 @@ func TestRetrieveSecret_NotFound(t *testing.T) {
 	repo := newMockRepo()
 	fs := newMockFileStore()
 	h := NewSecretHandler(repo, fs, 100*1024*1024, testMetrics())
+	publicID := testPublicID("retrieve nonexistent")
 
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/secrets/nonexistent", nil)
-	req.Header.Set(HeaderBlobToken, "some-token")
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/secrets/"+publicID, nil)
+	req.Header.Set(HeaderBlobToken, testToken("some token"))
 	rec := httptest.NewRecorder()
 	c := newEchoContext(req, rec)
 	c.SetParamNames("publicID")
-	c.SetParamValues("nonexistent")
+	c.SetParamValues(publicID)
 
 	callHandler(c, h.RetrieveSecret)
 
@@ -583,12 +657,13 @@ func TestRetrieveSecret_MissingToken(t *testing.T) {
 	repo := newMockRepo()
 	fs := newMockFileStore()
 	h := NewSecretHandler(repo, fs, 100*1024*1024, testMetrics())
+	publicID := testPublicID("missing token")
 
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/secrets/pub1", nil)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/secrets/"+publicID, nil)
 	rec := httptest.NewRecorder()
 	c := newEchoContext(req, rec)
 	c.SetParamNames("publicID")
-	c.SetParamValues("pub1")
+	c.SetParamValues(publicID)
 
 	callHandler(c, h.RetrieveSecret)
 
@@ -601,15 +676,18 @@ func TestRetrieveSecret_BurnAfterRead(t *testing.T) {
 	repo := newMockRepo()
 	fs := newMockFileStore()
 	h := NewSecretHandler(repo, fs, 100*1024*1024, testMetrics())
-	seedSecret(repo, fs, "burn1", "retrieval-tok", "deletion-tok", true)
+	publicID := testPublicID("burn after read")
+	blobToken := testToken("burn after read blob")
+	deletionToken := testToken("burn after read deletion")
+	seedSecret(repo, fs, publicID, blobToken, deletionToken, true)
 
 	// First retrieval succeeds
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/secrets/burn1", nil)
-	req.Header.Set(HeaderBlobToken, "retrieval-tok")
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/secrets/"+publicID, nil)
+	req.Header.Set(HeaderBlobToken, blobToken)
 	rec := httptest.NewRecorder()
 	c := newEchoContext(req, rec)
 	c.SetParamNames("publicID")
-	c.SetParamValues("burn1")
+	c.SetParamValues(publicID)
 	callHandler(c, h.RetrieveSecret)
 
 	if rec.Code != http.StatusOK {
@@ -617,25 +695,25 @@ func TestRetrieveSecret_BurnAfterRead(t *testing.T) {
 	}
 
 	// DB record and S3 object still exist (soft-delete, not hard-delete)
-	if _, ok := repo.secrets["burn1"]; !ok {
+	if _, ok := repo.secrets[publicID]; !ok {
 		t.Error("secret should still exist after burn-after-read (soft delete)")
 	}
-	if _, ok := fs.objects["secrets/burn1"]; !ok {
+	if _, ok := fs.objects[storageKey(publicID)]; !ok {
 		t.Error("S3 object should still exist after burn-after-read (soft delete)")
 	}
 
 	// RetrievedAt should be set
-	if repo.secrets["burn1"].RetrievedAt == nil {
+	if repo.secrets[publicID].RetrievedAt == nil {
 		t.Error("retrieved_at should be set after burn-after-read retrieval")
 	}
 
 	// Second retrieval fails (already burned)
-	req = httptest.NewRequest(http.MethodPost, "/api/v1/secrets/burn1", nil)
-	req.Header.Set(HeaderBlobToken, "retrieval-tok")
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/secrets/"+publicID, nil)
+	req.Header.Set(HeaderBlobToken, blobToken)
 	rec = httptest.NewRecorder()
 	c = newEchoContext(req, rec)
 	c.SetParamNames("publicID")
-	c.SetParamValues("burn1")
+	c.SetParamValues(publicID)
 	callHandler(c, h.RetrieveSecret)
 
 	if rec.Code != http.StatusNotFound {
@@ -647,7 +725,10 @@ func TestRetrieveSecret_BurnAfterRead_ConcurrentRevealOnlyOneSucceeds(t *testing
 	repo := newMockRepo()
 	fs := newMockFileStore()
 	h := NewSecretHandler(repo, fs, 100*1024*1024, testMetrics())
-	seedSecret(repo, fs, "burn-concurrent", "retrieval-tok", "deletion-tok", true)
+	publicID := testPublicID("burn concurrent")
+	blobToken := testToken("burn concurrent blob")
+	deletionToken := testToken("burn concurrent deletion")
+	seedSecret(repo, fs, publicID, blobToken, deletionToken, true)
 
 	const requests = 8
 	var wg sync.WaitGroup
@@ -658,12 +739,12 @@ func TestRetrieveSecret_BurnAfterRead_ConcurrentRevealOnlyOneSucceeds(t *testing
 		go func() {
 			defer wg.Done()
 
-			req := httptest.NewRequest(http.MethodPost, "/api/v1/secrets/burn-concurrent", nil)
-			req.Header.Set(HeaderBlobToken, "retrieval-tok")
+			req := httptest.NewRequest(http.MethodPost, "/api/v1/secrets/"+publicID, nil)
+			req.Header.Set(HeaderBlobToken, blobToken)
 			rec := httptest.NewRecorder()
 			c := newEchoContext(req, rec)
 			c.SetParamNames("publicID")
-			c.SetParamValues("burn-concurrent")
+			c.SetParamValues(publicID)
 
 			callHandler(c, h.RetrieveSecret)
 			statuses <- rec.Code
@@ -693,22 +774,59 @@ func TestRetrieveSecret_BurnAfterRead_ConcurrentRevealOnlyOneSucceeds(t *testing
 	}
 }
 
+func TestSecretMetadata_Success(t *testing.T) {
+	repo := newMockRepo()
+	fs := newMockFileStore()
+	h := NewSecretHandler(repo, fs, 100*1024*1024, testMetrics())
+	publicID := testPublicID("metadata success")
+	metadataToken := testToken("metadata success token")
+	deletionToken := testToken("metadata success deletion")
+	seedSecret(repo, fs, publicID, metadataToken, deletionToken, false)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/secrets/"+publicID+"/meta", nil)
+	req.Header.Set(HeaderMetadataToken, metadataToken)
+	rec := httptest.NewRecorder()
+	c := newEchoContext(req, rec)
+	c.SetParamNames("publicID")
+	c.SetParamValues(publicID)
+
+	callHandler(c, h.SecretMetadata)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d. body: %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+
+	var resp domain.SecretMetadataResponse
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.EncryptedMeta != testEncryptedMetaV1() {
+		t.Errorf("encrypted_meta = %q, want fixture", resp.EncryptedMeta)
+	}
+	if resp.BlobSize == 0 {
+		t.Error("blob_size should be populated")
+	}
+}
+
 func TestSecretMetadata_BurnAfterRead_AlreadyRetrieved(t *testing.T) {
 	repo := newMockRepo()
 	fs := newMockFileStore()
 	h := NewSecretHandler(repo, fs, 100*1024*1024, testMetrics())
-	seedSecret(repo, fs, "burn-meta", "retrieval-tok", "deletion-tok", true)
+	publicID := testPublicID("burn metadata")
+	metadataToken := testToken("burn metadata token")
+	deletionToken := testToken("burn metadata deletion")
+	seedSecret(repo, fs, publicID, metadataToken, deletionToken, true)
 
 	// Mark as already retrieved
 	now := time.Now()
-	repo.secrets["burn-meta"].RetrievedAt = &now
+	repo.secrets[publicID].RetrievedAt = &now
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/secrets/burn-meta/meta", nil)
-	req.Header.Set(HeaderMetadataToken, "retrieval-tok")
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/secrets/"+publicID+"/meta", nil)
+	req.Header.Set(HeaderMetadataToken, metadataToken)
 	rec := httptest.NewRecorder()
 	c := newEchoContext(req, rec)
 	c.SetParamNames("publicID")
-	c.SetParamValues("burn-meta")
+	c.SetParamValues(publicID)
 
 	callHandler(c, h.SecretMetadata)
 
@@ -721,14 +839,18 @@ func TestSecretMetadata_BlobTokenCannotFetchMetadata(t *testing.T) {
 	repo := newMockRepo()
 	fs := newMockFileStore()
 	h := NewSecretHandler(repo, fs, 100*1024*1024, testMetrics())
-	seedSecretWithTokens(repo, fs, "split-meta", "metadata-tok", "blob-tok", "deletion-tok", false)
+	publicID := testPublicID("metadata split")
+	metadataToken := testToken("metadata split metadata")
+	blobToken := testToken("metadata split blob")
+	deletionToken := testToken("metadata split deletion")
+	seedSecretWithTokens(repo, fs, publicID, metadataToken, blobToken, deletionToken, false)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/secrets/split-meta/meta", nil)
-	req.Header.Set(HeaderMetadataToken, "blob-tok")
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/secrets/"+publicID+"/meta", nil)
+	req.Header.Set(HeaderMetadataToken, blobToken)
 	rec := httptest.NewRecorder()
 	c := newEchoContext(req, rec)
 	c.SetParamNames("publicID")
-	c.SetParamValues("split-meta")
+	c.SetParamValues(publicID)
 
 	callHandler(c, h.SecretMetadata)
 
@@ -743,7 +865,7 @@ func TestRetrieveSecret_MissingPublicID(t *testing.T) {
 	h := NewSecretHandler(repo, fs, 100*1024*1024, testMetrics())
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/secrets/", nil)
-	req.Header.Set(HeaderBlobToken, "tok")
+	req.Header.Set(HeaderBlobToken, testToken("missing public id"))
 	rec := httptest.NewRecorder()
 	c := newEchoContext(req, rec)
 
@@ -754,19 +876,156 @@ func TestRetrieveSecret_MissingPublicID(t *testing.T) {
 	}
 }
 
+func TestSecretHandlers_MalformedPublicID(t *testing.T) {
+	tests := []struct {
+		name       string
+		method     string
+		pathSuffix string
+		setup      func(*http.Request)
+		handler    func(*SecretHandler) echo.HandlerFunc
+	}{
+		{
+			name:       "retrieve",
+			method:     http.MethodPost,
+			pathSuffix: "",
+			setup: func(req *http.Request) {
+				req.Header.Set(HeaderBlobToken, testToken("malformed public retrieve"))
+			},
+			handler: func(h *SecretHandler) echo.HandlerFunc { return h.RetrieveSecret },
+		},
+		{
+			name:       "metadata",
+			method:     http.MethodGet,
+			pathSuffix: "/meta",
+			setup: func(req *http.Request) {
+				req.Header.Set(HeaderMetadataToken, testToken("malformed public metadata"))
+			},
+			handler: func(h *SecretHandler) echo.HandlerFunc { return h.SecretMetadata },
+		},
+		{
+			name:       "delete",
+			method:     http.MethodDelete,
+			pathSuffix: "",
+			setup: func(req *http.Request) {
+				req.Header.Set(HeaderMetadataToken, testToken("malformed public delete metadata"))
+				req.Header.Set(HeaderDeletionToken, testToken("malformed public delete deletion"))
+			},
+			handler: func(h *SecretHandler) echo.HandlerFunc { return h.DeleteSecret },
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := newMockRepo()
+			fs := newMockFileStore()
+			h := NewSecretHandler(repo, fs, 100*1024*1024, testMetrics())
+			publicID := "short"
+
+			req := httptest.NewRequest(tt.method, "/api/v1/secrets/"+publicID+tt.pathSuffix, nil)
+			tt.setup(req)
+			rec := httptest.NewRecorder()
+			c := newEchoContext(req, rec)
+			c.SetParamNames("publicID")
+			c.SetParamValues(publicID)
+
+			callHandler(c, tt.handler(h))
+
+			if rec.Code != http.StatusBadRequest {
+				t.Errorf("status = %d, want %d. body: %s", rec.Code, http.StatusBadRequest, rec.Body.String())
+			}
+		})
+	}
+}
+
+func TestSecretHandlers_MalformedTokenHeaders(t *testing.T) {
+	tests := []struct {
+		name    string
+		method  string
+		path    func(string) string
+		setup   func(*mockSecretRepo, *mockFileStore, string, *http.Request)
+		handler func(*SecretHandler) echo.HandlerFunc
+	}{
+		{
+			name:   "retrieve blob token",
+			method: http.MethodPost,
+			path:   func(publicID string) string { return "/api/v1/secrets/" + publicID },
+			setup: func(_ *mockSecretRepo, _ *mockFileStore, _ string, req *http.Request) {
+				req.Header.Set(HeaderBlobToken, "short")
+			},
+			handler: func(h *SecretHandler) echo.HandlerFunc { return h.RetrieveSecret },
+		},
+		{
+			name:   "metadata token",
+			method: http.MethodGet,
+			path:   func(publicID string) string { return "/api/v1/secrets/" + publicID + "/meta" },
+			setup: func(_ *mockSecretRepo, _ *mockFileStore, _ string, req *http.Request) {
+				req.Header.Set(HeaderMetadataToken, "short")
+			},
+			handler: func(h *SecretHandler) echo.HandlerFunc { return h.SecretMetadata },
+		},
+		{
+			name:   "delete metadata token",
+			method: http.MethodDelete,
+			path:   func(publicID string) string { return "/api/v1/secrets/" + publicID },
+			setup: func(_ *mockSecretRepo, _ *mockFileStore, _ string, req *http.Request) {
+				req.Header.Set(HeaderMetadataToken, "short")
+				req.Header.Set(HeaderDeletionToken, testToken("delete malformed metadata deletion"))
+			},
+			handler: func(h *SecretHandler) echo.HandlerFunc { return h.DeleteSecret },
+		},
+		{
+			name:   "delete deletion token",
+			method: http.MethodDelete,
+			path:   func(publicID string) string { return "/api/v1/secrets/" + publicID },
+			setup: func(repo *mockSecretRepo, fs *mockFileStore, publicID string, req *http.Request) {
+				metadataToken := testToken("delete malformed deletion metadata")
+				seedSecret(repo, fs, publicID, metadataToken, testToken("delete malformed deletion"), false)
+				req.Header.Set(HeaderMetadataToken, metadataToken)
+				req.Header.Set(HeaderDeletionToken, "short")
+			},
+			handler: func(h *SecretHandler) echo.HandlerFunc { return h.DeleteSecret },
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := newMockRepo()
+			fs := newMockFileStore()
+			h := NewSecretHandler(repo, fs, 100*1024*1024, testMetrics())
+			publicID := testPublicID("malformed token " + tt.name)
+
+			req := httptest.NewRequest(tt.method, tt.path(publicID), nil)
+			tt.setup(repo, fs, publicID, req)
+			rec := httptest.NewRecorder()
+			c := newEchoContext(req, rec)
+			c.SetParamNames("publicID")
+			c.SetParamValues(publicID)
+
+			callHandler(c, tt.handler(h))
+
+			if rec.Code != http.StatusBadRequest {
+				t.Errorf("status = %d, want %d. body: %s", rec.Code, http.StatusBadRequest, rec.Body.String())
+			}
+		})
+	}
+}
+
 func TestRetrieveSecret_S3GetError(t *testing.T) {
 	repo := newMockRepo()
 	fs := newMockFileStore()
 	fs.getErr = fmt.Errorf("S3 not reachable")
 	h := NewSecretHandler(repo, fs, 100*1024*1024, testMetrics())
-	seedSecret(repo, fs, "s3-err", "ret-tok", "del-tok", false)
+	publicID := testPublicID("s3 get error")
+	blobToken := testToken("s3 get blob")
+	deletionToken := testToken("s3 get deletion")
+	seedSecret(repo, fs, publicID, blobToken, deletionToken, false)
 
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/secrets/s3-err", nil)
-	req.Header.Set(HeaderBlobToken, "ret-tok")
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/secrets/"+publicID, nil)
+	req.Header.Set(HeaderBlobToken, blobToken)
 	rec := httptest.NewRecorder()
 	c := newEchoContext(req, rec)
 	c.SetParamNames("publicID")
-	c.SetParamValues("s3-err")
+	c.SetParamValues(publicID)
 
 	callHandler(c, h.RetrieveSecret)
 
@@ -780,21 +1039,24 @@ func TestRetrieveSecret_BurnAfterRead_S3GetErrorDoesNotClaim(t *testing.T) {
 	fs := newMockFileStore()
 	fs.getErr = fmt.Errorf("S3 not reachable")
 	h := NewSecretHandler(repo, fs, 100*1024*1024, testMetrics())
-	seedSecret(repo, fs, "burn-s3-err", "ret-tok", "del-tok", true)
+	publicID := testPublicID("burn s3 get error")
+	blobToken := testToken("burn s3 blob")
+	deletionToken := testToken("burn s3 deletion")
+	seedSecret(repo, fs, publicID, blobToken, deletionToken, true)
 
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/secrets/burn-s3-err", nil)
-	req.Header.Set(HeaderBlobToken, "ret-tok")
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/secrets/"+publicID, nil)
+	req.Header.Set(HeaderBlobToken, blobToken)
 	rec := httptest.NewRecorder()
 	c := newEchoContext(req, rec)
 	c.SetParamNames("publicID")
-	c.SetParamValues("burn-s3-err")
+	c.SetParamValues(publicID)
 
 	callHandler(c, h.RetrieveSecret)
 
 	if rec.Code != http.StatusInternalServerError {
 		t.Errorf("status = %d, want %d", rec.Code, http.StatusInternalServerError)
 	}
-	if repo.secrets["burn-s3-err"].RetrievedAt != nil {
+	if repo.secrets[publicID].RetrievedAt != nil {
 		t.Error("retrieved_at should not be set when S3 object cannot be opened")
 	}
 }
@@ -805,15 +1067,18 @@ func TestDeleteSecret_Success(t *testing.T) {
 	repo := newMockRepo()
 	fs := newMockFileStore()
 	h := NewSecretHandler(repo, fs, 100*1024*1024, testMetrics())
-	seedSecret(repo, fs, "del1", "retrieval-tok", "deletion-tok", false)
+	publicID := testPublicID("delete success")
+	metadataToken := testToken("delete metadata")
+	deletionToken := testToken("delete deletion")
+	seedSecret(repo, fs, publicID, metadataToken, deletionToken, false)
 
-	req := httptest.NewRequest(http.MethodDelete, "/api/v1/secrets/del1", nil)
-	req.Header.Set(HeaderMetadataToken, "retrieval-tok")
-	req.Header.Set(HeaderDeletionToken, "deletion-tok")
+	req := httptest.NewRequest(http.MethodDelete, "/api/v1/secrets/"+publicID, nil)
+	req.Header.Set(HeaderMetadataToken, metadataToken)
+	req.Header.Set(HeaderDeletionToken, deletionToken)
 	rec := httptest.NewRecorder()
 	c := newEchoContext(req, rec)
 	c.SetParamNames("publicID")
-	c.SetParamValues("del1")
+	c.SetParamValues(publicID)
 
 	callHandler(c, h.DeleteSecret)
 
@@ -822,7 +1087,7 @@ func TestDeleteSecret_Success(t *testing.T) {
 	}
 
 	// Verify S3 object was deleted
-	if _, ok := fs.objects["secrets/del1"]; ok {
+	if _, ok := fs.objects[storageKey(publicID)]; ok {
 		t.Error("S3 object should have been deleted")
 	}
 }
@@ -831,15 +1096,18 @@ func TestDeleteSecret_InvalidDeletionToken(t *testing.T) {
 	repo := newMockRepo()
 	fs := newMockFileStore()
 	h := NewSecretHandler(repo, fs, 100*1024*1024, testMetrics())
-	seedSecret(repo, fs, "del1", "retrieval-tok", "deletion-tok", false)
+	publicID := testPublicID("delete invalid deletion")
+	metadataToken := testToken("delete metadata")
+	deletionToken := testToken("delete deletion")
+	seedSecret(repo, fs, publicID, metadataToken, deletionToken, false)
 
-	req := httptest.NewRequest(http.MethodDelete, "/api/v1/secrets/del1", nil)
-	req.Header.Set(HeaderMetadataToken, "retrieval-tok")
-	req.Header.Set(HeaderDeletionToken, "wrong-token")
+	req := httptest.NewRequest(http.MethodDelete, "/api/v1/secrets/"+publicID, nil)
+	req.Header.Set(HeaderMetadataToken, metadataToken)
+	req.Header.Set(HeaderDeletionToken, testToken("wrong deletion"))
 	rec := httptest.NewRecorder()
 	c := newEchoContext(req, rec)
 	c.SetParamNames("publicID")
-	c.SetParamValues("del1")
+	c.SetParamValues(publicID)
 
 	callHandler(c, h.DeleteSecret)
 
@@ -852,14 +1120,17 @@ func TestDeleteSecret_MissingDeletionToken(t *testing.T) {
 	repo := newMockRepo()
 	fs := newMockFileStore()
 	h := NewSecretHandler(repo, fs, 100*1024*1024, testMetrics())
-	seedSecret(repo, fs, "del1", "retrieval-tok", "deletion-tok", false)
+	publicID := testPublicID("delete missing deletion")
+	metadataToken := testToken("delete metadata")
+	deletionToken := testToken("delete deletion")
+	seedSecret(repo, fs, publicID, metadataToken, deletionToken, false)
 
-	req := httptest.NewRequest(http.MethodDelete, "/api/v1/secrets/del1", nil)
-	req.Header.Set(HeaderMetadataToken, "retrieval-tok")
+	req := httptest.NewRequest(http.MethodDelete, "/api/v1/secrets/"+publicID, nil)
+	req.Header.Set(HeaderMetadataToken, metadataToken)
 	rec := httptest.NewRecorder()
 	c := newEchoContext(req, rec)
 	c.SetParamNames("publicID")
-	c.SetParamValues("del1")
+	c.SetParamValues(publicID)
 
 	callHandler(c, h.DeleteSecret)
 
@@ -872,14 +1143,15 @@ func TestDeleteSecret_NotFound(t *testing.T) {
 	repo := newMockRepo()
 	fs := newMockFileStore()
 	h := NewSecretHandler(repo, fs, 100*1024*1024, testMetrics())
+	publicID := testPublicID("delete nonexistent")
 
-	req := httptest.NewRequest(http.MethodDelete, "/api/v1/secrets/nonexistent", nil)
-	req.Header.Set(HeaderMetadataToken, "tok")
-	req.Header.Set(HeaderDeletionToken, "tok")
+	req := httptest.NewRequest(http.MethodDelete, "/api/v1/secrets/"+publicID, nil)
+	req.Header.Set(HeaderMetadataToken, testToken("delete metadata"))
+	req.Header.Set(HeaderDeletionToken, testToken("delete deletion"))
 	rec := httptest.NewRecorder()
 	c := newEchoContext(req, rec)
 	c.SetParamNames("publicID")
-	c.SetParamValues("nonexistent")
+	c.SetParamValues(publicID)
 
 	callHandler(c, h.DeleteSecret)
 
@@ -893,12 +1165,13 @@ func TestDeleteSecret_MissingMetadataToken(t *testing.T) {
 	fs := newMockFileStore()
 	h := NewSecretHandler(repo, fs, 100*1024*1024, testMetrics())
 
-	req := httptest.NewRequest(http.MethodDelete, "/api/v1/secrets/del1", nil)
-	req.Header.Set(HeaderDeletionToken, "tok")
+	publicID := testPublicID("delete missing metadata")
+	req := httptest.NewRequest(http.MethodDelete, "/api/v1/secrets/"+publicID, nil)
+	req.Header.Set(HeaderDeletionToken, testToken("delete deletion"))
 	rec := httptest.NewRecorder()
 	c := newEchoContext(req, rec)
 	c.SetParamNames("publicID")
-	c.SetParamValues("del1")
+	c.SetParamValues(publicID)
 
 	callHandler(c, h.DeleteSecret)
 
@@ -913,8 +1186,8 @@ func TestDeleteSecret_MissingPublicID(t *testing.T) {
 	h := NewSecretHandler(repo, fs, 100*1024*1024, testMetrics())
 
 	req := httptest.NewRequest(http.MethodDelete, "/api/v1/secrets/", nil)
-	req.Header.Set(HeaderMetadataToken, "tok")
-	req.Header.Set(HeaderDeletionToken, "tok")
+	req.Header.Set(HeaderMetadataToken, testToken("missing delete public id metadata"))
+	req.Header.Set(HeaderDeletionToken, testToken("missing delete public id deletion"))
 	rec := httptest.NewRecorder()
 	c := newEchoContext(req, rec)
 
@@ -929,15 +1202,18 @@ func TestDeleteSecret_InvalidMetadataToken(t *testing.T) {
 	repo := newMockRepo()
 	fs := newMockFileStore()
 	h := NewSecretHandler(repo, fs, 100*1024*1024, testMetrics())
-	seedSecret(repo, fs, "del2", "retrieval-tok", "deletion-tok", false)
+	publicID := testPublicID("delete invalid metadata")
+	metadataToken := testToken("delete metadata")
+	deletionToken := testToken("delete deletion")
+	seedSecret(repo, fs, publicID, metadataToken, deletionToken, false)
 
-	req := httptest.NewRequest(http.MethodDelete, "/api/v1/secrets/del2", nil)
-	req.Header.Set(HeaderMetadataToken, "wrong-retrieval")
-	req.Header.Set(HeaderDeletionToken, "deletion-tok")
+	req := httptest.NewRequest(http.MethodDelete, "/api/v1/secrets/"+publicID, nil)
+	req.Header.Set(HeaderMetadataToken, testToken("wrong metadata"))
+	req.Header.Set(HeaderDeletionToken, deletionToken)
 	rec := httptest.NewRecorder()
 	c := newEchoContext(req, rec)
 	c.SetParamNames("publicID")
-	c.SetParamValues("del2")
+	c.SetParamValues(publicID)
 
 	callHandler(c, h.DeleteSecret)
 
@@ -951,25 +1227,28 @@ func TestDeleteSecret_S3DeleteError(t *testing.T) {
 	fs := newMockFileStore()
 	fs.deleteErr = errors.New("S3 connection failed")
 	h := NewSecretHandler(repo, fs, 100*1024*1024, testMetrics())
-	seedSecret(repo, fs, "del-s3-err", "ret-tok", "del-tok", false)
+	publicID := testPublicID("delete s3 error")
+	metadataToken := testToken("delete s3 metadata")
+	deletionToken := testToken("delete s3 deletion")
+	seedSecret(repo, fs, publicID, metadataToken, deletionToken, false)
 
-	req := httptest.NewRequest(http.MethodDelete, "/api/v1/secrets/del-s3-err", nil)
-	req.Header.Set(HeaderMetadataToken, "ret-tok")
-	req.Header.Set(HeaderDeletionToken, "del-tok")
+	req := httptest.NewRequest(http.MethodDelete, "/api/v1/secrets/"+publicID, nil)
+	req.Header.Set(HeaderMetadataToken, metadataToken)
+	req.Header.Set(HeaderDeletionToken, deletionToken)
 	rec := httptest.NewRecorder()
 	c := newEchoContext(req, rec)
 	c.SetParamNames("publicID")
-	c.SetParamValues("del-s3-err")
+	c.SetParamValues(publicID)
 
 	callHandler(c, h.DeleteSecret)
 
 	if rec.Code != http.StatusInternalServerError {
 		t.Errorf("status = %d, want %d", rec.Code, http.StatusInternalServerError)
 	}
-	if _, ok := repo.secrets["del-s3-err"]; !ok {
+	if _, ok := repo.secrets[publicID]; !ok {
 		t.Error("secret row should remain when S3 delete fails")
 	}
-	if _, ok := fs.objects["secrets/del-s3-err"]; !ok {
+	if _, ok := fs.objects[storageKey(publicID)]; !ok {
 		t.Error("S3 object should remain when delete fails")
 	}
 }

@@ -16,11 +16,11 @@ type Secret struct {
 }
 
 type CreateSecretRequest struct {
-	PublicID      string `json:"public_id" form:"public_id" validate:"required"`
-	MetadataToken string `json:"metadata_token" form:"metadata_token" validate:"required"`
-	BlobToken     string `json:"blob_token" form:"blob_token" validate:"required"`
-	DeletionToken string `json:"deletion_token" form:"deletion_token" validate:"required"`
-	EncryptedMeta string `json:"encrypted_meta" form:"encrypted_meta" validate:"required"`
+	PublicID      string `json:"public_id" form:"public_id" validate:"required,public_id"`
+	MetadataToken string `json:"metadata_token" form:"metadata_token" validate:"required,secret_token"`
+	BlobToken     string `json:"blob_token" form:"blob_token" validate:"required,secret_token"`
+	DeletionToken string `json:"deletion_token" form:"deletion_token" validate:"required,secret_token"`
+	EncryptedMeta string `json:"encrypted_meta" form:"encrypted_meta" validate:"required,encrypted_meta"`
 	Expiration    string `json:"expiration" form:"expiration" validate:"required,expiration"`
 	BurnAfterRead bool   `json:"burn_after_read" form:"burn_after_read"`
 }
