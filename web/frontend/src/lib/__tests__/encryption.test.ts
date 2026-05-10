@@ -8,7 +8,7 @@ function deriveLabel(secret: Uint8Array, name: string, len = 32): Uint8Array {
 }
 
 import { base64UrlDecode, base64UrlEncode } from "../base64";
-import { KeySet } from "../encryption";
+import { ENCRYPTED_BLOB_OVERHEAD_BYTES, KeySet } from "../encryption";
 
 describe("KeySet", () => {
   describe("generateRandom", () => {
@@ -59,7 +59,8 @@ describe("KeySet", () => {
       const data = new Uint8Array(100);
       const blob = await ks.encryptBlob(data);
       // 1 byte version + 24 byte nonce + 100 byte data + 16 byte Poly1305 tag = 141
-      expect(blob.size).toBe(141);
+      expect(ENCRYPTED_BLOB_OVERHEAD_BYTES).toBe(41);
+      expect(blob.size).toBe(data.length + ENCRYPTED_BLOB_OVERHEAD_BYTES);
     });
   });
 

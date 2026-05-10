@@ -9,6 +9,11 @@ import Spinner from "../components/Spinner";
 import Toggle from "../components/Toggle";
 import { ApiError, createSecret } from "../lib/api";
 import { KeySet } from "../lib/encryption";
+import {
+  fitsEncryptedUploadLimit,
+  MAX_ENCRYPTED_UPLOAD_BYTES,
+  MAX_UPLOAD_LABEL,
+} from "../lib/uploadLimits";
 
 interface FileFormData {
   files: File[];
@@ -82,6 +87,11 @@ export default function FilePage() {
         fileToUpload = data.files[0];
       }
 
+      if (!fitsEncryptedUploadLimit(fileToUpload.size)) {
+        toast.error(`Selected files exceed the ${MAX_UPLOAD_LABEL} upload limit after packaging.`);
+        return;
+      }
+
       const keySet = await KeySet.generateRandom();
       const hasPassword = data.password.length > 0;
 
@@ -93,6 +103,11 @@ export default function FilePage() {
 
       const fileBytes = new Uint8Array(await fileToUpload.arrayBuffer());
       const blob = await encryptKeySet.encryptBlob(fileBytes);
+      if (blob.size > MAX_ENCRYPTED_UPLOAD_BYTES) {
+        toast.error(`Encrypted file exceeds the ${MAX_UPLOAD_LABEL} upload limit.`);
+        return;
+      }
+
       const encryptedMeta = await keySet.encryptMeta({
         type: "file",
         password_protected: hasPassword,
