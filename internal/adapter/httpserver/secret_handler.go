@@ -176,6 +176,9 @@ func (h *SecretHandler) DeleteSecret(c echo.Context) error {
 	if deletionToken == "" {
 		return apperrors.BadRequestError("missing " + HeaderDeletionToken + " header")
 	}
+	if !domain.ValidToken(deletionToken) {
+		return apperrors.BadRequestError("malformed " + HeaderDeletionToken + " header")
+	}
 
 	if !crypto.TokensEqual(crypto.TokenHash(deletionToken), secret.DeletionTokenHash) {
 		return apperrors.ForbiddenError("invalid deletion token")
@@ -214,11 +217,17 @@ func (h *SecretHandler) authenticateSecret(c echo.Context, header string, expect
 	if publicID == "" {
 		return nil, apperrors.BadRequestError("missing public_id")
 	}
+	if !domain.ValidPublicID(publicID) {
+		return nil, apperrors.BadRequestError("malformed public_id")
+	}
 
 	r := c.Request()
 	token := r.Header.Get(header)
 	if token == "" {
 		return nil, apperrors.BadRequestError("missing " + header + " header")
+	}
+	if !domain.ValidToken(token) {
+		return nil, apperrors.BadRequestError("malformed " + header + " header")
 	}
 
 	secret, err := h.repo.GetByPublicID(r.Context(), publicID)
