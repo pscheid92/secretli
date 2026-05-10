@@ -9,14 +9,14 @@ import (
 )
 
 type Secret struct {
-	PublicID      string
-	MetadataToken string
-	DeletionToken string
-	EncryptedMeta string
-	BlobSize      int64
-	BurnAfterRead bool
-	ExpiresAt     pgtype.Timestamptz
-	CreatedAt     pgtype.Timestamptz
-	RetrievedAt   pgtype.Timestamptz
-	BlobToken     string
+	PublicID          string
+	MetadataTokenHash string
+	DeletionTokenHash string
+	EncryptedMeta     string
+	BlobSize          int64
+	BurnAfterRead     bool
+	ExpiresAt         pgtype.Timestamptz
+	CreatedAt         pgtype.Timestamptz
+	RetrievedAt       pgtype.Timestamptz
+	BlobTokenHash     string
 }

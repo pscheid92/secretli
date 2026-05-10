@@ -18,6 +18,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/pscheid92/secretli/internal/adapter/metrics"
 	"github.com/pscheid92/secretli/internal/domain"
+	tokencrypto "github.com/pscheid92/secretli/internal/platform/crypto"
 )
 
 func testMetrics() *metrics.SecretMetrics {
@@ -77,7 +78,7 @@ func (m *mockSecretRepo) GetByPublicID(_ context.Context, publicID string) (*dom
 	return &secret, nil
 }
 
-func (m *mockSecretRepo) ClaimBurnAfterRead(_ context.Context, publicID, blobToken string) error {
+func (m *mockSecretRepo) ClaimBurnAfterRead(_ context.Context, publicID, blobTokenHash string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -86,7 +87,7 @@ func (m *mockSecretRepo) ClaimBurnAfterRead(_ context.Context, publicID, blobTok
 		return domain.ErrNotFound
 	}
 	if s.ExpiresAt.Before(time.Now()) ||
-		s.BlobToken != blobToken ||
+		s.BlobTokenHash != blobTokenHash ||
 		!s.BurnAfterRead ||
 		s.RetrievedAt != nil {
 		return domain.ErrNotFound
@@ -212,14 +213,14 @@ func seedSecret(repo *mockSecretRepo, fs *mockFileStore, publicID, token, deleti
 func seedSecretWithTokens(repo *mockSecretRepo, fs *mockFileStore, publicID, metadataToken, blobToken, deletionToken string, burnAfterRead bool) {
 	blobData := []byte("v1$datanonce$encryptedcontent")
 	secret := &domain.Secret{
-		PublicID:      publicID,
-		MetadataToken: metadataToken,
-		BlobToken:     blobToken,
-		DeletionToken: deletionToken,
-		EncryptedMeta: "v1$bm9uY2U$Y2lwaGVydGV4dA",
-		BlobSize:      int64(len(blobData)),
-		BurnAfterRead: burnAfterRead,
-		ExpiresAt:     time.Now().Add(time.Hour),
+		PublicID:          publicID,
+		MetadataTokenHash: tokencrypto.TokenHash(metadataToken),
+		BlobTokenHash:     tokencrypto.TokenHash(blobToken),
+		DeletionTokenHash: tokencrypto.TokenHash(deletionToken),
+		EncryptedMeta:     "v1$bm9uY2U$Y2lwaGVydGV4dA",
+		BlobSize:          int64(len(blobData)),
+		BurnAfterRead:     burnAfterRead,
+		ExpiresAt:         time.Now().Add(time.Hour),
 	}
 	fs.objects[storageKey(publicID)] = blobData
 	repo.secrets[publicID] = secret
@@ -254,8 +255,19 @@ func TestCreateSecret_Success(t *testing.T) {
 	}
 
 	// Verify DB record
-	if _, ok := repo.secrets["test-public-id"]; !ok {
-		t.Error("secret not created in DB")
+	secret, ok := repo.secrets["test-public-id"]
+	if !ok {
+		t.Fatal("secret not created in DB")
+	}
+	meta := validCreateMetadata()
+	if secret.MetadataTokenHash != tokencrypto.TokenHash(meta["metadata_token"]) {
+		t.Error("metadata token should be stored as a hash")
+	}
+	if secret.BlobTokenHash != tokencrypto.TokenHash(meta["blob_token"]) {
+		t.Error("blob token should be stored as a hash")
+	}
+	if secret.DeletionTokenHash != tokencrypto.TokenHash(meta["deletion_token"]) {
+		t.Error("deletion token should be stored as a hash")
 	}
 }
 
