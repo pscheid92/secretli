@@ -27,14 +27,14 @@ func NewSecretRepo(pool *pgxpool.Pool) *SecretRepo {
 
 func (r *SecretRepo) Create(ctx context.Context, secret *domain.Secret) error {
 	params := dbsqlc.CreateSecretParams{
-		PublicID:      secret.PublicID,
-		MetadataToken: secret.MetadataToken,
-		BlobToken:     secret.BlobToken,
-		DeletionToken: secret.DeletionToken,
-		EncryptedMeta: secret.EncryptedMeta,
-		BlobSize:      secret.BlobSize,
-		BurnAfterRead: secret.BurnAfterRead,
-		ExpiresAt:     pgtype.Timestamptz{Time: secret.ExpiresAt, Valid: true},
+		PublicID:          secret.PublicID,
+		MetadataTokenHash: secret.MetadataTokenHash,
+		BlobTokenHash:     secret.BlobTokenHash,
+		DeletionTokenHash: secret.DeletionTokenHash,
+		EncryptedMeta:     secret.EncryptedMeta,
+		BlobSize:          secret.BlobSize,
+		BurnAfterRead:     secret.BurnAfterRead,
+		ExpiresAt:         pgtype.Timestamptz{Time: secret.ExpiresAt, Valid: true},
 	}
 	err := r.q.CreateSecret(ctx, params)
 	if err != nil && isDuplicateKeyError(err) {
@@ -57,10 +57,10 @@ func (r *SecretRepo) GetByPublicID(ctx context.Context, publicID string) (*domai
 	return secretFromRow(row), nil
 }
 
-func (r *SecretRepo) ClaimBurnAfterRead(ctx context.Context, publicID, blobToken string) error {
+func (r *SecretRepo) ClaimBurnAfterRead(ctx context.Context, publicID, blobTokenHash string) error {
 	n, err := r.q.ClaimBurnAfterRead(ctx, dbsqlc.ClaimBurnAfterReadParams{
-		PublicID:  publicID,
-		BlobToken: blobToken,
+		PublicID:      publicID,
+		BlobTokenHash: blobTokenHash,
 	})
 	if err != nil {
 		return fmt.Errorf("claim burn-after-read: %w", err)
@@ -117,16 +117,16 @@ func (r *SecretRepo) DeleteExpired(ctx context.Context, beforeDelete func(public
 
 func secretFromRow(row dbsqlc.GetSecretByPublicIDRow) *domain.Secret {
 	return &domain.Secret{
-		PublicID:      row.PublicID,
-		MetadataToken: row.MetadataToken,
-		BlobToken:     row.BlobToken,
-		DeletionToken: row.DeletionToken,
-		EncryptedMeta: row.EncryptedMeta,
-		BlobSize:      row.BlobSize,
-		BurnAfterRead: row.BurnAfterRead,
-		ExpiresAt:     row.ExpiresAt.Time,
-		CreatedAt:     row.CreatedAt.Time,
-		RetrievedAt:   pointerFromTimestamp(row.RetrievedAt),
+		PublicID:          row.PublicID,
+		MetadataTokenHash: row.MetadataTokenHash,
+		BlobTokenHash:     row.BlobTokenHash,
+		DeletionTokenHash: row.DeletionTokenHash,
+		EncryptedMeta:     row.EncryptedMeta,
+		BlobSize:          row.BlobSize,
+		BurnAfterRead:     row.BurnAfterRead,
+		ExpiresAt:         row.ExpiresAt.Time,
+		CreatedAt:         row.CreatedAt.Time,
+		RetrievedAt:       pointerFromTimestamp(row.RetrievedAt),
 	}
 }
 

@@ -10,18 +10,19 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	pgadapter "github.com/pscheid92/secretli/internal/adapter/postgres"
 	"github.com/pscheid92/secretli/internal/domain"
+	tokencrypto "github.com/pscheid92/secretli/internal/platform/crypto"
 )
 
 func newTestSecret(publicID string, expiresAt time.Time) *domain.Secret {
 	return &domain.Secret{
-		PublicID:      publicID,
-		MetadataToken: "metadata-token-" + publicID,
-		BlobToken:     "blob-token-" + publicID,
-		DeletionToken: "deletion-token-" + publicID,
-		EncryptedMeta: "v1$nonce$meta-" + publicID,
-		BlobSize:      1024,
-		BurnAfterRead: false,
-		ExpiresAt:     expiresAt,
+		PublicID:          publicID,
+		MetadataTokenHash: tokencrypto.TokenHash("metadata-token-" + publicID),
+		BlobTokenHash:     tokencrypto.TokenHash("blob-token-" + publicID),
+		DeletionTokenHash: tokencrypto.TokenHash("deletion-token-" + publicID),
+		EncryptedMeta:     "v1$nonce$meta-" + publicID,
+		BlobSize:          1024,
+		BurnAfterRead:     false,
+		ExpiresAt:         expiresAt,
 	}
 }
 
@@ -50,11 +51,14 @@ func TestSecretRepo_CreateAndGet(t *testing.T) {
 	if got.PublicID != "pub-001" {
 		t.Errorf("public_id = %q, want %q", got.PublicID, "pub-001")
 	}
-	if got.MetadataToken != "metadata-token-pub-001" {
-		t.Errorf("metadata_token = %q, want %q", got.MetadataToken, "metadata-token-pub-001")
+	if got.MetadataTokenHash != tokencrypto.TokenHash("metadata-token-pub-001") {
+		t.Errorf("metadata_token_hash = %q, want hash", got.MetadataTokenHash)
 	}
-	if got.BlobToken != "blob-token-pub-001" {
-		t.Errorf("blob_token = %q, want %q", got.BlobToken, "blob-token-pub-001")
+	if got.BlobTokenHash != tokencrypto.TokenHash("blob-token-pub-001") {
+		t.Errorf("blob_token_hash = %q, want hash", got.BlobTokenHash)
+	}
+	if got.DeletionTokenHash != tokencrypto.TokenHash("deletion-token-pub-001") {
+		t.Errorf("deletion_token_hash = %q, want hash", got.DeletionTokenHash)
 	}
 	if got.EncryptedMeta != "v1$nonce$meta-pub-001" {
 		t.Errorf("encrypted_meta = %q, want %q", got.EncryptedMeta, "v1$nonce$meta-pub-001")
@@ -111,7 +115,7 @@ func TestSecretRepo_ClaimBurnAfterRead(t *testing.T) {
 		t.Fatalf("create: %v", err)
 	}
 
-	if err := repo.ClaimBurnAfterRead(ctx, "claim-001", "blob-token-claim-001"); err != nil {
+	if err := repo.ClaimBurnAfterRead(ctx, "claim-001", tokencrypto.TokenHash("blob-token-claim-001")); err != nil {
 		t.Fatalf("claim burn-after-read: %v", err)
 	}
 
@@ -126,7 +130,7 @@ func TestSecretRepo_ClaimBurnAfterRead(t *testing.T) {
 		t.Error("expected non-zero retrieved_at")
 	}
 
-	err = repo.ClaimBurnAfterRead(ctx, "claim-001", "blob-token-claim-001")
+	err = repo.ClaimBurnAfterRead(ctx, "claim-001", tokencrypto.TokenHash("blob-token-claim-001"))
 	if err != domain.ErrNotFound {
 		t.Fatalf("expected ErrNotFound on second claim, got %v", err)
 	}
@@ -161,7 +165,7 @@ func TestSecretRepo_ClaimBurnAfterRead_InvalidInputs(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := repo.ClaimBurnAfterRead(ctx, tt.publicID, tt.blobToken)
+			err := repo.ClaimBurnAfterRead(ctx, tt.publicID, tokencrypto.TokenHash(tt.blobToken))
 			if err != domain.ErrNotFound {
 				t.Fatalf("expected ErrNotFound, got %v", err)
 			}
@@ -188,7 +192,7 @@ func TestSecretRepo_ClaimBurnAfterRead_ConcurrentOnlyOneSucceeds(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			errs <- repo.ClaimBurnAfterRead(ctx, "claim-concurrent", "blob-token-claim-concurrent")
+			errs <- repo.ClaimBurnAfterRead(ctx, "claim-concurrent", tokencrypto.TokenHash("blob-token-claim-concurrent"))
 		}()
 	}
 

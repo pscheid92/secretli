@@ -21,6 +21,7 @@ Secretli uses a zero-knowledge architecture:
 - All encryption and decryption happens client-side in the browser using [@noble/ciphers](https://github.com/paulmillr/noble-ciphers) and [@noble/hashes](https://github.com/paulmillr/noble-hashes)
 - The server only stores opaque, encrypted blobs and never has access to plaintext data or encryption keys
 - Encryption keys are transported via URL fragments (`#`), which are never sent to the server
+- Metadata, blob, and deletion bearer tokens are stored as SHA-256 hashes, not raw tokens
 - XChaCha20-Poly1305 is used for authenticated encryption with AAD binding per secret and purpose
 - HKDF-SHA512 derives separate metadata keys, blob keys, public IDs, and access tokens from domain-separated labels
 - Password protection uses scrypt (N=2^14, r=8, p=1) for blob key and blob token derivation
