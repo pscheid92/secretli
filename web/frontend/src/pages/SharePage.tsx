@@ -58,7 +58,8 @@ export default function SharePage() {
       const response = await createSecret(
         {
           public_id: encoded.publicID,
-          retrieval_token: encoded.retrievalToken,
+          metadata_token: encoded.metadataToken,
+          blob_token: encryptKeySet.getEncoded().blobToken,
           deletion_token: encoded.deletionToken,
           encrypted_meta: encryptedMeta,
           expiration: data.expiration,

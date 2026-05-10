@@ -14,19 +14,19 @@ import (
 const claimBurnAfterRead = `-- name: ClaimBurnAfterRead :execrows
 UPDATE secrets SET retrieved_at = NOW()
 WHERE public_id = $1
-  AND retrieval_token = $2
+  AND blob_token = $2
   AND burn_after_read = true
   AND retrieved_at IS NULL
   AND expires_at > NOW()
 `
 
 type ClaimBurnAfterReadParams struct {
-	PublicID       string
-	RetrievalToken string
+	PublicID  string
+	BlobToken string
 }
 
 func (q *Queries) ClaimBurnAfterRead(ctx context.Context, arg ClaimBurnAfterReadParams) (int64, error) {
-	result, err := q.db.Exec(ctx, claimBurnAfterRead, arg.PublicID, arg.RetrievalToken)
+	result, err := q.db.Exec(ctx, claimBurnAfterRead, arg.PublicID, arg.BlobToken)
 	if err != nil {
 		return 0, err
 	}
@@ -35,26 +35,28 @@ func (q *Queries) ClaimBurnAfterRead(ctx context.Context, arg ClaimBurnAfterRead
 
 const createSecret = `-- name: CreateSecret :exec
 INSERT INTO secrets (
-    public_id, retrieval_token, deletion_token,
+    public_id, metadata_token, blob_token, deletion_token,
     encrypted_meta, blob_size,
     burn_after_read, expires_at
-) VALUES ($1, $2, $3, $4, $5, $6, $7)
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 `
 
 type CreateSecretParams struct {
-	PublicID       string
-	RetrievalToken string
-	DeletionToken  string
-	EncryptedMeta  string
-	BlobSize       int64
-	BurnAfterRead  bool
-	ExpiresAt      pgtype.Timestamptz
+	PublicID      string
+	MetadataToken string
+	BlobToken     string
+	DeletionToken string
+	EncryptedMeta string
+	BlobSize      int64
+	BurnAfterRead bool
+	ExpiresAt     pgtype.Timestamptz
 }
 
 func (q *Queries) CreateSecret(ctx context.Context, arg CreateSecretParams) error {
 	_, err := q.db.Exec(ctx, createSecret,
 		arg.PublicID,
-		arg.RetrievalToken,
+		arg.MetadataToken,
+		arg.BlobToken,
 		arg.DeletionToken,
 		arg.EncryptedMeta,
 		arg.BlobSize,
@@ -77,7 +79,7 @@ func (q *Queries) DeleteSecret(ctx context.Context, publicID string) (int64, err
 }
 
 const getSecretByPublicID = `-- name: GetSecretByPublicID :one
-SELECT public_id, retrieval_token, deletion_token,
+SELECT public_id, metadata_token, blob_token, deletion_token,
     encrypted_meta, blob_size,
     burn_after_read,
     expires_at, created_at, retrieved_at
@@ -85,12 +87,26 @@ FROM secrets
 WHERE public_id = $1 AND expires_at > NOW()
 `
 
-func (q *Queries) GetSecretByPublicID(ctx context.Context, publicID string) (Secret, error) {
+type GetSecretByPublicIDRow struct {
+	PublicID      string
+	MetadataToken string
+	BlobToken     string
+	DeletionToken string
+	EncryptedMeta string
+	BlobSize      int64
+	BurnAfterRead bool
+	ExpiresAt     pgtype.Timestamptz
+	CreatedAt     pgtype.Timestamptz
+	RetrievedAt   pgtype.Timestamptz
+}
+
+func (q *Queries) GetSecretByPublicID(ctx context.Context, publicID string) (GetSecretByPublicIDRow, error) {
 	row := q.db.QueryRow(ctx, getSecretByPublicID, publicID)
-	var i Secret
+	var i GetSecretByPublicIDRow
 	err := row.Scan(
 		&i.PublicID,
-		&i.RetrievalToken,
+		&i.MetadataToken,
+		&i.BlobToken,
 		&i.DeletionToken,
 		&i.EncryptedMeta,
 		&i.BlobSize,

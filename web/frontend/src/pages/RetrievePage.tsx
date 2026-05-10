@@ -80,7 +80,7 @@ export default function RetrievePage() {
       const keySet = await KeySet.fromShareSecret(shareSecret);
       const encoded = keySet.getEncoded();
 
-      const serverMeta = await getSecretMetadata(encoded.publicID, encoded.retrievalToken);
+      const serverMeta = await getSecretMetadata(encoded.publicID, encoded.metadataToken);
 
       // Decrypt the client-encrypted metadata
       const clientMeta = await keySet.decryptMeta(serverMeta.encrypted_meta);
@@ -96,7 +96,7 @@ export default function RetrievePage() {
         if (err.status === 404) {
           setState({ stage: "error", message: "This secret has expired or does not exist." });
         } else if (err.status === 403) {
-          setState({ stage: "error", message: "Invalid retrieval token." });
+          setState({ stage: "error", message: "Invalid metadata token." });
         } else {
           setState({ stage: "error", message: err.message });
         }
@@ -137,10 +137,7 @@ export default function RetrievePage() {
     setPasswordLoading(true);
 
     try {
-      const kdfVersion = state.meta.serverMeta.encrypted_meta.startsWith("v2$") ? "v2" : "v1";
-      const keySet = await KeySet.fromShareSecret(state.shareSecret, data.password, {
-        kdfVersion,
-      });
+      const keySet = await KeySet.fromShareSecret(state.shareSecret, data.password);
       await revealWithKeySet(keySet, state.shareSecret, state.deletionToken, state.meta.clientMeta);
     } catch {
       setPasswordFormError("password", { message: "Wrong password. Please try again." });
@@ -155,11 +152,12 @@ export default function RetrievePage() {
     deletionToken: string,
     clientMeta: SecretMeta,
   ) {
-    // Use base keyset for API auth (publicID/retrievalToken are always derived without password)
+    // Public ID is always derived from the share secret; blob access may be password-derived.
     const baseKeySet = await KeySet.fromShareSecret(shareSecret);
-    const encoded = baseKeySet.getEncoded();
+    const baseEncoded = baseKeySet.getEncoded();
+    const blobEncoded = keySet.getEncoded();
 
-    const response = await retrieveSecret(encoded.publicID, encoded.retrievalToken);
+    const response = await retrieveSecret(baseEncoded.publicID, blobEncoded.blobToken);
     const decrypted = await keySet.decryptBlob(response.blob);
 
     if (clientMeta.type === "file") {
@@ -223,7 +221,7 @@ export default function RetrievePage() {
     try {
       const keySet = await KeySet.fromShareSecret(state.shareSecret);
       const encoded = keySet.getEncoded();
-      await deleteSecret(encoded.publicID, encoded.retrievalToken, state.deletionToken);
+      await deleteSecret(encoded.publicID, encoded.metadataToken, state.deletionToken);
       setState({ stage: "deleted" });
       toast.success("Secret deleted");
     } catch (err) {

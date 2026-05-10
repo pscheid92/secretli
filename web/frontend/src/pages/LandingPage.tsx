@@ -39,7 +39,7 @@ export default function LandingPage() {
       {/* Feature list */}
       <div className="mt-16 flex flex-wrap justify-center gap-x-8 gap-y-2">
         {[
-          "AES-256-GCM encryption",
+          "XChaCha20 encryption",
           "Auto-expires",
           "Burn after reveal",
           "No account required",

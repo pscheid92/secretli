@@ -18,12 +18,13 @@ Secrets are encrypted entirely in the browser — the server never sees plaintex
 
 ## How It Works
 
-1. The browser generates a random keyset and derives an encryption key, public ID, and retrieval token using HKDF-SHA512
+1. The browser generates a random share secret and derives separate metadata keys, blob keys, public IDs, and access tokens using HKDF-SHA512
 2. The secret (text or file) is encrypted with XChaCha20-Poly1305 (with AAD binding) and uploaded as an opaque blob
 3. A shareable link is created containing the keyset in the URL fragment (e.g., `/s#<shareSecret>`)
-4. The recipient's browser derives the same keys from the fragment, fetches the encrypted blob, and decrypts it locally
+4. The recipient's browser derives the metadata token from the fragment, and derives the blob token from the password when password protection is enabled
+5. The browser fetches the encrypted blob only after deriving the blob token, then decrypts it locally
 
-The server only ever sees the public ID, retrieval token, and encrypted ciphertext — never the plaintext or encryption key.
+The server only ever sees the public ID, metadata/blob access tokens, and encrypted ciphertext — never the plaintext, password, or encryption keys.
 
 ## Quickstart
 

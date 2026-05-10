@@ -19,9 +19,10 @@ import (
 )
 
 const (
-	HeaderRetrievalToken = "X-Retrieval-Token"
-	HeaderDeletionToken  = "X-Deletion-Token"
-	HeaderBurnAfterRead  = "X-Burn-After-Read"
+	HeaderMetadataToken = "X-Metadata-Token"
+	HeaderBlobToken     = "X-Blob-Token"
+	HeaderDeletionToken = "X-Deletion-Token"
+	HeaderBurnAfterRead = "X-Burn-After-Read"
 )
 
 type SecretHandler struct {
@@ -74,13 +75,14 @@ func (h *SecretHandler) CreateSecret(c echo.Context) error {
 	}
 
 	secret := &domain.Secret{
-		PublicID:       meta.PublicID,
-		RetrievalToken: meta.RetrievalToken,
-		DeletionToken:  meta.DeletionToken,
-		EncryptedMeta:  meta.EncryptedMeta,
-		BlobSize:       header.Size,
-		BurnAfterRead:  meta.BurnAfterRead,
-		ExpiresAt:      time.Now().Add(duration),
+		PublicID:      meta.PublicID,
+		MetadataToken: meta.MetadataToken,
+		BlobToken:     meta.BlobToken,
+		DeletionToken: meta.DeletionToken,
+		EncryptedMeta: meta.EncryptedMeta,
+		BlobSize:      header.Size,
+		BurnAfterRead: meta.BurnAfterRead,
+		ExpiresAt:     time.Now().Add(duration),
 	}
 
 	sk := storageKey(meta.PublicID)
@@ -105,7 +107,7 @@ func (h *SecretHandler) CreateSecret(c echo.Context) error {
 }
 
 func (h *SecretHandler) RetrieveSecret(c echo.Context) error {
-	secret, err := h.authenticateSecret(c)
+	secret, err := h.authenticateBlob(c)
 	if err != nil {
 		return err
 	}
@@ -121,7 +123,7 @@ func (h *SecretHandler) RetrieveSecret(c echo.Context) error {
 	defer func() { _ = obj.Close() }()
 
 	if secret.BurnAfterRead {
-		token := c.Request().Header.Get(HeaderRetrievalToken)
+		token := c.Request().Header.Get(HeaderBlobToken)
 		if err := h.repo.ClaimBurnAfterRead(ctx, publicID, token); err != nil {
 			if errors.Is(err, domain.ErrNotFound) {
 				return apperrors.NotFoundError("secret not found")
@@ -147,7 +149,7 @@ func (h *SecretHandler) RetrieveSecret(c echo.Context) error {
 }
 
 func (h *SecretHandler) SecretMetadata(c echo.Context) error {
-	secret, err := h.authenticateSecret(c)
+	secret, err := h.authenticateMetadata(c)
 	if err != nil {
 		return err
 	}
@@ -162,7 +164,7 @@ func (h *SecretHandler) SecretMetadata(c echo.Context) error {
 }
 
 func (h *SecretHandler) DeleteSecret(c echo.Context) error {
-	secret, err := h.authenticateSecret(c)
+	secret, err := h.authenticateMetadata(c)
 	if err != nil {
 		return err
 	}
@@ -195,16 +197,28 @@ func (h *SecretHandler) DeleteSecret(c echo.Context) error {
 	return c.NoContent(http.StatusNoContent)
 }
 
-func (h *SecretHandler) authenticateSecret(c echo.Context) (*domain.Secret, error) {
+func (h *SecretHandler) authenticateMetadata(c echo.Context) (*domain.Secret, error) {
+	return h.authenticateSecret(c, HeaderMetadataToken, func(secret *domain.Secret) string {
+		return secret.MetadataToken
+	})
+}
+
+func (h *SecretHandler) authenticateBlob(c echo.Context) (*domain.Secret, error) {
+	return h.authenticateSecret(c, HeaderBlobToken, func(secret *domain.Secret) string {
+		return secret.BlobToken
+	})
+}
+
+func (h *SecretHandler) authenticateSecret(c echo.Context, header string, expectedToken func(*domain.Secret) string) (*domain.Secret, error) {
 	publicID := c.Param("publicID")
 	if publicID == "" {
 		return nil, apperrors.BadRequestError("missing public_id")
 	}
 
 	r := c.Request()
-	token := r.Header.Get(HeaderRetrievalToken)
+	token := r.Header.Get(header)
 	if token == "" {
-		return nil, apperrors.BadRequestError("missing " + HeaderRetrievalToken + " header")
+		return nil, apperrors.BadRequestError("missing " + header + " header")
 	}
 
 	secret, err := h.repo.GetByPublicID(r.Context(), publicID)
@@ -215,8 +229,8 @@ func (h *SecretHandler) authenticateSecret(c echo.Context) (*domain.Secret, erro
 		return nil, apperrors.InternalError("failed to get secret", err)
 	}
 
-	if !crypto.TokensEqual(token, secret.RetrievalToken) {
-		return nil, apperrors.ForbiddenError("invalid retrieval token")
+	if !crypto.TokensEqual(token, expectedToken(secret)) {
+		return nil, apperrors.ForbiddenError("invalid token")
 	}
 
 	if secret.BurnAfterRead && secret.RetrievedAt != nil {

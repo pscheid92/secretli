@@ -14,13 +14,14 @@ import (
 
 func newTestSecret(publicID string, expiresAt time.Time) *domain.Secret {
 	return &domain.Secret{
-		PublicID:       publicID,
-		RetrievalToken: "retrieval-token-" + publicID,
-		DeletionToken:  "deletion-token-" + publicID,
-		EncryptedMeta:  "v1$nonce$meta-" + publicID,
-		BlobSize:       1024,
-		BurnAfterRead:  false,
-		ExpiresAt:      expiresAt,
+		PublicID:      publicID,
+		MetadataToken: "metadata-token-" + publicID,
+		BlobToken:     "blob-token-" + publicID,
+		DeletionToken: "deletion-token-" + publicID,
+		EncryptedMeta: "v1$nonce$meta-" + publicID,
+		BlobSize:      1024,
+		BurnAfterRead: false,
+		ExpiresAt:     expiresAt,
 	}
 }
 
@@ -49,8 +50,11 @@ func TestSecretRepo_CreateAndGet(t *testing.T) {
 	if got.PublicID != "pub-001" {
 		t.Errorf("public_id = %q, want %q", got.PublicID, "pub-001")
 	}
-	if got.RetrievalToken != "retrieval-token-pub-001" {
-		t.Errorf("retrieval_token = %q, want %q", got.RetrievalToken, "retrieval-token-pub-001")
+	if got.MetadataToken != "metadata-token-pub-001" {
+		t.Errorf("metadata_token = %q, want %q", got.MetadataToken, "metadata-token-pub-001")
+	}
+	if got.BlobToken != "blob-token-pub-001" {
+		t.Errorf("blob_token = %q, want %q", got.BlobToken, "blob-token-pub-001")
 	}
 	if got.EncryptedMeta != "v1$nonce$meta-pub-001" {
 		t.Errorf("encrypted_meta = %q, want %q", got.EncryptedMeta, "v1$nonce$meta-pub-001")
@@ -107,7 +111,7 @@ func TestSecretRepo_ClaimBurnAfterRead(t *testing.T) {
 		t.Fatalf("create: %v", err)
 	}
 
-	if err := repo.ClaimBurnAfterRead(ctx, "claim-001", "retrieval-token-claim-001"); err != nil {
+	if err := repo.ClaimBurnAfterRead(ctx, "claim-001", "blob-token-claim-001"); err != nil {
 		t.Fatalf("claim burn-after-read: %v", err)
 	}
 
@@ -122,7 +126,7 @@ func TestSecretRepo_ClaimBurnAfterRead(t *testing.T) {
 		t.Error("expected non-zero retrieved_at")
 	}
 
-	err = repo.ClaimBurnAfterRead(ctx, "claim-001", "retrieval-token-claim-001")
+	err = repo.ClaimBurnAfterRead(ctx, "claim-001", "blob-token-claim-001")
 	if err != domain.ErrNotFound {
 		t.Fatalf("expected ErrNotFound on second claim, got %v", err)
 	}
@@ -146,18 +150,18 @@ func TestSecretRepo_ClaimBurnAfterRead_InvalidInputs(t *testing.T) {
 	}
 
 	tests := []struct {
-		name           string
-		publicID       string
-		retrievalToken string
+		name      string
+		publicID  string
+		blobToken string
 	}{
-		{name: "wrong token", publicID: "claim-invalid-burn", retrievalToken: "wrong-token"},
-		{name: "regular secret", publicID: "claim-invalid-regular", retrievalToken: "retrieval-token-claim-invalid-regular"},
-		{name: "expired secret", publicID: "claim-invalid-expired", retrievalToken: "retrieval-token-claim-invalid-expired"},
+		{name: "wrong token", publicID: "claim-invalid-burn", blobToken: "wrong-token"},
+		{name: "regular secret", publicID: "claim-invalid-regular", blobToken: "blob-token-claim-invalid-regular"},
+		{name: "expired secret", publicID: "claim-invalid-expired", blobToken: "blob-token-claim-invalid-expired"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := repo.ClaimBurnAfterRead(ctx, tt.publicID, tt.retrievalToken)
+			err := repo.ClaimBurnAfterRead(ctx, tt.publicID, tt.blobToken)
 			if err != domain.ErrNotFound {
 				t.Fatalf("expected ErrNotFound, got %v", err)
 			}
@@ -184,7 +188,7 @@ func TestSecretRepo_ClaimBurnAfterRead_ConcurrentOnlyOneSucceeds(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			errs <- repo.ClaimBurnAfterRead(ctx, "claim-concurrent", "retrieval-token-claim-concurrent")
+			errs <- repo.ClaimBurnAfterRead(ctx, "claim-concurrent", "blob-token-claim-concurrent")
 		}()
 	}
 

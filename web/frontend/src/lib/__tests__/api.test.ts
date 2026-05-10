@@ -33,7 +33,7 @@ describe("request helper (via deleteSecret)", () => {
     );
 
     try {
-      await deleteSecret("pub-id", "ret-tok", "del-tok");
+      await deleteSecret("pub-id", "meta-tok", "del-tok");
       expect.unreachable("should have thrown");
     } catch (e) {
       expect(e).toBeInstanceOf(ApiError);
@@ -48,7 +48,7 @@ describe("request helper (via deleteSecret)", () => {
     );
 
     try {
-      await deleteSecret("pub-id", "ret-tok", "del-tok");
+      await deleteSecret("pub-id", "meta-tok", "del-tok");
       expect.unreachable("should have thrown");
     } catch (e) {
       expect(e).toBeInstanceOf(ApiError);
@@ -61,7 +61,7 @@ describe("request helper (via deleteSecret)", () => {
     vi.spyOn(globalThis, "fetch").mockRejectedValue(new TypeError("Failed to fetch"));
 
     try {
-      await deleteSecret("pub-id", "ret-tok", "del-tok");
+      await deleteSecret("pub-id", "meta-tok", "del-tok");
       expect.unreachable("should have thrown");
     } catch (e) {
       expect(e).toBeInstanceOf(ApiError);
@@ -73,7 +73,7 @@ describe("request helper (via deleteSecret)", () => {
   it("returns undefined for 204 responses", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(null, { status: 204 }));
 
-    const result = await deleteSecret("pub-id", "ret-tok", "del-tok");
+    const result = await deleteSecret("pub-id", "meta-tok", "del-tok");
     expect(result).toBeUndefined();
   });
 });
@@ -86,7 +86,8 @@ describe("createSecret", () => {
   it("sends multipart form with metadata and file blob", async () => {
     const params: CreateSecretParams = {
       public_id: "pub123",
-      retrieval_token: "ret-tok",
+      metadata_token: "meta-tok",
+      blob_token: "blob-tok",
       deletion_token: "del-tok",
       encrypted_meta: "v1$nonce$ciphertext",
       expiration: "5m",
@@ -108,7 +109,8 @@ describe("createSecret", () => {
     const body = call[1]?.body as FormData;
     expect(body).toBeInstanceOf(FormData);
     expect(body.get("public_id")).toBe(params.public_id);
-    expect(body.get("retrieval_token")).toBe(params.retrieval_token);
+    expect(body.get("metadata_token")).toBe(params.metadata_token);
+    expect(body.get("blob_token")).toBe(params.blob_token);
     expect(body.get("deletion_token")).toBe(params.deletion_token);
     expect(body.get("encrypted_meta")).toBe(params.encrypted_meta);
     expect(body.get("expiration")).toBe(params.expiration);
@@ -134,7 +136,7 @@ describe("retrieveSecret", () => {
       blob: () => Promise.resolve(fileBlob),
     } as unknown as Response);
 
-    const result = await retrieveSecret("pub-id", "ret-token");
+    const result = await retrieveSecret("pub-id", "blob-token");
     expect(result.burnAfterRead).toBe(true);
 
     const text = await result.blob.text();
@@ -150,7 +152,7 @@ describe("retrieveSecret", () => {
       blob: () => Promise.resolve(fileBlob),
     } as unknown as Response);
 
-    const result = await retrieveSecret("pub-id", "ret-token");
+    const result = await retrieveSecret("pub-id", "blob-token");
     expect(result.burnAfterRead).toBe(false);
   });
 
@@ -192,7 +194,7 @@ describe("getSecretMetadata", () => {
       new Response(JSON.stringify(mockResponse), { status: 200 }),
     );
 
-    const result = await getSecretMetadata("pub-id", "ret-token");
+    const result = await getSecretMetadata("pub-id", "meta-token");
     expect(result).toEqual(mockResponse);
   });
 });
@@ -207,13 +209,17 @@ describe("deleteSecret", () => {
       .spyOn(globalThis, "fetch")
       .mockResolvedValue(new Response(null, { status: 204 }));
 
-    const result = await deleteSecret("pub-id", "ret-tok", "del-tok");
+    const result = await deleteSecret("pub-id", "meta-tok", "del-tok");
     expect(result).toBeUndefined();
 
     expect(fetchSpy).toHaveBeenCalledWith(
       "/api/v1/secrets/pub-id",
       expect.objectContaining({
         method: "DELETE",
+        headers: {
+          "X-Metadata-Token": "meta-tok",
+          "X-Deletion-Token": "del-tok",
+        },
       }),
     );
   });

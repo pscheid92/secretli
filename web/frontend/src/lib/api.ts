@@ -30,7 +30,8 @@ async function request<T>(url: string, init: RequestInit): Promise<T> {
 
 export interface CreateSecretParams {
   public_id: string;
-  retrieval_token: string;
+  metadata_token: string;
+  blob_token: string;
   deletion_token: string;
   encrypted_meta: string;
   expiration: string;
@@ -47,7 +48,8 @@ export function createSecret(
 ): Promise<CreateSecretResponse> {
   const form = new FormData();
   form.append("public_id", params.public_id);
-  form.append("retrieval_token", params.retrieval_token);
+  form.append("metadata_token", params.metadata_token);
+  form.append("blob_token", params.blob_token);
   form.append("deletion_token", params.deletion_token);
   form.append("encrypted_meta", params.encrypted_meta);
   form.append("expiration", params.expiration);
@@ -69,14 +71,14 @@ export interface RetrieveSecretResponse {
 
 export async function retrieveSecret(
   publicID: string,
-  retrievalToken: string,
+  blobToken: string,
 ): Promise<RetrieveSecretResponse> {
   let res: Response;
   try {
     res = await fetch(`/api/v1/secrets/${publicID}`, {
       method: "POST",
       credentials: "same-origin",
-      headers: { "X-Retrieval-Token": retrievalToken },
+      headers: { "X-Blob-Token": blobToken },
     });
   } catch {
     throw new ApiError(0, "Network error — please check your connection");
@@ -107,11 +109,11 @@ export interface SecretMetadataResponse {
 
 export function getSecretMetadata(
   publicID: string,
-  retrievalToken: string,
+  metadataToken: string,
 ): Promise<SecretMetadataResponse> {
   return request(`/api/v1/secrets/${publicID}/meta`, {
     method: "GET",
-    headers: { "X-Retrieval-Token": retrievalToken },
+    headers: { "X-Metadata-Token": metadataToken },
   });
 }
 
@@ -119,13 +121,13 @@ export function getSecretMetadata(
 
 export function deleteSecret(
   publicID: string,
-  retrievalToken: string,
+  metadataToken: string,
   deletionToken: string,
 ): Promise<void> {
   return request(`/api/v1/secrets/${publicID}`, {
     method: "DELETE",
     headers: {
-      "X-Retrieval-Token": retrievalToken,
+      "X-Metadata-Token": metadataToken,
       "X-Deletion-Token": deletionToken,
     },
   });

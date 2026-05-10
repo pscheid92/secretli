@@ -103,7 +103,7 @@ func corsMiddleware(origins []string) echo.MiddlewareFunc {
 	return middleware.CORSWithConfig(middleware.CORSConfig{
 		AllowOrigins:     origins,
 		AllowMethods:     []string{http.MethodGet, http.MethodPost, http.MethodDelete, http.MethodOptions},
-		AllowHeaders:     []string{"Content-Type", HeaderRetrievalToken, HeaderDeletionToken},
+		AllowHeaders:     []string{"Content-Type", HeaderMetadataToken, HeaderBlobToken, HeaderDeletionToken},
 		AllowCredentials: true,
 		MaxAge:           86400,
 	})
