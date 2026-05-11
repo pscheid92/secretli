@@ -15,7 +15,9 @@ import {
 import {
   type BundleFile,
   type BundleManifest,
+  DOWNLOAD_ALL_BUNDLE_COALESCED_PLAINTEXT_BYTES,
   decryptBundleFile,
+  decryptBundleFiles,
   readBundleManifest,
 } from "../lib/bundle";
 import { KeySet, type SecretMeta } from "../lib/encryption";
@@ -618,8 +620,9 @@ export default function RetrievePage() {
       try {
         const fetchRange = (start: number, end: number) =>
           retrieveSecretRange(publicID, sessionToken, start, end);
-        for (const file of manifest.files) {
-          const blob = await decryptBundleFile(file, keySet, fetchRange);
+        for (const { file, blob } of await decryptBundleFiles(manifest.files, keySet, fetchRange, {
+          maxCoalescedPlaintextBytes: DOWNLOAD_ALL_BUNDLE_COALESCED_PLAINTEXT_BYTES,
+        })) {
           saveBlob(blob, file.name);
         }
       } catch {
