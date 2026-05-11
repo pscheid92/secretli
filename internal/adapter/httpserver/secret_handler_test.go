@@ -306,10 +306,10 @@ func testToken(label string) string {
 	return base64.RawURLEncoding.EncodeToString(sum[:])
 }
 
-func testEncryptedMetaV1() string {
-	nonce := base64.RawURLEncoding.EncodeToString([]byte("123456789012"))
+func testEncryptedMeta() string {
+	nonce := base64.RawURLEncoding.EncodeToString([]byte("123456789012123456789012"))
 	ciphertext := base64.RawURLEncoding.EncodeToString([]byte("ciphertext"))
-	return "v1$" + nonce + "$" + ciphertext
+	return "v2$" + nonce + "$" + ciphertext
 }
 
 func validCreateMetadata() map[string]string {
@@ -318,7 +318,7 @@ func validCreateMetadata() map[string]string {
 		"metadata_token":  testToken("create metadata"),
 		"blob_token":      testToken("create blob"),
 		"deletion_token":  testToken("create deletion"),
-		"encrypted_meta":  testEncryptedMetaV1(),
+		"encrypted_meta":  testEncryptedMeta(),
 		"expiration":      "7d",
 		"burn_after_read": "false",
 	}
@@ -329,13 +329,13 @@ func seedSecret(repo *mockSecretRepo, fs *mockFileStore, publicID, token, deleti
 }
 
 func seedSecretWithTokens(repo *mockSecretRepo, fs *mockFileStore, publicID, metadataToken, blobToken, deletionToken string, burnAfterRead bool) {
-	blobData := []byte("v1$datanonce$encryptedcontent")
+	blobData := []byte("encryptedcontent-fixture-data")
 	secret := &domain.Secret{
 		PublicID:          publicID,
 		MetadataTokenHash: tokencrypto.TokenHash(metadataToken),
 		BlobTokenHash:     tokencrypto.TokenHash(blobToken),
 		DeletionTokenHash: tokencrypto.TokenHash(deletionToken),
-		EncryptedMeta:     testEncryptedMetaV1(),
+		EncryptedMeta:     testEncryptedMeta(),
 		BlobSize:          int64(len(blobData)),
 		BurnAfterRead:     burnAfterRead,
 		ExpiresAt:         time.Now().Add(time.Hour),
@@ -452,7 +452,7 @@ func TestCreateSecret_RejectsMalformedProtectedFields(t *testing.T) {
 		{name: "metadata token", field: "metadata_token", value: "short"},
 		{name: "blob token", field: "blob_token", value: "short"},
 		{name: "deletion token", field: "deletion_token", value: "short"},
-		{name: "encrypted meta", field: "encrypted_meta", value: "v1$bad$bad"},
+		{name: "encrypted meta", field: "encrypted_meta", value: "v2$bad$bad"},
 		{name: "oversized encrypted meta", field: "encrypted_meta", value: string(bytes.Repeat([]byte("A"), domain.EncryptedMetaMaxBytes+1))},
 	}
 
@@ -655,8 +655,8 @@ func TestRetrieveSecret_Success(t *testing.T) {
 	}
 
 	body := rec.Body.String()
-	if body != "v1$datanonce$encryptedcontent" {
-		t.Errorf("body = %q, want %q", body, "v1$datanonce$encryptedcontent")
+	if body != "encryptedcontent-fixture-data" {
+		t.Errorf("body = %q, want %q", body, "encryptedcontent-fixture-data")
 	}
 }
 
@@ -958,7 +958,7 @@ func TestRetrieveSecretRange_Success(t *testing.T) {
 	if got, want := rec.Header().Get("Content-Length"), "6"; got != want {
 		t.Errorf("Content-Length = %q, want %q", got, want)
 	}
-	if got, want := rec.Body.String(), "datano"; got != want {
+	if got, want := rec.Body.String(), "rypted"; got != want {
 		t.Errorf("body = %q, want %q", got, want)
 	}
 }
@@ -1177,7 +1177,7 @@ func TestSecretMetadata_Success(t *testing.T) {
 	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	if resp.EncryptedMeta != testEncryptedMetaV1() {
+	if resp.EncryptedMeta != testEncryptedMeta() {
 		t.Errorf("encrypted_meta = %q, want fixture", resp.EncryptedMeta)
 	}
 	if resp.BlobSize == 0 {

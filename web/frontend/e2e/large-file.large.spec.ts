@@ -7,8 +7,6 @@ import { expect, type Page, test } from "@playwright/test";
 const DEFAULT_SIZE_MIB = 99;
 const TEST_TIMEOUT_MS = 10 * 60 * 1000;
 const MIB = 1024 * 1024;
-const MODES = ["bundle", "legacy"] as const;
-type Mode = (typeof MODES)[number];
 
 interface HeapSample {
   readonly label: string;
@@ -18,7 +16,6 @@ interface HeapSample {
 }
 
 interface Report {
-  readonly mode: Mode;
   readonly fileSizeBytes: number;
   readonly fileSizeMiB: number;
   readonly uploadMs: number;
@@ -42,7 +39,6 @@ test.describe("Large-file performance", () => {
   }, testInfo) => {
     test.skip(browserName !== "chromium", "heap sampling currently uses Chromium CDP");
 
-    const mode = parseMode();
     const sizeMiB = parseSizeMiB();
     const sizeBytes = sizeMiB * MIB;
     const filename = `secretli-large-${sizeMiB}MiB.bin`;
@@ -82,10 +78,7 @@ test.describe("Large-file performance", () => {
 
     const outputPath = testInfo.outputPath("downloaded", filename);
     const retrieveStartedAt = performance.now();
-    const { revealMs, downloadMs } =
-      mode === "bundle"
-        ? await retrieveBundle(page, outputPath, filename, sampleHeap)
-        : await retrieveLegacy(page, outputPath, filename, sampleHeap);
+    const { revealMs, downloadMs } = await retrieveBundle(page, outputPath, filename, sampleHeap);
     const retrieveTotalMs = performance.now() - retrieveStartedAt;
     await sampleHeap("after download");
 
@@ -97,7 +90,6 @@ test.describe("Large-file performance", () => {
 
     const totalMs = performance.now() - totalStartedAt;
     const report: Report = {
-      mode,
       fileSizeBytes: sizeBytes,
       fileSizeMiB: sizeMiB,
       uploadMs,
@@ -130,40 +122,13 @@ async function retrieveBundle(
 
   const downloadStartedAt = performance.now();
   const downloadPromise = page.waitForEvent("download", { timeout: TEST_TIMEOUT_MS });
-  await page.getByTestId("bundle-file-0").getByRole("button", { name: "Download" }).click();
+  await page.getByRole("button", { name: "Download File" }).click();
   const download = await downloadPromise;
   expect(download.suggestedFilename()).toBe(filename);
   await download.saveAs(outputPath);
   const downloadMs = performance.now() - downloadStartedAt;
 
   return { revealMs, downloadMs };
-}
-
-async function retrieveLegacy(
-  page: Page,
-  outputPath: string,
-  filename: string,
-  sampleHeap: (label: string) => Promise<void>,
-): Promise<{ revealMs: number; downloadMs: number }> {
-  const revealStartedAt = performance.now();
-  const downloadPromise = page.waitForEvent("download", { timeout: TEST_TIMEOUT_MS });
-  await page.getByRole("button", { name: /Download/ }).click();
-  const download = await downloadPromise;
-  expect(download.suggestedFilename()).toBe(filename);
-  await download.saveAs(outputPath);
-  await expect(page.locator("h1")).toHaveText("File Downloaded", { timeout: TEST_TIMEOUT_MS });
-  const revealMs = performance.now() - revealStartedAt;
-  await sampleHeap("after full decrypt");
-
-  return { revealMs, downloadMs: 0 };
-}
-
-function parseMode(): Mode {
-  const value = process.env.LARGE_E2E_MODE ?? "bundle";
-  if (!MODES.includes(value as Mode)) {
-    throw new Error(`LARGE_E2E_MODE must be one of: ${MODES.join(", ")}`);
-  }
-  return value as Mode;
 }
 
 function parseSizeMiB(): number {
@@ -297,7 +262,6 @@ function printReport(report: Report) {
 
   console.log(`
 Large-file E2E report
-  mode: ${report.mode}
   file: ${report.fileSizeMiB} MiB (${report.fileSizeBytes} bytes)
   upload: ${formatMs(report.uploadMs)}
   reveal: ${formatMs(report.revealMs)}

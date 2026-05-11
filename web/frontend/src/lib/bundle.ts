@@ -157,15 +157,6 @@ export async function readBundleManifest(
   return { header, manifest };
 }
 
-export async function decryptBundleFile(
-  file: BundleFile,
-  keySet: KeySet,
-  fetchRange: BundleRangeFetcher,
-): Promise<Blob> {
-  const [decrypted] = await decryptBundleFiles([file], keySet, fetchRange);
-  return decrypted.blob;
-}
-
 export async function decryptBundleFiles(
   files: readonly BundleFile[],
   keySet: KeySet,

@@ -13,25 +13,19 @@ export interface EncodedKeySet {
 }
 
 export interface SecretMeta {
-  readonly type: "text" | "file" | "bundle";
+  readonly type: "text" | "bundle";
   readonly password_protected: boolean;
-  readonly filename?: string;
   readonly bundle_name?: string;
 }
 
 const ENVELOPE_VERSION = "v2";
 const DERIVATION_VERSION = "v1";
 const DERIVATION_PREFIX = `secretli:derivation:${DERIVATION_VERSION}`;
-const V1_NONCE_LENGTH = 12;
 const V2_NONCE_LENGTH = 24;
 const BLOB_V2_TAG = 0x02;
 const POLY1305_TAG_LENGTH = 16;
 
 export const ENCRYPTED_BLOB_OVERHEAD_BYTES = 1 + V2_NONCE_LENGTH + POLY1305_TAG_LENGTH;
-
-function toBuffer(bytes: Uint8Array): ArrayBuffer {
-  return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
-}
 
 function buildAad(publicID: Uint8Array, purpose: "meta" | "blob" | "bundle"): Uint8Array {
   const suffix = new TextEncoder().encode(purpose);
@@ -117,7 +111,7 @@ export class KeySet {
   }
 
   /**
-   * Decrypt an envelope string back to a metadata object. Supports v1 and v2 formats.
+   * Decrypt an envelope string back to a metadata object.
    */
   async decryptMeta(envelope: string): Promise<SecretMeta> {
     const parts = envelope.split("$");
@@ -129,27 +123,13 @@ export class KeySet {
     const nonce = base64UrlDecode(parts[1]);
     const ciphertext = base64UrlDecode(parts[2]);
 
-    let plaintext: Uint8Array;
-
-    if (version === "v1") {
-      // Legacy AES-256-GCM path (no AAD)
-      const key = await crypto.subtle.importKey("raw", toBuffer(this.metaKey), "AES-GCM", false, [
-        "decrypt",
-      ]);
-      const decrypted = await crypto.subtle.decrypt(
-        { name: "AES-GCM", iv: toBuffer(nonce) },
-        key,
-        toBuffer(ciphertext),
-      );
-      plaintext = new Uint8Array(decrypted);
-    } else if (version === "v2") {
-      // XChaCha20-Poly1305 with AAD
-      const aad = buildAad(this.publicID, "meta");
-      const cipher = xchacha20poly1305(this.metaKey, nonce, aad);
-      plaintext = cipher.decrypt(ciphertext);
-    } else {
+    if (version !== ENVELOPE_VERSION || nonce.length !== V2_NONCE_LENGTH) {
       throw new Error("invalid metadata envelope format");
     }
+
+    const aad = buildAad(this.publicID, "meta");
+    const cipher = xchacha20poly1305(this.metaKey, nonce, aad);
+    const plaintext = cipher.decrypt(ciphertext);
 
     return JSON.parse(new TextDecoder().decode(plaintext));
   }
@@ -167,36 +147,20 @@ export class KeySet {
   }
 
   /**
-   * Decrypt a blob back to plaintext bytes. Supports v1 and v2 formats.
+   * Decrypt a blob back to plaintext bytes.
    */
   async decryptBlob(blob: Blob): Promise<Uint8Array> {
     const bytes = new Uint8Array(await blob.arrayBuffer());
 
-    if (bytes[0] === BLOB_V2_TAG) {
-      try {
-        // v2: [0x02][24-byte nonce][ciphertext with poly1305 tag]
-        const nonce = bytes.slice(1, 1 + V2_NONCE_LENGTH);
-        const ciphertext = bytes.slice(1 + V2_NONCE_LENGTH);
-        const aad = buildAad(this.publicID, "blob");
-        const cipher = xchacha20poly1305(this.blobKey, nonce, aad);
-        return cipher.decrypt(ciphertext);
-      } catch {
-        // Fall through to v1 — handles the rare case where a v1 nonce starts with 0x02
-      }
+    if (bytes[0] !== BLOB_V2_TAG || bytes.length < ENCRYPTED_BLOB_OVERHEAD_BYTES) {
+      throw new Error("invalid blob format");
     }
 
-    // v1: [12-byte nonce][AES-GCM ciphertext]
-    const nonce = bytes.slice(0, V1_NONCE_LENGTH);
-    const ciphertext = bytes.slice(V1_NONCE_LENGTH);
-    const key = await crypto.subtle.importKey("raw", toBuffer(this.blobKey), "AES-GCM", false, [
-      "decrypt",
-    ]);
-    const decrypted = await crypto.subtle.decrypt(
-      { name: "AES-GCM", iv: toBuffer(nonce) },
-      key,
-      toBuffer(ciphertext),
-    );
-    return new Uint8Array(decrypted);
+    const nonce = bytes.slice(1, 1 + V2_NONCE_LENGTH);
+    const ciphertext = bytes.slice(1 + V2_NONCE_LENGTH);
+    const aad = buildAad(this.publicID, "blob");
+    const cipher = xchacha20poly1305(this.blobKey, nonce, aad);
+    return cipher.decrypt(ciphertext);
   }
 
   encryptBundlePart(data: Uint8Array, aadSuffix: Uint8Array): Uint8Array {

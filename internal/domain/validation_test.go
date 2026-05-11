@@ -61,7 +61,6 @@ func TestValidToken(t *testing.T) {
 }
 
 func TestValidEncryptedMeta(t *testing.T) {
-	nonceV1 := rawURL(strings.Repeat("1", metadataV1NonceLength))
 	nonceV2 := rawURL(strings.Repeat("2", metadataV2NonceLength))
 	ciphertext := rawURL("ciphertext")
 
@@ -70,19 +69,18 @@ func TestValidEncryptedMeta(t *testing.T) {
 		envelope string
 		want     bool
 	}{
-		{name: "valid v1", envelope: "v1$" + nonceV1 + "$" + ciphertext, want: true},
 		{name: "valid v2", envelope: "v2$" + nonceV2 + "$" + ciphertext, want: true},
 		{name: "empty", envelope: "", want: false},
-		{name: "bad version", envelope: "v3$" + nonceV1 + "$" + ciphertext, want: false},
-		{name: "missing part", envelope: "v1$" + nonceV1, want: false},
-		{name: "extra part", envelope: "v1$" + nonceV1 + "$" + ciphertext + "$extra", want: false},
-		{name: "bad nonce base64url", envelope: "v1$" + strings.Repeat("A", 15) + "+$" + ciphertext, want: false},
-		{name: "v1 wrong nonce length", envelope: "v1$" + nonceV2 + "$" + ciphertext, want: false},
-		{name: "v2 wrong nonce length", envelope: "v2$" + nonceV1 + "$" + ciphertext, want: false},
-		{name: "empty ciphertext", envelope: "v1$" + nonceV1 + "$", want: false},
-		{name: "bad ciphertext char", envelope: "v1$" + nonceV1 + "$cipher+", want: false},
-		{name: "bad ciphertext base64", envelope: "v1$" + nonceV1 + "$A", want: false},
-		{name: "oversized", envelope: "v1$" + nonceV1 + "$" + strings.Repeat("A", EncryptedMetaMaxBytes), want: false},
+		{name: "rejects v1", envelope: "v1$" + nonceV2 + "$" + ciphertext, want: false},
+		{name: "bad version", envelope: "v3$" + nonceV2 + "$" + ciphertext, want: false},
+		{name: "missing part", envelope: "v2$" + nonceV2, want: false},
+		{name: "extra part", envelope: "v2$" + nonceV2 + "$" + ciphertext + "$extra", want: false},
+		{name: "bad nonce base64url", envelope: "v2$" + strings.Repeat("A", 15) + "+$" + ciphertext, want: false},
+		{name: "wrong nonce length", envelope: "v2$" + rawURL(strings.Repeat("1", metadataV2NonceLength-1)) + "$" + ciphertext, want: false},
+		{name: "empty ciphertext", envelope: "v2$" + nonceV2 + "$", want: false},
+		{name: "bad ciphertext char", envelope: "v2$" + nonceV2 + "$cipher+", want: false},
+		{name: "bad ciphertext base64", envelope: "v2$" + nonceV2 + "$A", want: false},
+		{name: "oversized", envelope: "v2$" + nonceV2 + "$" + strings.Repeat("A", EncryptedMetaMaxBytes), want: false},
 	}
 
 	for _, tt := range tests {
