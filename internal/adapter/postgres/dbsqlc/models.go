@@ -8,6 +8,14 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+type RetrievalSession struct {
+	ID               int64
+	PublicID         string
+	SessionTokenHash string
+	ExpiresAt        pgtype.Timestamptz
+	CreatedAt        pgtype.Timestamptz
+}
+
 type Secret struct {
 	PublicID          string
 	MetadataTokenHash string

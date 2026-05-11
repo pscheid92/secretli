@@ -219,6 +219,153 @@ func TestSecretRepo_ClaimBurnAfterRead_ConcurrentOnlyOneSucceeds(t *testing.T) {
 	}
 }
 
+func TestSecretRepo_RetrievalSession(t *testing.T) {
+	pool := setupTestDB(t)
+	repo := pgadapter.NewSecretRepo(pool)
+	ctx := context.Background()
+
+	secret := newTestSecret("session-001", time.Now().Add(1*time.Hour))
+	if err := repo.Create(ctx, secret); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	sessionHash := tokencrypto.TokenHash("session-token")
+	got, err := repo.StartRetrievalSession(
+		ctx,
+		"session-001",
+		tokencrypto.TokenHash("blob-token-session-001"),
+		sessionHash,
+		time.Now().Add(15*time.Minute),
+	)
+	if err != nil {
+		t.Fatalf("start retrieval session: %v", err)
+	}
+	if got.PublicID != "session-001" {
+		t.Errorf("public_id = %q, want %q", got.PublicID, "session-001")
+	}
+
+	got, err = repo.GetByRetrievalSession(ctx, "session-001", sessionHash)
+	if err != nil {
+		t.Fatalf("get by retrieval session: %v", err)
+	}
+	if got.PublicID != "session-001" {
+		t.Errorf("session public_id = %q, want %q", got.PublicID, "session-001")
+	}
+
+	_, err = repo.GetByRetrievalSession(ctx, "session-001", tokencrypto.TokenHash("wrong-session"))
+	if err != domain.ErrForbidden {
+		t.Fatalf("expected ErrForbidden for wrong session, got %v", err)
+	}
+
+	_, err = repo.StartRetrievalSession(
+		ctx,
+		"session-001",
+		tokencrypto.TokenHash("wrong-blob-token"),
+		tokencrypto.TokenHash("session-token-wrong-blob"),
+		time.Now().Add(15*time.Minute),
+	)
+	if err != domain.ErrForbidden {
+		t.Fatalf("expected ErrForbidden for wrong blob token, got %v", err)
+	}
+}
+
+func TestSecretRepo_RetrievalSessionExpiry(t *testing.T) {
+	pool := setupTestDB(t)
+	repo := pgadapter.NewSecretRepo(pool)
+	ctx := context.Background()
+
+	active := newTestSecret("session-expiry-active", time.Now().Add(1*time.Hour))
+	expired := newTestSecret("session-expiry-expired", time.Now().Add(1*time.Hour))
+	for _, secret := range []*domain.Secret{active, expired} {
+		if err := repo.Create(ctx, secret); err != nil {
+			t.Fatalf("create %s: %v", secret.PublicID, err)
+		}
+	}
+
+	activeHash := tokencrypto.TokenHash("active-session-token")
+	if _, err := repo.StartRetrievalSession(
+		ctx,
+		"session-expiry-active",
+		tokencrypto.TokenHash("blob-token-session-expiry-active"),
+		activeHash,
+		time.Now().Add(15*time.Minute),
+	); err != nil {
+		t.Fatalf("start active session: %v", err)
+	}
+
+	expiredHash := tokencrypto.TokenHash("expired-session-token")
+	if _, err := repo.StartRetrievalSession(
+		ctx,
+		"session-expiry-expired",
+		tokencrypto.TokenHash("blob-token-session-expiry-expired"),
+		expiredHash,
+		time.Now().Add(-time.Minute),
+	); err != nil {
+		t.Fatalf("start expired session: %v", err)
+	}
+
+	if _, err := repo.GetByRetrievalSession(ctx, "session-expiry-active", activeHash); err != nil {
+		t.Fatalf("active session should validate: %v", err)
+	}
+	if _, err := repo.GetByRetrievalSession(ctx, "session-expiry-expired", expiredHash); err != domain.ErrForbidden {
+		t.Fatalf("expected ErrForbidden for expired session, got %v", err)
+	}
+
+	deleted, err := repo.DeleteExpiredRetrievalSessions(ctx)
+	if err != nil {
+		t.Fatalf("delete expired sessions: %v", err)
+	}
+	if deleted != 1 {
+		t.Errorf("deleted sessions = %d, want 1", deleted)
+	}
+
+	if _, err := repo.GetByRetrievalSession(ctx, "session-expiry-active", activeHash); err != nil {
+		t.Fatalf("active session should remain after cleanup: %v", err)
+	}
+}
+
+func TestSecretRepo_StartRetrievalSession_BurnAfterRead(t *testing.T) {
+	pool := setupTestDB(t)
+	repo := pgadapter.NewSecretRepo(pool)
+	ctx := context.Background()
+
+	secret := newTestSecret("session-burn-001", time.Now().Add(1*time.Hour))
+	secret.BurnAfterRead = true
+	if err := repo.Create(ctx, secret); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	_, err := repo.StartRetrievalSession(
+		ctx,
+		"session-burn-001",
+		tokencrypto.TokenHash("blob-token-session-burn-001"),
+		tokencrypto.TokenHash("session-token"),
+		time.Now().Add(15*time.Minute),
+	)
+	if err != nil {
+		t.Fatalf("start retrieval session: %v", err)
+	}
+
+	got, err := repo.GetByPublicID(ctx, "session-burn-001")
+	if err != nil {
+		t.Fatalf("get after session: %v", err)
+	}
+	if got.RetrievedAt == nil {
+		t.Fatal("retrieved_at should be set")
+	}
+
+	_, err = repo.StartRetrievalSession(
+		ctx,
+		"session-burn-001",
+		tokencrypto.TokenHash("blob-token-session-burn-001"),
+		tokencrypto.TokenHash("session-token-2"),
+		time.Now().Add(15*time.Minute),
+	)
+	if err != domain.ErrNotFound {
+		t.Fatalf("expected ErrNotFound on second burn session, got %v", err)
+	}
+}
+
 func TestSecretRepo_Delete(t *testing.T) {
 	pool := setupTestDB(t)
 	repo := pgadapter.NewSecretRepo(pool)
@@ -316,6 +463,55 @@ func TestSecretRepo_DeleteExpired_BurnAfterRead(t *testing.T) {
 	// Unretrieved burn secret should still exist
 	if _, err := repo.GetByPublicID(ctx, "burn-unretr-001"); err != nil {
 		t.Fatalf("unretrieved burn secret should still exist: %v", err)
+	}
+}
+
+func TestSecretRepo_DeleteExpired_KeepsBurnedSecretWithActiveSession(t *testing.T) {
+	pool := setupTestDB(t)
+	repo := pgadapter.NewSecretRepo(pool)
+	ctx := context.Background()
+
+	secret := newTestSecret("burn-active-session", time.Now().Add(1*time.Hour))
+	secret.BurnAfterRead = true
+	if err := repo.Create(ctx, secret); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if _, err := repo.StartRetrievalSession(
+		ctx,
+		"burn-active-session",
+		tokencrypto.TokenHash("blob-token-burn-active-session"),
+		tokencrypto.TokenHash("session-active"),
+		time.Now().Add(15*time.Minute),
+	); err != nil {
+		t.Fatalf("start retrieval session: %v", err)
+	}
+
+	noop := func(string) error { return nil }
+	count, err := repo.DeleteExpired(ctx, noop)
+	if err != nil {
+		t.Fatalf("delete expired: %v", err)
+	}
+	if count != 0 {
+		t.Errorf("deleted count = %d, want 0", count)
+	}
+
+	if _, err := pool.Exec(ctx, "UPDATE retrieval_sessions SET expires_at = NOW() - INTERVAL '1 minute' WHERE public_id = $1", "burn-active-session"); err != nil {
+		t.Fatalf("expire retrieval session: %v", err)
+	}
+	deletedSessions, err := repo.DeleteExpiredRetrievalSessions(ctx)
+	if err != nil {
+		t.Fatalf("delete expired retrieval sessions: %v", err)
+	}
+	if deletedSessions != 1 {
+		t.Errorf("deleted sessions = %d, want 1", deletedSessions)
+	}
+
+	count, err = repo.DeleteExpired(ctx, noop)
+	if err != nil {
+		t.Fatalf("delete expired after session cleanup: %v", err)
+	}
+	if count != 1 {
+		t.Errorf("deleted count after session cleanup = %d, want 1", count)
 	}
 }
 

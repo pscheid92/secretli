@@ -4,22 +4,21 @@ import (
 	"bytes"
 	"context"
 	"io"
+	"net"
+	"net/http"
 	"os/exec"
 	"testing"
 	"time"
 
-	"github.com/minio/minio-go/v7"
-	"github.com/minio/minio-go/v7/pkg/credentials"
 	"github.com/pscheid92/secretli/internal/adapter/s3"
 	"github.com/pscheid92/secretli/internal/platform/config"
 	"github.com/testcontainers/testcontainers-go"
-	tcminio "github.com/testcontainers/testcontainers-go/modules/minio"
 	"github.com/testcontainers/testcontainers-go/wait"
 )
 
 const testBucket = "test-bucket"
 
-func setupMinIO(t *testing.T) *s3.Client {
+func setupSeaweedFS(t *testing.T) *s3.Client {
 	t.Helper()
 
 	if testing.Short() {
@@ -35,18 +34,18 @@ func setupMinIO(t *testing.T) *s3.Client {
 
 	ctx := context.Background()
 
-	container, err := tcminio.Run(ctx,
-		"minio/minio:latest",
-		tcminio.WithUsername("minioadmin"),
-		tcminio.WithPassword("minioadmin"),
-		testcontainers.WithWaitStrategy(
-			wait.ForHTTP("/minio/health/live").
-				WithPort("9000/tcp").
-				WithStartupTimeout(30*time.Second),
-		),
-	)
+	container, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
+		ContainerRequest: testcontainers.ContainerRequest{
+			Image:        "chrislusf/seaweedfs:latest",
+			ExposedPorts: []string{"8333/tcp"},
+			Cmd:          []string{"server", "-s3", "-dir=/data"},
+			WaitingFor: wait.ForListeningPort("8333/tcp").
+				WithStartupTimeout(30 * time.Second),
+		},
+		Started: true,
+	})
 	if err != nil {
-		t.Fatalf("start minio container: %v", err)
+		t.Fatalf("start seaweedfs container: %v", err)
 	}
 
 	t.Cleanup(func() {
@@ -55,28 +54,25 @@ func setupMinIO(t *testing.T) *s3.Client {
 		}
 	})
 
-	endpoint, err := container.ConnectionString(ctx)
+	host, err := container.Host(ctx)
 	if err != nil {
-		t.Fatalf("get minio connection string: %v", err)
+		t.Fatalf("get seaweedfs host: %v", err)
 	}
+	port, err := container.MappedPort(ctx, "8333/tcp")
+	if err != nil {
+		t.Fatalf("get seaweedfs port: %v", err)
+	}
+	endpoint := net.JoinHostPort(host, port.Port())
 
-	// Create the test bucket using the minio client directly
-	mc, err := minio.New(endpoint, &minio.Options{
-		Creds:  credentials.NewStaticV4("minioadmin", "minioadmin", ""),
-		Secure: false,
-	})
-	if err != nil {
-		t.Fatalf("create minio admin client: %v", err)
-	}
-	if err := mc.MakeBucket(ctx, testBucket, minio.MakeBucketOptions{}); err != nil {
-		t.Fatalf("create test bucket: %v", err)
-	}
+	createBucket(t, endpoint, testBucket)
 
 	client, err := s3.NewClient(config.S3Config{
 		Endpoint:  endpoint,
 		Bucket:    testBucket,
-		AccessKey: "minioadmin",
-		SecretKey: "minioadmin",
+		AccessKey: "admin",
+		SecretKey: "admin",
+		UseSSL:    false,
+		Region:    "us-east-1",
 	})
 	if err != nil {
 		t.Fatalf("create S3Client: %v", err)
@@ -85,11 +81,37 @@ func setupMinIO(t *testing.T) *s3.Client {
 	return client
 }
 
+func createBucket(t *testing.T, endpoint, bucket string) {
+	t.Helper()
+
+	url := "http://" + endpoint + "/" + bucket
+	deadline := time.Now().Add(10 * time.Second)
+	var lastErr error
+	for time.Now().Before(deadline) {
+		req, err := http.NewRequest(http.MethodPut, url, nil)
+		if err != nil {
+			t.Fatalf("create bucket request: %v", err)
+		}
+		res, err := http.DefaultClient.Do(req)
+		if err == nil {
+			_ = res.Body.Close()
+			if res.StatusCode >= 200 && res.StatusCode < 300 {
+				return
+			}
+			lastErr = io.ErrUnexpectedEOF
+		} else {
+			lastErr = err
+		}
+		time.Sleep(250 * time.Millisecond)
+	}
+	t.Fatalf("create seaweedfs bucket %q: %v", bucket, lastErr)
+}
+
 func TestS3Client_PutAndGet(t *testing.T) {
-	client := setupMinIO(t)
+	client := setupSeaweedFS(t)
 	ctx := context.Background()
 
-	data := []byte("hello, minio integration test!")
+	data := []byte("hello, seaweedfs integration test!")
 	err := client.Put(ctx, "test-key", bytes.NewReader(data), int64(len(data)))
 	if err != nil {
 		t.Fatalf("Put: %v", err)
@@ -112,7 +134,7 @@ func TestS3Client_PutAndGet(t *testing.T) {
 }
 
 func TestS3Client_Delete(t *testing.T) {
-	client := setupMinIO(t)
+	client := setupSeaweedFS(t)
 	ctx := context.Background()
 
 	data := []byte("to be deleted")
@@ -124,7 +146,8 @@ func TestS3Client_Delete(t *testing.T) {
 		t.Fatalf("Delete: %v", err)
 	}
 
-	// Get after delete — minio returns an error when reading the object
+	// Get after delete may fail either when opening the object or reading it,
+	// depending on the S3-compatible server implementation.
 	reader, err := client.Get(ctx, "del-key")
 	if err != nil {
 		// Some versions return error on Get itself
@@ -138,7 +161,7 @@ func TestS3Client_Delete(t *testing.T) {
 }
 
 func TestS3Client_PutOverwrite(t *testing.T) {
-	client := setupMinIO(t)
+	client := setupSeaweedFS(t)
 	ctx := context.Background()
 
 	data1 := []byte("version 1")
@@ -168,7 +191,7 @@ func TestS3Client_PutOverwrite(t *testing.T) {
 }
 
 func TestS3Client_LargeFile(t *testing.T) {
-	client := setupMinIO(t)
+	client := setupSeaweedFS(t)
 	ctx := context.Background()
 
 	// 1MB file
@@ -200,6 +223,57 @@ func TestS3Client_LargeFile(t *testing.T) {
 	}
 }
 
+func TestS3Client_GetRange(t *testing.T) {
+	client := setupSeaweedFS(t)
+	ctx := context.Background()
+
+	data := make([]byte, 1<<20)
+	for i := range data {
+		data[i] = byte(i % 251)
+	}
+
+	if err := client.Put(ctx, "range-key", bytes.NewReader(data), int64(len(data))); err != nil {
+		t.Fatalf("Put: %v", err)
+	}
+
+	tests := []struct {
+		name       string
+		start, end int64
+	}{
+		{name: "first byte", start: 0, end: 0},
+		{name: "prefix", start: 0, end: 1023},
+		{name: "middle", start: 100_000, end: 101_000},
+		{name: "last byte", start: int64(len(data) - 1), end: int64(len(data) - 1)},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			reader, err := client.GetRange(ctx, "range-key", tt.start, tt.end)
+			if err != nil {
+				t.Fatalf("GetRange: %v", err)
+			}
+			defer reader.Close()
+
+			got, err := io.ReadAll(reader)
+			if err != nil {
+				t.Fatalf("ReadAll: %v", err)
+			}
+			want := data[tt.start : tt.end+1]
+			if !bytes.Equal(got, want) {
+				t.Fatalf("range bytes mismatch: got %d bytes, want %d bytes", len(got), len(want))
+			}
+		})
+	}
+}
+
+func TestS3Client_GetRangeRejectsMalformedRange(t *testing.T) {
+	client := setupSeaweedFS(t)
+	_, err := client.GetRange(context.Background(), "range-key", 5, 4)
+	if err == nil {
+		t.Fatal("expected malformed range error")
+	}
+}
+
 func TestNewS3Client_BucketNotFound(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")
@@ -214,18 +288,18 @@ func TestNewS3Client_BucketNotFound(t *testing.T) {
 
 	ctx := context.Background()
 
-	container, err := tcminio.Run(ctx,
-		"minio/minio:latest",
-		tcminio.WithUsername("minioadmin"),
-		tcminio.WithPassword("minioadmin"),
-		testcontainers.WithWaitStrategy(
-			wait.ForHTTP("/minio/health/live").
-				WithPort("9000/tcp").
-				WithStartupTimeout(30*time.Second),
-		),
-	)
+	container, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
+		ContainerRequest: testcontainers.ContainerRequest{
+			Image:        "chrislusf/seaweedfs:latest",
+			ExposedPorts: []string{"8333/tcp"},
+			Cmd:          []string{"server", "-s3", "-dir=/data"},
+			WaitingFor: wait.ForListeningPort("8333/tcp").
+				WithStartupTimeout(30 * time.Second),
+		},
+		Started: true,
+	})
 	if err != nil {
-		t.Fatalf("start minio container: %v", err)
+		t.Fatalf("start seaweedfs container: %v", err)
 	}
 	t.Cleanup(func() {
 		if err := container.Terminate(ctx); err != nil {
@@ -233,16 +307,23 @@ func TestNewS3Client_BucketNotFound(t *testing.T) {
 		}
 	})
 
-	endpoint, err := container.ConnectionString(ctx)
+	host, err := container.Host(ctx)
 	if err != nil {
-		t.Fatalf("get connection string: %v", err)
+		t.Fatalf("get seaweedfs host: %v", err)
 	}
+	port, err := container.MappedPort(ctx, "8333/tcp")
+	if err != nil {
+		t.Fatalf("get seaweedfs port: %v", err)
+	}
+	endpoint := net.JoinHostPort(host, port.Port())
 
 	_, err = s3.NewClient(config.S3Config{
 		Endpoint:  endpoint,
 		Bucket:    "nonexistent-bucket",
-		AccessKey: "minioadmin",
-		SecretKey: "minioadmin",
+		AccessKey: "admin",
+		SecretKey: "admin",
+		UseSSL:    false,
+		Region:    "us-east-1",
 	})
 	if err == nil {
 		t.Fatal("expected error for nonexistent bucket, got nil")

@@ -1,3 +1,4 @@
+import { estimateBundleEncryptedSize } from "./bundle";
 import { ENCRYPTED_BLOB_OVERHEAD_BYTES } from "./encryption";
 
 export const MAX_ENCRYPTED_UPLOAD_BYTES = 100 * 1024 * 1024;
@@ -10,4 +11,8 @@ export function encryptedUploadSize(plaintextBytes: number): number {
 
 export function fitsEncryptedUploadLimit(plaintextBytes: number): boolean {
   return encryptedUploadSize(plaintextBytes) <= MAX_ENCRYPTED_UPLOAD_BYTES;
+}
+
+export function fitsBundleUploadLimit(fileSizes: number[]): boolean {
+  return estimateBundleEncryptedSize(fileSizes) <= MAX_ENCRYPTED_UPLOAD_BYTES;
 }

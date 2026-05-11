@@ -1,6 +1,10 @@
 import { useCallback, useRef, useState } from "react";
 import { formatSize } from "../lib/format";
-import { MAX_FILE_UPLOAD_BYTES, MAX_UPLOAD_LABEL } from "../lib/uploadLimits";
+import {
+  fitsBundleUploadLimit,
+  MAX_FILE_UPLOAD_BYTES,
+  MAX_UPLOAD_LABEL,
+} from "../lib/uploadLimits";
 
 interface FileUploadProps {
   onSelect: (files: File[]) => void;
@@ -54,7 +58,7 @@ export default function FileUpload({ onSelect }: FileUploadProps) {
     (files: File[]) => {
       setError("");
       const total = files.reduce((sum, f) => sum + f.size, 0);
-      if (total > MAX_FILE_UPLOAD_BYTES) {
+      if (total > MAX_FILE_UPLOAD_BYTES || !fitsBundleUploadLimit(files.map((file) => file.size))) {
         setError(`Total file size exceeds the ${MAX_UPLOAD_LABEL} upload limit.`);
         return;
       }

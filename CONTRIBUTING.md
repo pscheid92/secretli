@@ -11,7 +11,7 @@ Prerequisites: Go 1.26+, Node.js 24+, Docker
 git clone https://github.com/pscheid92/secretli.git
 cd secretli
 
-# Start Postgres and MinIO
+# Start Postgres and SeaweedFS
 cd docker && docker compose -f docker-compose.dev.yml up -d && cd ..
 
 # Configure environment
@@ -29,8 +29,12 @@ make dev
 ```bash
 make test          # Full suite (requires Docker for testcontainers)
 make test-short    # Fast unit tests only
+make e2e           # Browser E2E tests against a running app
+make e2e-large     # Opt-in large-file browser performance test
 make lint          # Linters (Go + frontend)
 ```
+
+`make e2e-large` is not part of normal PR CI. It defaults to a near-limit synthetic file and can be tuned with `LARGE_E2E_SIZE_MB`, `LARGE_E2E_MAX_TOTAL_MS`, and `LARGE_E2E_MAX_HEAP_MIB`. Set `LARGE_E2E_MODE=legacy` when comparing against a pre-bundle app.
 
 ## Submitting Changes
 

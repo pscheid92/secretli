@@ -121,7 +121,15 @@ func (q *Queries) GetSecretByPublicID(ctx context.Context, publicID string) (Get
 const selectExpiredForCleanup = `-- name: SelectExpiredForCleanup :many
 SELECT public_id FROM secrets
 WHERE expires_at < NOW()
-   OR (burn_after_read = true AND retrieved_at IS NOT NULL)
+   OR (
+       burn_after_read = true
+       AND retrieved_at IS NOT NULL
+       AND NOT EXISTS (
+           SELECT 1 FROM retrieval_sessions
+           WHERE retrieval_sessions.public_id = secrets.public_id
+             AND retrieval_sessions.expires_at > NOW()
+       )
+   )
 FOR UPDATE SKIP LOCKED
 `
 

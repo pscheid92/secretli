@@ -10,7 +10,9 @@
     "format": "biome format --write .",
     "preview": "vite preview",
     "test": "vitest",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "vitest run --coverage",
+    "e2e": "playwright test",
+    "e2e:large": "LARGE_E2E=1 playwright test e2e/large-file.large.spec.ts --workers=1"
   },
   "dependencies": {
     "@noble/ciphers": "^2.1.1",

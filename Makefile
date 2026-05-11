@@ -1,4 +1,4 @@
-.PHONY: dev dev-api dev-frontend build build-frontend build-go test test-short test-coverage clean lint lint-go lint-frontend
+.PHONY: dev dev-api dev-frontend build build-frontend build-go test test-short test-coverage e2e e2e-large clean lint lint-go lint-frontend
 
 # Run both backend and frontend in development mode
 dev:
@@ -32,6 +32,14 @@ test-short:
 test:
 	go test -cover ./...
 	cd web/frontend && pnpm test --run
+
+# Browser E2E tests. Requires the app to be running at PLAYWRIGHT_BASE_URL or localhost:8080.
+e2e:
+	cd web/frontend && pnpm e2e
+
+# Large-file browser E2E. Requires the app to be running; set LARGE_E2E_SIZE_MB to override the default.
+e2e-large:
+	cd web/frontend && pnpm e2e:large
 
 # Generate coverage reports
 test-coverage:

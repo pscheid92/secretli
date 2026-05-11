@@ -97,6 +97,57 @@ export async function retrieveSecret(
   };
 }
 
+// --- Retrieval sessions and ranges ---
+
+export interface RetrievalSessionResponse {
+  session_token: string;
+  blob_size: number;
+  expires_at: string;
+  burn_after_read: boolean;
+}
+
+export async function startRetrievalSession(
+  publicID: string,
+  blobToken: string,
+): Promise<RetrievalSessionResponse> {
+  return request(`/api/v1/secrets/${publicID}/retrieval-session`, {
+    method: "POST",
+    headers: { "X-Blob-Token": blobToken },
+  });
+}
+
+export async function retrieveSecretRange(
+  publicID: string,
+  sessionToken: string,
+  start: number,
+  end: number,
+): Promise<Uint8Array> {
+  let res: Response;
+  try {
+    res = await fetch(`/api/v1/secrets/${publicID}/blob`, {
+      method: "GET",
+      credentials: "same-origin",
+      headers: {
+        Authorization: `Bearer ${sessionToken}`,
+        Range: `bytes=${start}-${end}`,
+      },
+    });
+  } catch {
+    throw new ApiError(0, "Network error — please check your connection");
+  }
+
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    const message = body?.error ?? `Request failed (${res.status})`;
+    throw new ApiError(res.status, message);
+  }
+  if (res.status !== 206) {
+    throw new ApiError(res.status, `Expected partial content response (${res.status})`);
+  }
+
+  return new Uint8Array(await res.arrayBuffer());
+}
+
 // --- Metadata ---
 
 export interface SecretMetadataResponse {

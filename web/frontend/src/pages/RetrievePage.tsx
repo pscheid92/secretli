@@ -8,8 +8,16 @@ import {
   deleteSecret,
   getSecretMetadata,
   retrieveSecret,
+  retrieveSecretRange,
   type SecretMetadataResponse,
+  startRetrievalSession,
 } from "../lib/api";
+import {
+  type BundleFile,
+  type BundleManifest,
+  decryptBundleFile,
+  readBundleManifest,
+} from "../lib/bundle";
 import { KeySet, type SecretMeta } from "../lib/encryption";
 import { formatRelativeTime, formatSize } from "../lib/format";
 
@@ -28,6 +36,15 @@ type State =
   | {
       stage: "file-ready";
       files: Array<{ name: string; blob: Blob }>;
+      shareSecret: string;
+      deletionToken: string;
+    }
+  | {
+      stage: "bundle-ready";
+      manifest: BundleManifest;
+      keySet: KeySet;
+      publicID: string;
+      sessionToken: string;
       shareSecret: string;
       deletionToken: string;
     }
@@ -64,6 +81,7 @@ export default function RetrievePage() {
   const [passwordLoading, setPasswordLoading] = useState(false);
   const [revealing, setRevealing] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [downloadingBundle, setDownloadingBundle] = useState(false);
 
   const fetchMetadata = useCallback(async () => {
     const hash = window.location.hash.slice(1);
@@ -157,6 +175,23 @@ export default function RetrievePage() {
     const baseEncoded = baseKeySet.getEncoded();
     const blobEncoded = keySet.getEncoded();
 
+    if (clientMeta.type === "bundle") {
+      const session = await startRetrievalSession(baseEncoded.publicID, blobEncoded.blobToken);
+      const fetchRange = (start: number, end: number) =>
+        retrieveSecretRange(baseEncoded.publicID, session.session_token, start, end);
+      const { manifest } = await readBundleManifest(fetchRange, keySet, session.blob_size);
+      setState({
+        stage: "bundle-ready",
+        manifest,
+        keySet,
+        publicID: baseEncoded.publicID,
+        sessionToken: session.session_token,
+        shareSecret,
+        deletionToken,
+      });
+      return;
+    }
+
     const response = await retrieveSecret(baseEncoded.publicID, blobEncoded.blobToken);
     const decrypted = await keySet.decryptBlob(response.blob);
 
@@ -214,7 +249,13 @@ export default function RetrievePage() {
   }
 
   async function handleDelete() {
-    if (state.stage !== "decrypted" && state.stage !== "file-ready") return;
+    if (
+      state.stage !== "decrypted" &&
+      state.stage !== "file-ready" &&
+      state.stage !== "bundle-ready"
+    ) {
+      return;
+    }
     if (!state.deletionToken) return;
 
     setDeleting(true);
@@ -356,7 +397,7 @@ export default function RetrievePage() {
 
   if (state.stage === "confirm") {
     const { serverMeta, clientMeta } = state.meta;
-    const isFile = clientMeta.type === "file";
+    const isFile = clientMeta.type === "file" || clientMeta.type === "bundle";
     const revealLabel = clientMeta.password_protected
       ? "Enter Password"
       : serverMeta.burn_after_read
@@ -385,7 +426,7 @@ export default function RetrievePage() {
               className="h-4 w-4 text-zinc-500 dark:text-zinc-100"
             />
             <span className="text-sm font-medium text-zinc-600 dark:text-zinc-100">
-              {isFile ? "File" : "Text"} secret
+              {clientMeta.type === "bundle" ? "File bundle" : isFile ? "File" : "Text"} secret
             </span>
           </div>
           <div className="px-4">
@@ -446,7 +487,7 @@ export default function RetrievePage() {
 
   if (state.stage === "password") {
     const isBurnAfterRead = state.meta.serverMeta.burn_after_read;
-    const isFile = state.meta.clientMeta.type === "file";
+    const isFile = state.meta.clientMeta.type === "file" || state.meta.clientMeta.type === "bundle";
     const submitLabel = isBurnAfterRead
       ? isFile
         ? "Download & Burn"
@@ -537,6 +578,114 @@ export default function RetrievePage() {
         >
           ← Share a new secret
         </a>
+      </div>
+    );
+  }
+
+  // -- Bundle ready --
+
+  if (state.stage === "bundle-ready") {
+    const { keySet, manifest, publicID, sessionToken } = state;
+    const isMulti = manifest.files.length > 1;
+
+    function saveBlob(blob: Blob, name: string) {
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = name;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    }
+
+    async function downloadFile(file: BundleFile) {
+      setDownloadingBundle(true);
+      try {
+        const fetchRange = (start: number, end: number) =>
+          retrieveSecretRange(publicID, sessionToken, start, end);
+        const blob = await decryptBundleFile(file, keySet, fetchRange);
+        saveBlob(blob, file.name);
+      } catch {
+        toast.error("Failed to download file.");
+      } finally {
+        setDownloadingBundle(false);
+      }
+    }
+
+    async function downloadAll() {
+      setDownloadingBundle(true);
+      try {
+        const fetchRange = (start: number, end: number) =>
+          retrieveSecretRange(publicID, sessionToken, start, end);
+        for (const file of manifest.files) {
+          const blob = await decryptBundleFile(file, keySet, fetchRange);
+          saveBlob(blob, file.name);
+        }
+      } catch {
+        toast.error("Failed to download files.");
+      } finally {
+        setDownloadingBundle(false);
+      }
+    }
+
+    return (
+      <div className="space-y-5">
+        <div>
+          <h1 className="font-display text-2xl font-semibold text-zinc-800 dark:text-zinc-100">
+            {isMulti ? "Files Ready" : "File Ready"}
+          </h1>
+          <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-100">{manifest.bundleName}</p>
+        </div>
+        <div className="rounded-lg border border-zinc-200 dark:border-zinc-500/50 divide-y divide-zinc-200 dark:divide-zinc-500/50 overflow-hidden">
+          {manifest.files.map((file) => (
+            <div
+              key={`${file.index}-${file.path}`}
+              data-testid={`bundle-file-${file.index}`}
+              className="flex items-center gap-3 px-4 py-3"
+            >
+              <div className="w-2 h-2 rounded-full bg-emerald-400 flex-shrink-0" />
+              <div className="flex-1 min-w-0">
+                <span className="text-sm font-medium text-zinc-600 dark:text-zinc-100 font-mono truncate block">
+                  {file.path}
+                </span>
+                <span className="text-xs text-zinc-500 dark:text-zinc-400">
+                  {formatSize(file.size)}
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => downloadFile(file)}
+                disabled={downloadingBundle}
+                className="flex-shrink-0 text-xs font-medium text-amber-600 dark:text-amber-400 hover:text-amber-500 dark:hover:text-amber-300 disabled:opacity-40 disabled:cursor-not-allowed transition-colors duration-150"
+              >
+                Download
+              </button>
+            </div>
+          ))}
+        </div>
+        {isMulti && (
+          <button
+            type="button"
+            onClick={downloadAll}
+            disabled={downloadingBundle}
+            className="flex w-full items-center justify-center gap-2 rounded-lg bg-amber-400 px-4 py-3 text-sm font-medium text-zinc-900 hover:bg-amber-300 focus:outline-none focus:ring-2 focus:ring-amber-400/50 disabled:opacity-40 disabled:cursor-not-allowed transition-all duration-150"
+          >
+            {downloadingBundle && <Spinner size="sm" className="text-zinc-700" />}
+            {downloadingBundle ? "Downloading..." : "Download All"}
+          </button>
+        )}
+        {state.deletionToken && (
+          <button
+            type="button"
+            onClick={handleDelete}
+            disabled={deleting}
+            className="flex items-center gap-2 rounded-lg border border-red-200 dark:border-red-900/40 px-4 py-2.5 text-sm text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/10 focus:outline-none focus:ring-2 focus:ring-red-500/20 disabled:opacity-40 disabled:cursor-not-allowed transition-all duration-150"
+          >
+            {deleting && <Spinner size="sm" className="text-red-500" />}
+            {deleting ? "Deleting..." : "Delete this secret"}
+          </button>
+        )}
       </div>
     );
   }

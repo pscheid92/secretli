@@ -5,6 +5,7 @@ import (
 	"io/fs"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"testing/fstest"
 
@@ -141,6 +142,54 @@ func TestMetricsAuth(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestCORSMiddlewareAllowsRangeAPIHeaders(t *testing.T) {
+	e := echo.New()
+	handler := corsMiddleware([]string{"https://app.example"})(func(c echo.Context) error {
+		c.Response().Header().Set("Content-Range", "bytes 0-1/10")
+		return c.NoContent(http.StatusPartialContent)
+	})
+
+	preflight := httptest.NewRequest(http.MethodOptions, "/api/v1/secrets/id/blob", nil)
+	preflight.Header.Set(echo.HeaderOrigin, "https://app.example")
+	preflight.Header.Set(echo.HeaderAccessControlRequestMethod, http.MethodGet)
+	preflight.Header.Set(echo.HeaderAccessControlRequestHeaders, "Authorization, Range, X-Blob-Token")
+	preflightRec := httptest.NewRecorder()
+	if err := handler(e.NewContext(preflight, preflightRec)); err != nil {
+		t.Fatalf("preflight: %v", err)
+	}
+
+	allowHeaders := preflightRec.Header().Get(echo.HeaderAccessControlAllowHeaders)
+	for _, header := range []string{"Authorization", "Range", HeaderBlobToken} {
+		if !headerListContains(allowHeaders, header) {
+			t.Fatalf("Allow-Headers %q missing %q", allowHeaders, header)
+		}
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/secrets/id/blob", nil)
+	req.Header.Set(echo.HeaderOrigin, "https://app.example")
+	rec := httptest.NewRecorder()
+	if err := handler(e.NewContext(req, rec)); err != nil {
+		t.Fatalf("request: %v", err)
+	}
+
+	exposeHeaders := rec.Header().Get(echo.HeaderAccessControlExposeHeaders)
+	for _, header := range []string{"Content-Range", "Accept-Ranges", HeaderBurnAfterRead} {
+		if !headerListContains(exposeHeaders, header) {
+			t.Fatalf("Expose-Headers %q missing %q", exposeHeaders, header)
+		}
+	}
+}
+
+func headerListContains(list, header string) bool {
+	header = strings.ToLower(header)
+	for _, item := range strings.Split(list, ",") {
+		if strings.ToLower(strings.TrimSpace(item)) == header {
+			return true
+		}
+	}
+	return false
 }
 
 // --- spaHandler tests ---

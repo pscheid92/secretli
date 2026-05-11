@@ -31,12 +31,15 @@ services:
       POSTGRES_PASSWORD: secretli
       POSTGRES_DB: secretli
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - postgres_data:/var/lib/postgresql
 
   seaweedfs:
     image: chrislusf/seaweedfs:latest
     ports:
       - "8333:8333"
+    environment:
+      AWS_ACCESS_KEY_ID: admin
+      AWS_SECRET_ACCESS_KEY: admin
     command: "server -s3 -dir=/data"
     volumes:
       - seaweedfs_data:/data
@@ -47,8 +50,14 @@ services:
       - seaweedfs
     entrypoint: >
       /bin/sh -c "
-      sleep 3;
-      curl -s -X PUT http://seaweedfs:8333/secretli;
+      for i in $$(seq 1 30); do
+        code=$$(curl -s -o /dev/null -w '%{http_code}' --aws-sigv4 'aws:amz:us-east-1:s3' --user 'admin:admin' -X PUT http://seaweedfs:8333/secretli || true);
+        if [ $$code = 200 ] || [ $$code = 409 ]; then
+          exit 0;
+        fi;
+        sleep 1;
+      done;
+      exit 1;
       "
 
 volumes:

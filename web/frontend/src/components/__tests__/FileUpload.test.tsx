@@ -17,9 +17,9 @@ function fileInput(container: HTMLElement): HTMLInputElement {
 }
 
 describe("FileUpload", () => {
-  it("accepts the largest file that fits after encryption", () => {
+  it("accepts files that fit after bundle encryption", () => {
     const onSelect = vi.fn();
-    const file = fileWithSize(MAX_FILE_UPLOAD_BYTES);
+    const file = fileWithSize(1024);
     const { container } = render(<FileUpload onSelect={onSelect} />);
 
     fireEvent.change(fileInput(container), { target: { files: [file] } });
