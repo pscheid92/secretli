@@ -6,7 +6,9 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"os"
 	"os/exec"
+	"sync"
 	"testing"
 	"time"
 
@@ -18,20 +20,65 @@ import (
 
 const testBucket = "test-bucket"
 
+type seaweedFSTestEnv struct {
+	client    *s3.Client
+	container testcontainers.Container
+	endpoint  string
+}
+
+var (
+	seaweedDockerOnce sync.Once
+	seaweedDockerErr  error
+
+	seaweedOnce sync.Once
+	seaweedEnv  seaweedFSTestEnv
+	seaweedErr  error
+)
+
+func TestMain(m *testing.M) {
+	code := m.Run()
+	if seaweedEnv.container != nil {
+		_ = seaweedEnv.container.Terminate(context.Background())
+	}
+	os.Exit(code)
+}
+
 func setupSeaweedFS(t *testing.T) *s3.Client {
+	t.Helper()
+
+	return setupSeaweedFSEnv(t).client
+}
+
+func setupSeaweedFSEnv(t *testing.T) seaweedFSTestEnv {
+	t.Helper()
+	requireDocker(t)
+	seaweedOnce.Do(startSeaweedFS)
+	if seaweedErr != nil {
+		t.Fatalf("setup seaweedfs: %v", seaweedErr)
+	}
+	return seaweedEnv
+}
+
+func requireDocker(t *testing.T) {
 	t.Helper()
 
 	if testing.Short() {
 		t.Skip("skipping integration test")
 	}
 
-	if _, err := exec.LookPath("docker"); err != nil {
-		t.Skip("skipping integration test: docker not found in PATH")
+	seaweedDockerOnce.Do(func() {
+		if _, err := exec.LookPath("docker"); err != nil {
+			seaweedDockerErr = err
+			return
+		}
+		seaweedDockerErr = exec.Command("docker", "info").Run()
+	})
+	if seaweedDockerErr != nil {
+		t.Skipf("skipping integration test: docker unavailable: %v", seaweedDockerErr)
 	}
-	if err := exec.Command("docker", "info").Run(); err != nil {
-		t.Skipf("skipping integration test: docker not available: %v", err)
-	}
+}
 
+func startSeaweedFS() {
 	ctx := context.Background()
 
 	container, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
@@ -45,26 +92,28 @@ func setupSeaweedFS(t *testing.T) *s3.Client {
 		Started: true,
 	})
 	if err != nil {
-		t.Fatalf("start seaweedfs container: %v", err)
+		seaweedErr = err
+		return
 	}
-
-	t.Cleanup(func() {
-		if err := container.Terminate(ctx); err != nil {
-			t.Logf("terminate minio container: %v", err)
-		}
-	})
+	seaweedEnv.container = container
 
 	host, err := container.Host(ctx)
 	if err != nil {
-		t.Fatalf("get seaweedfs host: %v", err)
+		seaweedErr = err
+		return
 	}
 	port, err := container.MappedPort(ctx, "8333/tcp")
 	if err != nil {
-		t.Fatalf("get seaweedfs port: %v", err)
+		seaweedErr = err
+		return
 	}
 	endpoint := net.JoinHostPort(host, port.Port())
+	seaweedEnv.endpoint = endpoint
 
-	createBucket(t, endpoint, testBucket)
+	if err := createBucket(endpoint, testBucket); err != nil {
+		seaweedErr = err
+		return
+	}
 
 	client, err := s3.NewClient(config.S3Config{
 		Endpoint:  endpoint,
@@ -75,28 +124,27 @@ func setupSeaweedFS(t *testing.T) *s3.Client {
 		Region:    "us-east-1",
 	})
 	if err != nil {
-		t.Fatalf("create S3Client: %v", err)
+		seaweedErr = err
+		return
 	}
 
-	return client
+	seaweedEnv.client = client
 }
 
-func createBucket(t *testing.T, endpoint, bucket string) {
-	t.Helper()
-
+func createBucket(endpoint, bucket string) error {
 	url := "http://" + endpoint + "/" + bucket
 	deadline := time.Now().Add(10 * time.Second)
 	var lastErr error
 	for time.Now().Before(deadline) {
 		req, err := http.NewRequest(http.MethodPut, url, nil)
 		if err != nil {
-			t.Fatalf("create bucket request: %v", err)
+			return err
 		}
 		res, err := http.DefaultClient.Do(req)
 		if err == nil {
 			_ = res.Body.Close()
 			if res.StatusCode >= 200 && res.StatusCode < 300 {
-				return
+				return nil
 			}
 			lastErr = io.ErrUnexpectedEOF
 		} else {
@@ -104,10 +152,11 @@ func createBucket(t *testing.T, endpoint, bucket string) {
 		}
 		time.Sleep(250 * time.Millisecond)
 	}
-	t.Fatalf("create seaweedfs bucket %q: %v", bucket, lastErr)
+	return lastErr
 }
 
 func TestS3Client_PutAndGet(t *testing.T) {
+	t.Parallel()
 	client := setupSeaweedFS(t)
 	ctx := context.Background()
 
@@ -134,6 +183,7 @@ func TestS3Client_PutAndGet(t *testing.T) {
 }
 
 func TestS3Client_Delete(t *testing.T) {
+	t.Parallel()
 	client := setupSeaweedFS(t)
 	ctx := context.Background()
 
@@ -161,6 +211,7 @@ func TestS3Client_Delete(t *testing.T) {
 }
 
 func TestS3Client_PutOverwrite(t *testing.T) {
+	t.Parallel()
 	client := setupSeaweedFS(t)
 	ctx := context.Background()
 
@@ -191,6 +242,7 @@ func TestS3Client_PutOverwrite(t *testing.T) {
 }
 
 func TestS3Client_LargeFile(t *testing.T) {
+	t.Parallel()
 	client := setupSeaweedFS(t)
 	ctx := context.Background()
 
@@ -224,6 +276,7 @@ func TestS3Client_LargeFile(t *testing.T) {
 }
 
 func TestS3Client_GetRange(t *testing.T) {
+	t.Parallel()
 	client := setupSeaweedFS(t)
 	ctx := context.Background()
 
@@ -267,6 +320,7 @@ func TestS3Client_GetRange(t *testing.T) {
 }
 
 func TestS3Client_GetRangeRejectsMalformedRange(t *testing.T) {
+	t.Parallel()
 	client := setupSeaweedFS(t)
 	_, err := client.GetRange(context.Background(), "range-key", 5, 4)
 	if err == nil {
@@ -275,50 +329,11 @@ func TestS3Client_GetRangeRejectsMalformedRange(t *testing.T) {
 }
 
 func TestNewS3Client_BucketNotFound(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
+	t.Parallel()
+	env := setupSeaweedFSEnv(t)
 
-	if _, err := exec.LookPath("docker"); err != nil {
-		t.Skip("skipping integration test: docker not found in PATH")
-	}
-	if err := exec.Command("docker", "info").Run(); err != nil {
-		t.Skipf("skipping integration test: docker not available: %v", err)
-	}
-
-	ctx := context.Background()
-
-	container, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
-		ContainerRequest: testcontainers.ContainerRequest{
-			Image:        "chrislusf/seaweedfs:latest",
-			ExposedPorts: []string{"8333/tcp"},
-			Cmd:          []string{"server", "-s3", "-dir=/data"},
-			WaitingFor: wait.ForListeningPort("8333/tcp").
-				WithStartupTimeout(30 * time.Second),
-		},
-		Started: true,
-	})
-	if err != nil {
-		t.Fatalf("start seaweedfs container: %v", err)
-	}
-	t.Cleanup(func() {
-		if err := container.Terminate(ctx); err != nil {
-			t.Logf("terminate minio container: %v", err)
-		}
-	})
-
-	host, err := container.Host(ctx)
-	if err != nil {
-		t.Fatalf("get seaweedfs host: %v", err)
-	}
-	port, err := container.MappedPort(ctx, "8333/tcp")
-	if err != nil {
-		t.Fatalf("get seaweedfs port: %v", err)
-	}
-	endpoint := net.JoinHostPort(host, port.Port())
-
-	_, err = s3.NewClient(config.S3Config{
-		Endpoint:  endpoint,
+	_, err := s3.NewClient(config.S3Config{
+		Endpoint:  env.endpoint,
 		Bucket:    "nonexistent-bucket",
 		AccessKey: "admin",
 		SecretKey: "admin",

@@ -2,7 +2,9 @@ package postgres_test
 
 import (
 	"context"
+	"os"
 	"os/exec"
+	"sync"
 	"testing"
 	"time"
 
@@ -13,20 +15,64 @@ import (
 	"github.com/testcontainers/testcontainers-go/wait"
 )
 
+var (
+	testDBDockerOnce sync.Once
+	testDBDockerErr  error
+
+	testDBOnce      sync.Once
+	testDBErr       error
+	testDBMu        sync.Mutex
+	testDBPool      *pgxpool.Pool
+	testDBContainer *tcpostgres.PostgresContainer
+)
+
+func TestMain(m *testing.M) {
+	code := m.Run()
+	if testDBPool != nil {
+		testDBPool.Close()
+	}
+	if testDBContainer != nil {
+		_ = testDBContainer.Terminate(context.Background())
+	}
+	os.Exit(code)
+}
+
 func setupTestDB(t *testing.T) *pgxpool.Pool {
+	t.Helper()
+
+	requireDocker(t)
+	testDBMu.Lock()
+	t.Cleanup(testDBMu.Unlock)
+
+	testDBOnce.Do(startTestDB)
+	if testDBErr != nil {
+		t.Fatalf("setup postgres test database: %v", testDBErr)
+	}
+
+	resetTestDB(t, testDBPool)
+	return testDBPool
+}
+
+func requireDocker(t *testing.T) {
 	t.Helper()
 
 	if testing.Short() {
 		t.Skip("skipping integration test")
 	}
 
-	if _, err := exec.LookPath("docker"); err != nil {
-		t.Skip("skipping integration test: docker not found in PATH")
+	testDBDockerOnce.Do(func() {
+		if _, err := exec.LookPath("docker"); err != nil {
+			testDBDockerErr = err
+			return
+		}
+		testDBDockerErr = exec.Command("docker", "info").Run()
+	})
+	if testDBDockerErr != nil {
+		t.Skipf("skipping integration test: docker unavailable: %v", testDBDockerErr)
 	}
-	if err := exec.Command("docker", "info").Run(); err != nil {
-		t.Skipf("skipping integration test: docker not available: %v", err)
-	}
+}
 
+func startTestDB() {
 	ctx := context.Background()
 
 	pgContainer, err := tcpostgres.Run(ctx,
@@ -43,32 +89,32 @@ func setupTestDB(t *testing.T) *pgxpool.Pool {
 		),
 	)
 	if err != nil {
-		t.Fatalf("start postgres container: %v", err)
+		testDBErr = err
+		return
 	}
-
-	t.Cleanup(func() {
-		if err := pgContainer.Terminate(ctx); err != nil {
-			t.Logf("terminate postgres container: %v", err)
-		}
-	})
+	testDBContainer = pgContainer
 
 	connStr, err := pgContainer.ConnectionString(ctx, "sslmode=disable")
 	if err != nil {
-		t.Fatalf("get connection string: %v", err)
+		testDBErr = err
+		return
 	}
 
 	pool, err := pgxpool.New(ctx, connStr)
 	if err != nil {
-		t.Fatalf("create pool: %v", err)
+		testDBErr = err
+		return
 	}
+	testDBPool = pool
 
 	if err := pgadapter.RunMigrations(ctx, pool); err != nil {
-		t.Fatalf("run migrations: %v", err)
+		testDBErr = err
 	}
+}
 
-	t.Cleanup(func() {
-		pool.Close()
-	})
-
-	return pool
+func resetTestDB(t *testing.T, pool *pgxpool.Pool) {
+	t.Helper()
+	if _, err := pool.Exec(context.Background(), "TRUNCATE retrieval_sessions, secrets RESTART IDENTITY CASCADE"); err != nil {
+		t.Fatalf("reset postgres test database: %v", err)
+	}
 }
