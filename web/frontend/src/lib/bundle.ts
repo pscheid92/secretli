@@ -4,6 +4,7 @@ export const BUNDLE_HEADER_LENGTH = 64;
 export const DEFAULT_BUNDLE_CHUNK_SIZE = 4 * 1024 * 1024;
 export const BUNDLE_RECORD_OVERHEAD_BYTES = 24 + 16;
 export const MAX_BUNDLE_COALESCED_PLAINTEXT_BYTES = 16 * 1024 * 1024;
+export const DOWNLOAD_ALL_BUNDLE_COALESCED_PLAINTEXT_BYTES = 64 * 1024 * 1024;
 export const MAX_BUNDLE_MANIFEST_BYTES = 256 * 1024;
 
 const BUNDLE_MAGIC = new Uint8Array([0x53, 0x4c, 0x42, 0x4e, 0x44, 0x4c, 0x31, 0x00]);
@@ -39,13 +40,27 @@ export interface BundleHeader {
   readonly manifestLength: number;
 }
 
+export interface DecryptedBundleFile {
+  readonly file: BundleFile;
+  readonly blob: Blob;
+}
+
+export interface DecryptBundleFilesOptions {
+  readonly maxCoalescedPlaintextBytes?: number;
+}
+
 export type BundleRangeFetcher = (start: number, end: number) => Promise<Uint8Array>;
 
 interface BundleChunkGroup {
-  readonly chunks: BundleChunk[];
+  readonly chunks: BundleChunkRef[];
   readonly offset: number;
   length: number;
   plaintextSize: number;
+}
+
+interface BundleChunkRef {
+  readonly file: BundleFile;
+  readonly chunk: BundleChunk;
 }
 
 export async function createEncryptedBundle(
@@ -147,16 +162,32 @@ export async function decryptBundleFile(
   keySet: KeySet,
   fetchRange: BundleRangeFetcher,
 ): Promise<Blob> {
-  const parts: BlobPart[] = [];
+  const [decrypted] = await decryptBundleFiles([file], keySet, fetchRange);
+  return decrypted.blob;
+}
 
-  for (const group of coalesceChunks(file.chunks)) {
+export async function decryptBundleFiles(
+  files: readonly BundleFile[],
+  keySet: KeySet,
+  fetchRange: BundleRangeFetcher,
+  options: DecryptBundleFilesOptions = {},
+): Promise<DecryptedBundleFile[]> {
+  const partsByFile = files.map(() => [] as BlobPart[]);
+  const fileIndexes = new Map(files.map((file, index) => [file.index, index]));
+  const refs = files
+    .flatMap((file) => file.chunks.map((chunk) => ({ file, chunk })))
+    .sort((a, b) => a.chunk.offset - b.chunk.offset);
+  const maxCoalescedPlaintextBytes =
+    options.maxCoalescedPlaintextBytes ?? MAX_BUNDLE_COALESCED_PLAINTEXT_BYTES;
+
+  for (const group of coalesceChunks(refs, maxCoalescedPlaintextBytes)) {
     const encryptedGroup = await fetchRange(group.offset, rangeEnd(group.offset, group.length));
     if (encryptedGroup.length !== group.length) {
       throw new Error("bundle range size mismatch");
     }
 
     let cursor = 0;
-    for (const chunk of group.chunks) {
+    for (const { file, chunk } of group.chunks) {
       const encrypted = encryptedGroup.subarray(cursor, cursor + chunk.length);
       const plaintext = keySet.decryptBundlePart(
         encrypted,
@@ -165,11 +196,19 @@ export async function decryptBundleFile(
       if (plaintext.length !== chunk.plaintextSize) {
         throw new Error("bundle chunk size mismatch");
       }
-      parts.push(toArrayBuffer(plaintext));
+      const fileIndex = fileIndexes.get(file.index);
+      if (fileIndex === undefined) {
+        throw new Error("invalid bundle file");
+      }
+      partsByFile[fileIndex].push(toArrayBuffer(plaintext));
       cursor += chunk.length;
     }
   }
-  return new Blob(parts, { type: file.type || "application/octet-stream" });
+
+  return files.map((file, index) => ({
+    file,
+    blob: new Blob(partsByFile[index], { type: file.type || "application/octet-stream" }),
+  }));
 }
 
 export function estimateBundleEncryptedSize(fileSizes: number[]): number {
@@ -283,18 +322,22 @@ function validateManifest(manifest: BundleManifest, header: BundleHeader, bundle
   }
 }
 
-function coalesceChunks(chunks: readonly BundleChunk[]): BundleChunkGroup[] {
+function coalesceChunks(
+  chunks: readonly BundleChunkRef[],
+  maxPlaintextBytes: number,
+): BundleChunkGroup[] {
   const groups: BundleChunkGroup[] = [];
 
-  for (const chunk of chunks) {
+  for (const chunkRef of chunks) {
+    const { chunk } = chunkRef;
     const previous = groups.at(-1);
     if (
       !previous ||
       chunk.offset !== previous.offset + previous.length ||
-      previous.plaintextSize + chunk.plaintextSize > MAX_BUNDLE_COALESCED_PLAINTEXT_BYTES
+      previous.plaintextSize + chunk.plaintextSize > maxPlaintextBytes
     ) {
       groups.push({
-        chunks: [chunk],
+        chunks: [chunkRef],
         offset: chunk.offset,
         length: chunk.length,
         plaintextSize: chunk.plaintextSize,
@@ -302,7 +345,7 @@ function coalesceChunks(chunks: readonly BundleChunk[]): BundleChunkGroup[] {
       continue;
     }
 
-    previous.chunks.push(chunk);
+    previous.chunks.push(chunkRef);
     previous.length += chunk.length;
     previous.plaintextSize += chunk.plaintextSize;
   }

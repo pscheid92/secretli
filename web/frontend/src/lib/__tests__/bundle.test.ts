@@ -1,7 +1,11 @@
 import {
+  BUNDLE_HEADER_LENGTH,
+  type BundleFile,
   createEncryptedBundle,
   DEFAULT_BUNDLE_CHUNK_SIZE,
+  DOWNLOAD_ALL_BUNDLE_COALESCED_PLAINTEXT_BYTES,
   decryptBundleFile,
+  decryptBundleFiles,
   readBundleManifest,
 } from "../bundle";
 import { KeySet } from "../encryption";
@@ -85,6 +89,41 @@ describe("encrypted bundles", () => {
     expect(decryptedBytes[0]).toBe(1);
     expect(decryptedBytes[DEFAULT_BUNDLE_CHUNK_SIZE]).toBe(2);
     expect(decryptedBytes[decryptedBytes.length - 1]).toBe(3);
+  });
+
+  it("uses the download-all coalescing option", async () => {
+    const ranges: Array<[number, number]> = [];
+    const file: BundleFile = {
+      index: 0,
+      path: "alpha.bin",
+      name: "alpha.bin",
+      type: "application/octet-stream",
+      size: 6,
+      chunks: Array.from({ length: 6 }, (_, index) => ({
+        index,
+        offset: BUNDLE_HEADER_LENGTH + index,
+        length: 1,
+        plaintextSize: 1,
+      })),
+    };
+    const fakeKeySet = {
+      decryptBundlePart: () => new Uint8Array([1]),
+    } as unknown as KeySet;
+    const recordingRange = async (start: number, end: number) => {
+      ranges.push([start, end]);
+      return new Uint8Array(end - start + 1);
+    };
+
+    const decrypted = await decryptBundleFiles([file], fakeKeySet, recordingRange, {
+      maxCoalescedPlaintextBytes: 4,
+    });
+
+    expect(DOWNLOAD_ALL_BUNDLE_COALESCED_PLAINTEXT_BYTES).toBe(64 * 1024 * 1024);
+    expect(ranges).toEqual([
+      [BUNDLE_HEADER_LENGTH, BUNDLE_HEADER_LENGTH + 3],
+      [BUNDLE_HEADER_LENGTH + 4, BUNDLE_HEADER_LENGTH + 5],
+    ]);
+    await expect(decrypted[0].blob.arrayBuffer()).resolves.toHaveProperty("byteLength", 6);
   });
 
   it("rejects a manifest range outside the reported bundle size", async () => {
