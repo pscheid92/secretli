@@ -1,12 +1,3 @@
-import { hkdf } from "@noble/hashes/hkdf.js";
-import { sha512 } from "@noble/hashes/sha2.js";
-
-const enc = new TextEncoder();
-
-function deriveLabel(secret: Uint8Array, name: string, len = 32): Uint8Array {
-  return hkdf(sha512, secret, undefined, enc.encode(`secretli:derivation:v1:${name}`), len);
-}
-
 import { base64UrlDecode, base64UrlEncode } from "../base64";
 import { ENCRYPTED_BLOB_OVERHEAD_BYTES, KeySet } from "../encryption";
 
@@ -73,9 +64,9 @@ describe("KeySet", () => {
       expect(decrypted).toEqual(meta);
     });
 
-    it("round-trips file metadata with filename", async () => {
+    it("round-trips bundle metadata with bundle name", async () => {
       const ks = await KeySet.generateRandom();
-      const meta = { type: "file" as const, password_protected: true, filename: "report.pdf" };
+      const meta = { type: "bundle" as const, password_protected: true, bundle_name: "files" };
       const envelope = await ks.encryptMeta(meta);
       const decrypted = await ks.decryptMeta(envelope);
       expect(decrypted).toEqual(meta);
@@ -123,7 +114,7 @@ describe("KeySet", () => {
 
     it("can decrypt metadata encrypted by the original keyset", async () => {
       const original = await KeySet.generateRandom();
-      const meta = { type: "file" as const, password_protected: false, filename: "test.txt" };
+      const meta = { type: "bundle" as const, password_protected: false, bundle_name: "files" };
       const envelope = await original.encryptMeta(meta);
 
       const restored = await KeySet.fromShareSecret(original.getEncoded().shareSecret);
@@ -251,62 +242,23 @@ describe("KeySet", () => {
     });
   });
 
-  describe("v1 envelope compatibility", () => {
-    // Helper to create v1-formatted encrypted meta using Web Crypto AES-GCM
-    async function createV1Meta(
-      encryptionKey: Uint8Array,
-      meta: { type: string; password_protected: boolean },
-    ): Promise<string> {
-      const nonce = crypto.getRandomValues(new Uint8Array(12));
-      const plaintext = new TextEncoder().encode(JSON.stringify(meta));
-      const keyBuf = new ArrayBuffer(encryptionKey.length);
-      new Uint8Array(keyBuf).set(encryptionKey);
-      const key = await crypto.subtle.importKey("raw", keyBuf, "AES-GCM", false, ["encrypt"]);
-      const ciphertext = await crypto.subtle.encrypt(
-        { name: "AES-GCM", iv: nonce },
-        key,
-        plaintext,
+  describe("old envelope rejection", () => {
+    it("rejects v1 metadata envelopes", async () => {
+      const ks = await KeySet.generateRandom();
+      const nonce = base64UrlEncode(crypto.getRandomValues(new Uint8Array(12)));
+      const ciphertext = base64UrlEncode(new TextEncoder().encode("ciphertext"));
+
+      await expect(ks.decryptMeta(`v1$${nonce}$${ciphertext}`)).rejects.toThrow(
+        "invalid metadata envelope format",
       );
-      return `v1$${base64UrlEncode(nonce)}$${base64UrlEncode(new Uint8Array(ciphertext))}`;
-    }
-
-    // Helper to create v1-formatted encrypted blob using Web Crypto AES-GCM
-    async function createV1Blob(encryptionKey: Uint8Array, data: Uint8Array): Promise<Blob> {
-      const nonce = crypto.getRandomValues(new Uint8Array(12));
-      const keyBuf = new ArrayBuffer(encryptionKey.length);
-      new Uint8Array(keyBuf).set(encryptionKey);
-      const key = await crypto.subtle.importKey("raw", keyBuf, "AES-GCM", false, ["encrypt"]);
-      const dataBuf = data.buffer.slice(
-        data.byteOffset,
-        data.byteOffset + data.byteLength,
-      ) as ArrayBuffer;
-      const ciphertext = await crypto.subtle.encrypt({ name: "AES-GCM", iv: nonce }, key, dataBuf);
-      return new Blob([nonce, ciphertext]);
-    }
-
-    it("decrypts v1-encrypted meta", async () => {
-      const shareSecret = crypto.getRandomValues(new Uint8Array(32));
-      const encryptionKey = deriveLabel(shareSecret, "meta_key");
-
-      const meta = { type: "text" as const, password_protected: false };
-      const v1Envelope = await createV1Meta(encryptionKey, meta);
-      expect(v1Envelope.startsWith("v1$")).toBe(true);
-
-      const ks = await KeySet.fromShareSecret(base64UrlEncode(shareSecret));
-      const decrypted = await ks.decryptMeta(v1Envelope);
-      expect(decrypted).toEqual(meta);
     });
 
-    it("decrypts v1-encrypted blob", async () => {
-      const shareSecret = crypto.getRandomValues(new Uint8Array(32));
-      const encryptionKey = deriveLabel(shareSecret, "blob_key");
+    it("rejects untagged blobs", async () => {
+      const ks = await KeySet.generateRandom();
 
-      const data = new TextEncoder().encode("v1 encrypted data");
-      const v1Blob = await createV1Blob(encryptionKey, data);
-
-      const ks = await KeySet.fromShareSecret(base64UrlEncode(shareSecret));
-      const decrypted = await ks.decryptBlob(v1Blob);
-      expect(new TextDecoder().decode(decrypted)).toBe("v1 encrypted data");
+      await expect(ks.decryptBlob(new Blob([new Uint8Array(32)]))).rejects.toThrow(
+        "invalid blob format",
+      );
     });
   });
 });

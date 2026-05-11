@@ -4,7 +4,6 @@ import {
   createEncryptedBundle,
   DEFAULT_BUNDLE_CHUNK_SIZE,
   DOWNLOAD_ALL_BUNDLE_COALESCED_PLAINTEXT_BYTES,
-  decryptBundleFile,
   decryptBundleFiles,
   readBundleManifest,
 } from "../bundle";
@@ -32,7 +31,7 @@ describe("encrypted bundles", () => {
     expect(manifest.files).toHaveLength(1);
     expect(manifest.files[0].path).toBe("notes.txt");
 
-    const decrypted = await decryptBundleFile(manifest.files[0], keySet, fetchRange);
+    const [{ blob: decrypted }] = await decryptBundleFiles(manifest.files, keySet, fetchRange);
     await expect(decrypted.text()).resolves.toBe("hello bundle");
   });
 
@@ -72,7 +71,7 @@ describe("encrypted bundles", () => {
       return bytes.slice(start, end + 1);
     };
 
-    const decrypted = await decryptBundleFile(fileManifest, keySet, recordingRange);
+    const [{ blob: decrypted }] = await decryptBundleFiles([fileManifest], keySet, recordingRange);
     const decryptedBytes = await blobBytes(decrypted);
 
     expect(fileManifest.chunks).toHaveLength(5);
@@ -151,12 +150,9 @@ describe("encrypted bundles", () => {
     const { manifest } = await readBundleManifest(fetchRange, keySet);
     expect(manifest.files.map((file) => file.path)).toEqual(["a.txt", "b.txt"]);
 
-    await expect(
-      decryptBundleFile(manifest.files[0], keySet, fetchRange).then((b) => b.text()),
-    ).resolves.toBe("alpha");
-    await expect(
-      decryptBundleFile(manifest.files[1], keySet, fetchRange).then((b) => b.text()),
-    ).resolves.toBe("bravo");
+    const decrypted = await decryptBundleFiles(manifest.files, keySet, fetchRange);
+    await expect(decrypted[0].blob.text()).resolves.toBe("alpha");
+    await expect(decrypted[1].blob.text()).resolves.toBe("bravo");
   });
 
   it("rejects tampered chunks", async () => {
@@ -171,6 +167,6 @@ describe("encrypted bundles", () => {
     tampered[chunk.offset] ^= 1;
     const tamperedRange = async (start: number, end: number) => tampered.slice(start, end + 1);
 
-    await expect(decryptBundleFile(manifest.files[0], keySet, tamperedRange)).rejects.toThrow();
+    await expect(decryptBundleFiles([manifest.files[0]], keySet, tamperedRange)).rejects.toThrow();
   });
 });

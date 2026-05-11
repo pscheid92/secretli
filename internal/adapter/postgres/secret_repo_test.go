@@ -19,7 +19,7 @@ func newTestSecret(publicID string, expiresAt time.Time) *domain.Secret {
 		MetadataTokenHash: tokencrypto.TokenHash("metadata-token-" + publicID),
 		BlobTokenHash:     tokencrypto.TokenHash("blob-token-" + publicID),
 		DeletionTokenHash: tokencrypto.TokenHash("deletion-token-" + publicID),
-		EncryptedMeta:     "v1$nonce$meta-" + publicID,
+		EncryptedMeta:     "v2$nonce$meta-" + publicID,
 		BlobSize:          1024,
 		BurnAfterRead:     false,
 		ExpiresAt:         expiresAt,
@@ -60,8 +60,8 @@ func TestSecretRepo_CreateAndGet(t *testing.T) {
 	if got.DeletionTokenHash != tokencrypto.TokenHash("deletion-token-pub-001") {
 		t.Errorf("deletion_token_hash = %q, want hash", got.DeletionTokenHash)
 	}
-	if got.EncryptedMeta != "v1$nonce$meta-pub-001" {
-		t.Errorf("encrypted_meta = %q, want %q", got.EncryptedMeta, "v1$nonce$meta-pub-001")
+	if got.EncryptedMeta != "v2$nonce$meta-pub-001" {
+		t.Errorf("encrypted_meta = %q, want %q", got.EncryptedMeta, "v2$nonce$meta-pub-001")
 	}
 	if got.BlobSize != 1024 {
 		t.Errorf("blob_size = %d, want %d", got.BlobSize, 1024)

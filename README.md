@@ -79,7 +79,6 @@ LARGE_E2E_SIZE_MB=99 make e2e-large
 ```
 
 It uploads and downloads a synthetic near-limit file, verifies the SHA-256 hash, and prints timing and browser heap samples. GitHub Actions also has a manual **Large E2E** workflow for this check.
-Set `LARGE_E2E_MODE=legacy` to point the same test at a pre-bundle app and compare the old full-blob retrieve path.
 
 ## Tech Stack
 

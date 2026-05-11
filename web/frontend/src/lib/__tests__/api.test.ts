@@ -91,7 +91,7 @@ describe("createSecret", () => {
       metadata_token: "meta-tok",
       blob_token: "blob-tok",
       deletion_token: "del-tok",
-      encrypted_meta: "v1$nonce$ciphertext",
+      encrypted_meta: "v2$nonce$ciphertext",
       expiration: "5m",
       burn_after_read: true,
     };
@@ -245,7 +245,7 @@ describe("getSecretMetadata", () => {
 
   it("returns metadata with encrypted_meta", async () => {
     const mockResponse = {
-      encrypted_meta: "v1$nonce$cipher",
+      encrypted_meta: "v2$nonce$cipher",
       blob_size: 2048,
       burn_after_read: false,
       expires_at: "2026-03-01T00:00:00Z",

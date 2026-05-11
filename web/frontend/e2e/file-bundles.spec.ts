@@ -64,21 +64,26 @@ async function revealBundle(page: Page, shareUrl: string, password?: string) {
   }
 }
 
-async function downloadTextFile(
+async function downloadBundleFiles(
   page: Page,
-  rowIndex: number,
-  filename: string,
-  outputPath: string,
-): Promise<string> {
-  const downloadPromise = page.waitForEvent("download");
+  files: TestFile[],
+  outputPath: (filename: string) => string,
+) {
+  const downloads: Download[] = [];
+  page.on("download", (download) => downloads.push(download));
+
   await page
-    .getByTestId(`bundle-file-${rowIndex}`)
-    .getByRole("button", { name: "Download" })
+    .getByRole("button", { name: files.length > 1 ? "Download All" : "Download File" })
     .click();
-  const download = await downloadPromise;
-  expect(download.suggestedFilename()).toBe(filename);
-  await download.saveAs(outputPath);
-  return readFile(outputPath, "utf8");
+  await expect.poll(() => downloads.length, { timeout: 10000 }).toBe(files.length);
+
+  for (const [index, file] of files.entries()) {
+    const download = downloads[index];
+    expect(download.suggestedFilename()).toBe(file.name);
+    const path = outputPath(file.name);
+    await download.saveAs(path);
+    await expect(readFile(path, "utf8")).resolves.toBe(file.contents);
+  }
 }
 
 test.describe("File bundle sharing", () => {
@@ -95,35 +100,10 @@ test.describe("File bundle sharing", () => {
     await expect(page.locator("h1")).toHaveText("File Ready", { timeout: 10000 });
     await expect(page.getByTestId("bundle-file-0").getByText(file.name)).toBeVisible();
 
-    const downloaded = await downloadTextFile(page, 0, file.name, testInfo.outputPath(file.name));
-    expect(downloaded).toBe(file.contents);
+    await downloadBundleFiles(page, [file], (filename) => testInfo.outputPath(filename));
   });
 
-  test("creates and retrieves a multi-file bundle", async ({ page }, testInfo) => {
-    const files = [
-      { name: "alpha.txt", mimeType: "text/plain", contents: "alpha contents" },
-      { name: "bravo.txt", mimeType: "text/plain", contents: "bravo contents" },
-    ];
-
-    const shareUrl = await createFileSecret(page, files);
-    await revealBundle(page, shareUrl);
-
-    await expect(page.locator("h1")).toHaveText("Files Ready", { timeout: 10000 });
-    await expect(page.getByText("alpha.txt")).toBeVisible();
-    await expect(page.getByText("bravo.txt")).toBeVisible();
-
-    for (const [index, file] of files.entries()) {
-      const downloaded = await downloadTextFile(
-        page,
-        index,
-        file.name,
-        testInfo.outputPath(file.name),
-      );
-      expect(downloaded).toBe(file.contents);
-    }
-  });
-
-  test("downloads all files from a bundle", async ({ page }, testInfo) => {
+  test("creates and downloads a multi-file bundle", async ({ page }, testInfo) => {
     const files = [
       { name: "all-alpha.txt", mimeType: "text/plain", contents: "download all alpha" },
       { name: "all-bravo.txt", mimeType: "text/plain", contents: "download all bravo" },
@@ -132,19 +112,10 @@ test.describe("File bundle sharing", () => {
     const shareUrl = await createFileSecret(page, files);
     await revealBundle(page, shareUrl);
     await expect(page.locator("h1")).toHaveText("Files Ready", { timeout: 10000 });
+    await expect(page.getByText("all-alpha.txt")).toBeVisible();
+    await expect(page.getByText("all-bravo.txt")).toBeVisible();
 
-    const downloads: Download[] = [];
-    page.on("download", (download) => downloads.push(download));
-    await page.getByRole("button", { name: "Download All" }).click();
-    await expect.poll(() => downloads.length, { timeout: 10000 }).toBe(files.length);
-
-    for (const [index, file] of files.entries()) {
-      const download = downloads[index];
-      expect(download.suggestedFilename()).toBe(file.name);
-      const outputPath = testInfo.outputPath(file.name);
-      await download.saveAs(outputPath);
-      await expect(readFile(outputPath, "utf8")).resolves.toBe(file.contents);
-    }
+    await downloadBundleFiles(page, files, (filename) => testInfo.outputPath(filename));
   });
 
   test("requires password before listing a protected bundle", async ({ page }, testInfo) => {
@@ -159,8 +130,7 @@ test.describe("File bundle sharing", () => {
     await revealBundle(page, shareUrl, password);
 
     await expect(page.locator("h1")).toHaveText("File Ready", { timeout: 10000 });
-    const downloaded = await downloadTextFile(page, 0, file.name, testInfo.outputPath(file.name));
-    expect(downloaded).toBe(file.contents);
+    await downloadBundleFiles(page, [file], (filename) => testInfo.outputPath(filename));
   });
 
   test("burn-after-read bundle cannot start a second retrieval session", async ({

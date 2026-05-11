@@ -10,7 +10,6 @@ const (
 	TokenLength           = 43
 	EncryptedMetaMaxBytes = 8192
 
-	metadataV1NonceLength = 12
 	metadataV2NonceLength = 24
 )
 
@@ -32,18 +31,12 @@ func ValidEncryptedMeta(envelope string) bool {
 		return false
 	}
 
-	wantNonceLength := 0
-	switch parts[0] {
-	case "v1":
-		wantNonceLength = metadataV1NonceLength
-	case "v2":
-		wantNonceLength = metadataV2NonceLength
-	default:
+	if parts[0] != "v2" {
 		return false
 	}
 
 	nonce, err := base64.RawURLEncoding.DecodeString(parts[1])
-	if err != nil || len(nonce) != wantNonceLength {
+	if err != nil || len(nonce) != metadataV2NonceLength {
 		return false
 	}
 
