@@ -33,32 +33,85 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: 24
+          cache: pnpm
+          cache-dependency-path: web/frontend/pnpm-lock.yaml
 
       - uses: pnpm/action-setup@v5
         with:
           version: 10
           run_install: false
 
-      - name: Start Secretli stack
+      - name: Install frontend dependencies
+        working-directory: web/frontend
+        run: pnpm install --frozen-lockfile
+
+      - name: Build frontend
+        working-directory: web/frontend
+        run: pnpm build
+
+      - name: Playwright version
+        id: playwright-version
+        working-directory: web/frontend
+        run: echo "version=$(node -p "require('./node_modules/@playwright/test/package.json').version")" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-chromium-${{ steps.playwright-version.outputs.version }}
+
+      - name: Install Playwright browser
+        working-directory: web/frontend
+        run: pnpm exec playwright install chromium
+
+      - name: Start E2E dependencies
         run: |
-          docker compose -f docker/docker-compose.yml up -d --build app
+          docker compose -f docker/docker-compose.dev.yml up -d postgres seaweedfs
+          for i in {1..60}; do
+            if docker compose -f docker/docker-compose.dev.yml exec -T postgres pg_isready -U secretli >/dev/null; then
+              break
+            fi
+            sleep 1
+          done
+          for i in {1..60}; do
+            code=$(curl -s -o /dev/null -w '%{http_code}' --aws-sigv4 'aws:amz:us-east-1:s3' --user 'admin:admin' -X PUT http://localhost:8333/secretli || true)
+            if [ "$code" = "200" ] || [ "$code" = "409" ]; then
+              exit 0
+            fi
+            sleep 1
+          done
+          docker compose -f docker/docker-compose.dev.yml ps
+          docker compose -f docker/docker-compose.dev.yml logs
+          exit 1
+
+      - name: Build app
+        run: go build -o bin/secretli-e2e .
+
+      - name: Start app
+        env:
+          DATABASE_URL: postgres://secretli:secretli@localhost:5432/secretli?sslmode=disable
+          S3_ENDPOINT: localhost:8333
+          S3_BUCKET: secretli
+          S3_ACCESS_KEY: admin
+          S3_SECRET_KEY: admin
+          S3_USE_SSL: "false"
+          S3_REGION: us-east-1
+          SERVER_PORT: "8080"
+          COOKIE_SECURE: "false"
+          COOKIE_DOMAIN: ""
+        run: |
+          ./bin/secretli-e2e > secretli-e2e.log 2>&1 &
+          echo $! > secretli-e2e.pid
           for i in {1..60}; do
             if curl -fsS http://localhost:8080/api/v1/health/ready >/dev/null; then
               exit 0
             fi
             sleep 1
           done
-          docker compose -f docker/docker-compose.yml ps
-          docker compose -f docker/docker-compose.yml logs
+          cat secretli-e2e.log || true
+          docker compose -f docker/docker-compose.dev.yml ps
+          docker compose -f docker/docker-compose.dev.yml logs
           exit 1
-
-      - name: Install frontend dependencies
-        working-directory: web/frontend
-        run: pnpm install --frozen-lockfile
-
-      - name: Install Playwright browser
-        working-directory: web/frontend
-        run: pnpm exec playwright install --with-deps chromium
 
       - name: Large-file Playwright E2E
         working-directory: web/frontend
@@ -70,8 +123,12 @@ jobs:
 
       - name: Secretli logs
         if: always()
-        run: docker compose -f docker/docker-compose.yml logs app || true
+        run: |
+          cat secretli-e2e.log || true
+          docker compose -f docker/docker-compose.dev.yml logs postgres seaweedfs || true
 
       - name: Stop services
         if: always()
-        run: docker compose -f docker/docker-compose.yml down -v
+        run: |
+          if [ -f secretli-e2e.pid ]; then kill "$(cat secretli-e2e.pid)" || true; fi
+          docker compose -f docker/docker-compose.dev.yml down -v
