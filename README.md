@@ -110,7 +110,6 @@ The CI pipeline builds a minimal Docker image (distroless) and publishes it to G
 
 ```
 ghcr.io/pscheid92/secretli:main
-ghcr.io/pscheid92/secretli:<version>
 ghcr.io/pscheid92/secretli:sha-<commit>
 ```
 
