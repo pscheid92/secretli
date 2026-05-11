@@ -20,14 +20,16 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - uses: actions/setup-node@v6
-        with:
-          node-version: 24
-
       - uses: pnpm/action-setup@v5
         with:
           version: 10
           run_install: false
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: web/frontend/pnpm-lock.yaml
 
       - name: Create frontend dist stub
         run: mkdir -p web/frontend/dist && touch web/frontend/dist/.gitkeep
@@ -52,14 +54,16 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - uses: actions/setup-node@v6
-        with:
-          node-version: 24
-
       - uses: pnpm/action-setup@v5
         with:
           version: 10
           run_install: false
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: web/frontend/pnpm-lock.yaml
 
       - name: Go tests
         run: |
@@ -82,14 +86,16 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - uses: actions/setup-node@v6
-        with:
-          node-version: 24
-
       - uses: pnpm/action-setup@v5
         with:
           version: 10
           run_install: false
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: web/frontend/pnpm-lock.yaml
 
       - name: Start Secretli stack
         run: |
@@ -107,6 +113,14 @@ jobs:
       - name: Install frontend dependencies
         working-directory: web/frontend
         run: pnpm install --frozen-lockfile
+
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('web/frontend/pnpm-lock.yaml') }}
+          restore-keys: |
+            playwright-${{ runner.os }}-
 
       - name: Install Playwright browser
         working-directory: web/frontend
