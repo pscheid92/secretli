@@ -5,6 +5,8 @@ import {
   deleteSecret,
   getSecretMetadata,
   retrieveSecret,
+  retrieveSecretRange,
+  startRetrievalSession,
 } from "../api";
 
 describe("ApiError", () => {
@@ -174,6 +176,65 @@ describe("retrieveSecret", () => {
       expect(e).toBeInstanceOf(ApiError);
       expect((e as ApiError).status).toBe(0);
     }
+  });
+});
+
+describe("retrieval sessions", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("starts a retrieval session with blob token header", async () => {
+    const response = {
+      session_token: "session-token",
+      blob_size: 123,
+      expires_at: "2026-05-11T12:00:00Z",
+      burn_after_read: true,
+    };
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(new Response(JSON.stringify(response), { status: 201 }));
+
+    await expect(startRetrievalSession("pub-id", "blob-token")).resolves.toEqual(response);
+    expect(fetchSpy).toHaveBeenCalledWith(
+      "/api/v1/secrets/pub-id/retrieval-session",
+      expect.objectContaining({
+        method: "POST",
+        headers: { "X-Blob-Token": "blob-token" },
+      }),
+    );
+  });
+
+  it("retrieves a byte range with bearer session and range headers", async () => {
+    const bytes = new Uint8Array([1, 2, 3]);
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(bytes, {
+        status: 206,
+        headers: { "Content-Range": "bytes 5-7/20" },
+      }),
+    );
+
+    const result = await retrieveSecretRange("pub-id", "session-token", 5, 7);
+    expect(result).toEqual(bytes);
+    expect(fetchSpy).toHaveBeenCalledWith(
+      "/api/v1/secrets/pub-id/blob",
+      expect.objectContaining({
+        method: "GET",
+        headers: {
+          Authorization: "Bearer session-token",
+          Range: "bytes=5-7",
+        },
+      }),
+    );
+  });
+
+  it("rejects non-partial range responses", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(new Uint8Array([1, 2, 3])));
+
+    await expect(retrieveSecretRange("pub-id", "session-token", 5, 7)).rejects.toMatchObject({
+      status: 200,
+      message: "Expected partial content response (200)",
+    });
   });
 });
 

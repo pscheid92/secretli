@@ -8,9 +8,10 @@ import SecretResult from "../components/SecretResult";
 import Spinner from "../components/Spinner";
 import Toggle from "../components/Toggle";
 import { ApiError, createSecret } from "../lib/api";
+import { createEncryptedBundle } from "../lib/bundle";
 import { KeySet } from "../lib/encryption";
 import {
-  fitsEncryptedUploadLimit,
+  fitsBundleUploadLimit,
   MAX_ENCRYPTED_UPLOAD_BYTES,
   MAX_UPLOAD_LABEL,
 } from "../lib/uploadLimits";
@@ -74,21 +75,13 @@ export default function FilePage() {
     setLoading(true);
 
     try {
-      let fileToUpload: File;
-      if (data.files.length > 1) {
-        const JSZip = (await import("jszip")).default;
-        const zip = new JSZip();
-        for (const f of data.files) {
-          zip.file(f.name, f);
-        }
-        const blob = await zip.generateAsync({ type: "blob" });
-        fileToUpload = new File([blob], "multiple.zip", { type: "application/zip" });
-      } else {
-        fileToUpload = data.files[0];
+      if (data.files.length === 0) {
+        toast.error("Select at least one file.");
+        return;
       }
 
-      if (!fitsEncryptedUploadLimit(fileToUpload.size)) {
-        toast.error(`Selected files exceed the ${MAX_UPLOAD_LABEL} upload limit after packaging.`);
+      if (!fitsBundleUploadLimit(data.files.map((file) => file.size))) {
+        toast.error(`Selected files exceed the ${MAX_UPLOAD_LABEL} upload limit.`);
         return;
       }
 
@@ -101,17 +94,16 @@ export default function FilePage() {
         encryptKeySet = await KeySet.fromShareSecret(encoded.shareSecret, data.password);
       }
 
-      const fileBytes = new Uint8Array(await fileToUpload.arrayBuffer());
-      const blob = await encryptKeySet.encryptBlob(fileBytes);
+      const { blob, manifest } = await createEncryptedBundle(data.files, encryptKeySet);
       if (blob.size > MAX_ENCRYPTED_UPLOAD_BYTES) {
         toast.error(`Encrypted file exceeds the ${MAX_UPLOAD_LABEL} upload limit.`);
         return;
       }
 
       const encryptedMeta = await keySet.encryptMeta({
-        type: "file",
+        type: "bundle",
         password_protected: hasPassword,
-        filename: fileToUpload.name,
+        bundle_name: manifest.bundleName,
       });
 
       const encoded = keySet.getEncoded();

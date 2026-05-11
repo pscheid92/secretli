@@ -30,7 +30,13 @@ func (m *mockSecretRepo) GetByPublicID(_ context.Context, _ string) (*domain.Sec
 	return nil, nil
 }
 func (m *mockSecretRepo) ClaimBurnAfterRead(_ context.Context, _, _ string) error { return nil }
-func (m *mockSecretRepo) Delete(_ context.Context, _ string) error                { return nil }
+func (m *mockSecretRepo) StartRetrievalSession(_ context.Context, _, _, _ string, _ time.Time) (*domain.Secret, error) {
+	return nil, nil
+}
+func (m *mockSecretRepo) GetByRetrievalSession(_ context.Context, _, _ string) (*domain.Secret, error) {
+	return nil, nil
+}
+func (m *mockSecretRepo) Delete(_ context.Context, _ string) error { return nil }
 func (m *mockSecretRepo) DeleteExpired(_ context.Context, beforeDelete func(string) error) (int64, error) {
 	m.deleteExpiredCalled.Add(1)
 	if m.deleteExpiredErr != nil {
@@ -45,6 +51,9 @@ func (m *mockSecretRepo) DeleteExpired(_ context.Context, beforeDelete func(stri
 	}
 	return deleted, nil
 }
+func (m *mockSecretRepo) DeleteExpiredRetrievalSessions(_ context.Context) (int64, error) {
+	return 0, nil
+}
 
 type mockFileStore struct {
 	deletedKeys  []string
@@ -54,6 +63,9 @@ type mockFileStore struct {
 
 func (m *mockFileStore) Put(_ context.Context, _ string, _ io.Reader, _ int64) error { return nil }
 func (m *mockFileStore) Get(_ context.Context, _ string) (io.ReadCloser, error)      { return nil, nil }
+func (m *mockFileStore) GetRange(_ context.Context, _ string, _, _ int64) (io.ReadCloser, error) {
+	return nil, nil
+}
 func (m *mockFileStore) Delete(_ context.Context, key string) error {
 	m.deleteCalled.Add(1)
 	m.deletedKeys = append(m.deletedKeys, key)

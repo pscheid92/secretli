@@ -23,6 +23,11 @@ import (
 	"github.com/pscheid92/secretli/internal/platform/correlation"
 )
 
+const (
+	databaseConnectTimeout = 30 * time.Second
+	databaseConnectRetry   = time.Second
+)
+
 func Run() error {
 	// Set up correlated logger: injects request_id into every log record.
 	baseHandler := slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo})
@@ -62,9 +67,9 @@ func Run() error {
 func setupDatabase(cfg config.Config) (*pgxpool.Pool, error) {
 	ctx := context.Background()
 
-	pool, err := postgres.NewPool(ctx, cfg.DatabaseURL)
+	pool, err := connectDatabase(ctx, cfg.DatabaseURL)
 	if err != nil {
-		return nil, fmt.Errorf("database connection failed: %w", err)
+		return nil, err
 	}
 
 	slog.Info("running database migrations")
@@ -75,6 +80,34 @@ func setupDatabase(cfg config.Config) (*pgxpool.Pool, error) {
 	slog.Info("migrations complete")
 
 	return pool, nil
+}
+
+func connectDatabase(ctx context.Context, databaseURL string) (*pgxpool.Pool, error) {
+	ctx, cancel := context.WithTimeout(ctx, databaseConnectTimeout)
+	defer cancel()
+
+	var lastErr error
+	for attempt := 1; ; attempt++ {
+		pool, err := postgres.NewPool(ctx, databaseURL)
+		if err == nil {
+			return pool, nil
+		}
+		lastErr = err
+
+		if ctx.Err() != nil {
+			return nil, fmt.Errorf("database connection failed: %w", lastErr)
+		}
+
+		slog.Warn("database connection failed; retrying", "attempt", attempt, "error", err)
+
+		timer := time.NewTimer(databaseConnectRetry)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return nil, fmt.Errorf("database connection failed: %w", lastErr)
+		case <-timer.C:
+		}
+	}
 }
 
 func runGracefulShutdown(app *httpserver.App, worker *cleanup.Worker) error {

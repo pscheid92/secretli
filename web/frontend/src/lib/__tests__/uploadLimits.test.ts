@@ -1,6 +1,7 @@
 import { ENCRYPTED_BLOB_OVERHEAD_BYTES } from "../encryption";
 import {
   encryptedUploadSize,
+  fitsBundleUploadLimit,
   fitsEncryptedUploadLimit,
   MAX_ENCRYPTED_UPLOAD_BYTES,
   MAX_FILE_UPLOAD_BYTES,
@@ -19,5 +20,10 @@ describe("upload limits", () => {
   it("rejects one byte over the plaintext boundary", () => {
     expect(encryptedUploadSize(MAX_FILE_UPLOAD_BYTES + 1)).toBe(MAX_ENCRYPTED_UPLOAD_BYTES + 1);
     expect(fitsEncryptedUploadLimit(MAX_FILE_UPLOAD_BYTES + 1)).toBe(false);
+  });
+
+  it("reserves bundle chunk and manifest overhead", () => {
+    expect(fitsBundleUploadLimit([1024])).toBe(true);
+    expect(fitsBundleUploadLimit([MAX_ENCRYPTED_UPLOAD_BYTES])).toBe(false);
   });
 });

@@ -13,9 +13,10 @@ export interface EncodedKeySet {
 }
 
 export interface SecretMeta {
-  readonly type: "text" | "file";
+  readonly type: "text" | "file" | "bundle";
   readonly password_protected: boolean;
   readonly filename?: string;
+  readonly bundle_name?: string;
 }
 
 const ENVELOPE_VERSION = "v2";
@@ -32,7 +33,7 @@ function toBuffer(bytes: Uint8Array): ArrayBuffer {
   return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
 }
 
-function buildAad(publicID: Uint8Array, purpose: "meta" | "blob"): Uint8Array {
+function buildAad(publicID: Uint8Array, purpose: "meta" | "blob" | "bundle"): Uint8Array {
   const suffix = new TextEncoder().encode(purpose);
   const aad = new Uint8Array(publicID.length + suffix.length);
   aad.set(publicID, 0);
@@ -198,6 +199,28 @@ export class KeySet {
     return new Uint8Array(decrypted);
   }
 
+  encryptBundlePart(data: Uint8Array, aadSuffix: Uint8Array): Uint8Array {
+    const nonce = crypto.getRandomValues(new Uint8Array(V2_NONCE_LENGTH));
+    const aad = bundleAad(this.publicID, aadSuffix);
+    const cipher = xchacha20poly1305(this.blobKey, nonce, aad);
+    const ciphertext = cipher.encrypt(data);
+    const output = new Uint8Array(nonce.length + ciphertext.length);
+    output.set(nonce, 0);
+    output.set(ciphertext, nonce.length);
+    return output;
+  }
+
+  decryptBundlePart(record: Uint8Array, aadSuffix: Uint8Array): Uint8Array {
+    if (record.length < V2_NONCE_LENGTH + POLY1305_TAG_LENGTH) {
+      throw new Error("invalid bundle record");
+    }
+    const nonce = record.slice(0, V2_NONCE_LENGTH);
+    const ciphertext = record.slice(V2_NONCE_LENGTH);
+    const aad = bundleAad(this.publicID, aadSuffix);
+    const cipher = xchacha20poly1305(this.blobKey, nonce, aad);
+    return cipher.decrypt(ciphertext);
+  }
+
   getEncoded(): EncodedKeySet {
     return {
       shareSecret: base64UrlEncode(this.shareSecret),
@@ -207,6 +230,15 @@ export class KeySet {
       deletionToken: base64UrlEncode(this.deletionToken),
     };
   }
+}
+
+function bundleAad(publicID: Uint8Array, suffix: Uint8Array): Uint8Array {
+  const prefix = buildAad(publicID, "bundle");
+  const aad = new Uint8Array(prefix.length + 1 + suffix.length);
+  aad.set(prefix, 0);
+  aad[prefix.length] = 0;
+  aad.set(suffix, prefix.length + 1);
+  return aad;
 }
 
 const encoder = new TextEncoder();

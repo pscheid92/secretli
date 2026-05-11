@@ -42,6 +42,13 @@ func (w *Worker) Run(ctx context.Context) {
 }
 
 func (w *Worker) runCycle(ctx context.Context) {
+	if count, err := w.secretRepo.DeleteExpiredRetrievalSessions(ctx); err != nil {
+		slog.ErrorContext(ctx, "cleanup: expired retrieval session cleanup failed", "error", err)
+		w.metrics.CleanupErrors.Inc()
+	} else if count > 0 {
+		slog.InfoContext(ctx, "cleanup: deleted retrieval sessions", "count", count)
+	}
+
 	beforeDelete := func(publicID string) error {
 		return w.fileStore.Delete(ctx, "secrets/"+publicID)
 	}

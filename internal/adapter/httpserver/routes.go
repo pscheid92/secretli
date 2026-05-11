@@ -53,7 +53,13 @@ func (a *App) registerRoutes() *metrics.SecretMetrics {
 	retrieveGroup := secrets.Group("")
 	retrieveGroup.Use(rateLimiter(30, time.Minute))
 	retrieveGroup.POST("/:publicID", sh.RetrieveSecret)
+	retrieveGroup.POST("/:publicID/retrieval-session", sh.StartRetrievalSession)
 	retrieveGroup.GET("/:publicID/meta", sh.SecretMetadata)
+
+	// Range retrieval can require many chunk requests for one authorized session.
+	rangeGroup := secrets.Group("")
+	rangeGroup.Use(rateLimiter(600, time.Minute))
+	rangeGroup.GET("/:publicID/blob", sh.RetrieveSecretRange)
 
 	// Delete (30/min)
 	deleteGroup := secrets.Group("")
