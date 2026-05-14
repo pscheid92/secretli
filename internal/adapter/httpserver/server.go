@@ -32,8 +32,9 @@ func New(cfg config.Config, pool *pgxpool.Pool, secretRepo domain.SecretRepo, fi
 	e.HidePort = true
 	e.HTTPErrorHandler = httpErrorHandler
 
-	e.Server.ReadTimeout = 30 * time.Second
-	e.Server.WriteTimeout = 60 * time.Second
+	e.Server.ReadHeaderTimeout = 10 * time.Second
+	e.Server.ReadTimeout = 30 * time.Minute
+	e.Server.WriteTimeout = 30 * time.Minute
 	e.Server.IdleTimeout = 120 * time.Second
 
 	a := &App{

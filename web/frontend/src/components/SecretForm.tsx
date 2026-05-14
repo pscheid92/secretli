@@ -83,7 +83,7 @@ export default function SecretForm({ onSubmit, loading, stage }: SecretFormProps
       state: stage === "idle" ? "pending" : stage === "encrypting" ? "active" : "done",
     },
     { label: "Uploading", state: stage === "uploading" ? "active" : "pending" },
-    { label: "Creating link", state: "pending" },
+    { label: "Finalize", state: "pending" },
   ];
 
   return (
