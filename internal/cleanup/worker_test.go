@@ -21,12 +21,17 @@ func testMetrics() *metrics.SecretMetrics {
 
 type mockSecretRepo struct {
 	deleteExpiredKeys   []string
+	objects             []domain.SecretObject
 	deleteExpiredErr    error
 	deleteExpiredCalled atomic.Int32
 }
 
-func (m *mockSecretRepo) Create(_ context.Context, _ *domain.Secret) error { return nil }
+func (m *mockSecretRepo) Create(_ context.Context, _ *domain.Secret) error       { return nil }
+func (m *mockSecretRepo) CreateUpload(_ context.Context, _ *domain.Secret) error { return nil }
 func (m *mockSecretRepo) GetByPublicID(_ context.Context, _ string) (*domain.Secret, error) {
+	return nil, nil
+}
+func (m *mockSecretRepo) GetPendingUploadByPublicID(_ context.Context, _ string) (*domain.Secret, error) {
 	return nil, nil
 }
 func (m *mockSecretRepo) ClaimBurnAfterRead(_ context.Context, _, _ string) error { return nil }
@@ -36,15 +41,37 @@ func (m *mockSecretRepo) StartRetrievalSession(_ context.Context, _, _, _ string
 func (m *mockSecretRepo) GetByRetrievalSession(_ context.Context, _, _ string) (*domain.Secret, error) {
 	return nil, nil
 }
+func (m *mockSecretRepo) GetObject(_ context.Context, _, _ string, _ int32) (*domain.SecretObject, error) {
+	return nil, nil
+}
+func (m *mockSecretRepo) CreateObject(_ context.Context, _ *domain.SecretObject) error { return nil }
+func (m *mockSecretRepo) ListObjects(_ context.Context, publicID string) ([]domain.SecretObject, error) {
+	objects := make([]domain.SecretObject, 0)
+	for _, object := range m.objects {
+		if object.PublicID == publicID {
+			objects = append(objects, object)
+		}
+	}
+	return objects, nil
+}
+func (m *mockSecretRepo) CompleteUpload(_ context.Context, _ string, _ int64, _ time.Time) error {
+	return nil
+}
 func (m *mockSecretRepo) Delete(_ context.Context, _ string) error { return nil }
-func (m *mockSecretRepo) DeleteExpired(_ context.Context, beforeDelete func(string) error) (int64, error) {
+func (m *mockSecretRepo) DeleteExpired(_ context.Context, beforeDelete func(string, []domain.SecretObject) error) (int64, error) {
 	m.deleteExpiredCalled.Add(1)
 	if m.deleteExpiredErr != nil {
 		return 0, m.deleteExpiredErr
 	}
 	var deleted int64
 	for _, id := range m.deleteExpiredKeys {
-		if err := beforeDelete(id); err != nil {
+		objects := make([]domain.SecretObject, 0)
+		for _, object := range m.objects {
+			if object.PublicID == id {
+				objects = append(objects, object)
+			}
+		}
+		if err := beforeDelete(id, objects); err != nil {
 			continue
 		}
 		deleted++
@@ -95,6 +122,36 @@ func TestRunCycle_Success(t *testing.T) {
 	for i, expected := range []string{"secrets/pub1", "secrets/pub2", "secrets/pub3"} {
 		if fileStore.deletedKeys[i] != expected {
 			t.Errorf("deletedKeys[%d] = %q, want %q", i, fileStore.deletedKeys[i], expected)
+		}
+	}
+}
+
+func TestRunCycle_DeletesChunkedObjects(t *testing.T) {
+	secretRepo := &mockSecretRepo{
+		deleteExpiredKeys: []string{"chunked"},
+		objects: []domain.SecretObject{
+			{PublicID: "chunked", ObjectKind: domain.ObjectKindManifest, ObjectIndex: domain.ManifestObjectIndex},
+			{PublicID: "chunked", ObjectKind: domain.ObjectKindChunk, ObjectIndex: 0},
+			{PublicID: "chunked", ObjectKind: domain.ObjectKindChunk, ObjectIndex: 1},
+		},
+	}
+	fileStore := &mockFileStore{}
+
+	w := NewWorker(time.Minute, secretRepo, fileStore, testMetrics())
+	w.runCycle(context.Background())
+
+	expected := []string{
+		"secrets/chunked",
+		"secrets/chunked/manifest",
+		"secrets/chunked/chunks/0",
+		"secrets/chunked/chunks/1",
+	}
+	if len(fileStore.deletedKeys) != len(expected) {
+		t.Fatalf("deleted keys = %v, want %v", fileStore.deletedKeys, expected)
+	}
+	for i, key := range expected {
+		if fileStore.deletedKeys[i] != key {
+			t.Fatalf("deletedKeys[%d] = %q, want %q", i, fileStore.deletedKeys[i], key)
 		}
 	}
 }

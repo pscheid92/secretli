@@ -3,6 +3,7 @@ package cleanup
 import (
 	"context"
 	"log/slog"
+	"strconv"
 	"time"
 
 	"github.com/pscheid92/secretli/internal/adapter/metrics"
@@ -49,8 +50,16 @@ func (w *Worker) runCycle(ctx context.Context) {
 		slog.InfoContext(ctx, "cleanup: deleted retrieval sessions", "count", count)
 	}
 
-	beforeDelete := func(publicID string) error {
-		return w.fileStore.Delete(ctx, "secrets/"+publicID)
+	beforeDelete := func(publicID string, objects []domain.SecretObject) error {
+		if err := w.fileStore.Delete(ctx, "secrets/"+publicID); err != nil {
+			return err
+		}
+		for _, object := range objects {
+			if err := w.fileStore.Delete(ctx, objectStorageKey(object)); err != nil {
+				return err
+			}
+		}
+		return nil
 	}
 
 	count, err := w.secretRepo.DeleteExpired(ctx, beforeDelete)
@@ -64,4 +73,11 @@ func (w *Worker) runCycle(ctx context.Context) {
 		slog.InfoContext(ctx, "cleanup: deleted secrets", "count", count)
 		w.metrics.SecretsDeleted.WithLabelValues("cleanup").Add(float64(count))
 	}
+}
+
+func objectStorageKey(object domain.SecretObject) string {
+	if object.ObjectKind == domain.ObjectKindManifest {
+		return "secrets/" + object.PublicID + "/manifest"
+	}
+	return "secrets/" + object.PublicID + "/chunks/" + strconv.FormatInt(int64(object.ObjectIndex), 10)
 }

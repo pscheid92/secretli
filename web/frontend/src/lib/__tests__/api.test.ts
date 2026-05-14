@@ -1,11 +1,15 @@
 import {
   ApiError,
   type CreateSecretParams,
+  createChunkedUpload,
   createSecret,
   deleteSecret,
   getSecretMetadata,
+  retrieveChunkedChunk,
+  retrieveChunkedManifest,
   retrieveSecret,
   retrieveSecretRange,
+  startChunkedRetrievalSession,
   startRetrievalSession,
 } from "../api";
 
@@ -235,6 +239,71 @@ describe("retrieval sessions", () => {
       status: 200,
       message: "Expected partial content response (200)",
     });
+  });
+});
+
+describe("chunked API", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("initializes a v2 chunked upload with JSON metadata", async () => {
+    const response = {
+      public_id: "pub-id",
+      upload_token: "upload-token",
+      upload_expires_at: "2026-05-12T12:00:00Z",
+      chunk_size: 16 * 1024 * 1024,
+    };
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(new Response(JSON.stringify(response), { status: 201 }));
+
+    await expect(
+      createChunkedUpload({
+        public_id: "pub-id",
+        metadata_token: "meta-token",
+        blob_token: "blob-token",
+        deletion_token: "delete-token",
+        encrypted_meta: "v2$nonce$ciphertext",
+        expiration: "1d",
+        burn_after_read: false,
+        chunk_size: 16 * 1024 * 1024,
+        chunk_count: 2,
+        encrypted_total_size: 123,
+      }),
+    ).resolves.toEqual(response);
+
+    expect(fetchSpy).toHaveBeenCalledWith(
+      "/api/v2/secrets/uploads",
+      expect.objectContaining({
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+  });
+
+  it("starts a v2 retrieval session and downloads chunked objects", async () => {
+    const session = {
+      session_token: "session-token",
+      blob_size: 123,
+      expires_at: "2026-05-11T12:00:00Z",
+      burn_after_read: false,
+      storage_version: "chunked-v1" as const,
+    };
+    const bytes = new Uint8Array([1, 2, 3]);
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(JSON.stringify(session), { status: 201 }))
+      .mockResolvedValueOnce(new Response(bytes))
+      .mockResolvedValueOnce(new Response(bytes));
+
+    await expect(startChunkedRetrievalSession("pub-id", "blob-token")).resolves.toEqual(session);
+    await expect(retrieveChunkedManifest("pub-id", "session-token")).resolves.toEqual(bytes);
+    await expect(retrieveChunkedChunk("pub-id", "session-token", 0)).resolves.toEqual(bytes);
+
+    expect(fetchSpy.mock.calls[0][0]).toBe("/api/v2/secrets/pub-id/retrieval-session");
+    expect(fetchSpy.mock.calls[1][0]).toBe("/api/v2/secrets/pub-id/manifest");
+    expect(fetchSpy.mock.calls[2][0]).toBe("/api/v2/secrets/pub-id/chunks/0");
   });
 });
 

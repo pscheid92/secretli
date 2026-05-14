@@ -66,6 +66,28 @@ func (a *App) registerRoutes() *metrics.SecretMetrics {
 	deleteGroup.Use(rateLimiter(30, time.Minute))
 	deleteGroup.DELETE("/:publicID", sh.DeleteSecret)
 
+	// Chunked v2 upload/retrieval APIs.
+	secretsV2 := e.Group("/api/v2/secrets")
+
+	uploadCreateGroup := secretsV2.Group("")
+	uploadCreateGroup.Use(rateLimiter(10, time.Minute))
+	uploadCreateGroup.POST("/uploads", sh.CreateUpload)
+
+	uploadGroup := secretsV2.Group("")
+	uploadGroup.Use(rateLimiter(600, time.Minute))
+	uploadGroup.GET("/:publicID/upload", sh.UploadStatus)
+	uploadGroup.PUT("/:publicID/chunks/:index", sh.UploadChunk)
+	uploadGroup.PUT("/:publicID/manifest", sh.UploadManifest)
+	uploadGroup.POST("/:publicID/complete", sh.CompleteUpload)
+	uploadGroup.DELETE("/:publicID/upload", sh.CancelUpload)
+
+	retrieveV2Group := secretsV2.Group("")
+	retrieveV2Group.Use(rateLimiter(600, time.Minute))
+	retrieveV2Group.POST("/:publicID/retrieval-session", sh.StartRetrievalSession)
+	retrieveV2Group.GET("/:publicID/meta", sh.SecretMetadata)
+	retrieveV2Group.GET("/:publicID/manifest", sh.RetrieveChunkedManifest)
+	retrieveV2Group.GET("/:publicID/chunks/:index", sh.RetrieveChunkedChunk)
+
 	// SPA catch-all
 	distFS, _ := fs.Sub(web.DistFS, "frontend/dist")
 	e.GET("/*", spaHandler(distFS))

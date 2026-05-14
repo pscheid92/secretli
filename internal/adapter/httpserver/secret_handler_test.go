@@ -12,6 +12,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -43,6 +44,7 @@ func callHandler(c echo.Context, handler echo.HandlerFunc) {
 type mockSecretRepo struct {
 	mu        sync.Mutex
 	secrets   map[string]*domain.Secret
+	objects   map[string]domain.SecretObject
 	sessions  map[string]mockRetrievalSession
 	createErr error
 }
@@ -55,6 +57,7 @@ type mockRetrievalSession struct {
 func newMockRepo() *mockSecretRepo {
 	return &mockSecretRepo{
 		secrets:  make(map[string]*domain.Secret),
+		objects:  make(map[string]domain.SecretObject),
 		sessions: make(map[string]mockRetrievalSession),
 	}
 }
@@ -74,6 +77,10 @@ func (m *mockSecretRepo) Create(_ context.Context, s *domain.Secret) error {
 	return nil
 }
 
+func (m *mockSecretRepo) CreateUpload(_ context.Context, s *domain.Secret) error {
+	return m.Create(context.Background(), s)
+}
+
 func (m *mockSecretRepo) GetByPublicID(_ context.Context, publicID string) (*domain.Secret, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -82,7 +89,22 @@ func (m *mockSecretRepo) GetByPublicID(_ context.Context, publicID string) (*dom
 	if !ok {
 		return nil, domain.ErrNotFound
 	}
-	if s.ExpiresAt.Before(time.Now()) {
+	if s.ExpiresAt.Before(time.Now()) || s.Status == domain.SecretStatusPending {
+		return nil, domain.ErrNotFound
+	}
+	secret := *s
+	return &secret, nil
+}
+
+func (m *mockSecretRepo) GetPendingUploadByPublicID(_ context.Context, publicID string) (*domain.Secret, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	s, ok := m.secrets[publicID]
+	if !ok || s.Status != domain.SecretStatusPending || s.StorageVersion != domain.StorageVersionChunked {
+		return nil, domain.ErrNotFound
+	}
+	if s.UploadExpiresAt == nil || s.UploadExpiresAt.Before(time.Now()) {
 		return nil, domain.ErrNotFound
 	}
 	secret := *s
@@ -114,7 +136,7 @@ func (m *mockSecretRepo) StartRetrievalSession(_ context.Context, publicID, blob
 	defer m.mu.Unlock()
 
 	s, ok := m.secrets[publicID]
-	if !ok || s.ExpiresAt.Before(time.Now()) {
+	if !ok || s.ExpiresAt.Before(time.Now()) || s.Status == domain.SecretStatusPending {
 		return nil, domain.ErrNotFound
 	}
 	if s.BurnAfterRead && s.RetrievedAt != nil {
@@ -141,11 +163,68 @@ func (m *mockSecretRepo) GetByRetrievalSession(_ context.Context, publicID, sess
 		return nil, domain.ErrForbidden
 	}
 	s, ok := m.secrets[publicID]
-	if !ok || s.ExpiresAt.Before(time.Now()) {
+	if !ok || s.ExpiresAt.Before(time.Now()) || s.Status == domain.SecretStatusPending {
 		return nil, domain.ErrForbidden
 	}
 	secret := *s
 	return &secret, nil
+}
+
+func (m *mockSecretRepo) GetObject(_ context.Context, publicID, objectKind string, objectIndex int32) (*domain.SecretObject, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	object, ok := m.objects[objectKey(publicID, objectKind, objectIndex)]
+	if !ok {
+		return nil, domain.ErrNotFound
+	}
+	return &object, nil
+}
+
+func (m *mockSecretRepo) CreateObject(_ context.Context, object *domain.SecretObject) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	key := objectKey(object.PublicID, object.ObjectKind, object.ObjectIndex)
+	if _, ok := m.objects[key]; ok {
+		return domain.ErrDuplicate
+	}
+	copy := *object
+	now := time.Now()
+	copy.CreatedAt = now
+	copy.UpdatedAt = now
+	m.objects[key] = copy
+	return nil
+}
+
+func (m *mockSecretRepo) ListObjects(_ context.Context, publicID string) ([]domain.SecretObject, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	objects := make([]domain.SecretObject, 0)
+	for _, object := range m.objects {
+		if object.PublicID == publicID {
+			objects = append(objects, object)
+		}
+	}
+	return objects, nil
+}
+
+func (m *mockSecretRepo) CompleteUpload(_ context.Context, publicID string, blobSize int64, expiresAt time.Time) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	s, ok := m.secrets[publicID]
+	if !ok || s.Status != domain.SecretStatusPending {
+		return domain.ErrNotFound
+	}
+	s.Status = domain.SecretStatusActive
+	s.BlobSize = blobSize
+	s.ExpiresAt = expiresAt
+	s.UploadTokenHash = ""
+	now := time.Now()
+	s.CompletedAt = &now
+	return nil
 }
 
 func (m *mockSecretRepo) Delete(_ context.Context, publicID string) error {
@@ -156,10 +235,15 @@ func (m *mockSecretRepo) Delete(_ context.Context, publicID string) error {
 		return domain.ErrNotFound
 	}
 	delete(m.secrets, publicID)
+	for key, object := range m.objects {
+		if object.PublicID == publicID {
+			delete(m.objects, key)
+		}
+	}
 	return nil
 }
 
-func (m *mockSecretRepo) DeleteExpired(_ context.Context, beforeDelete func(string) error) (int64, error) {
+func (m *mockSecretRepo) DeleteExpired(_ context.Context, beforeDelete func(string, []domain.SecretObject) error) (int64, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -168,7 +252,13 @@ func (m *mockSecretRepo) DeleteExpired(_ context.Context, beforeDelete func(stri
 		expired := s.ExpiresAt.Before(time.Now())
 		burnedAndRetrieved := s.BurnAfterRead && s.RetrievedAt != nil
 		if expired || burnedAndRetrieved {
-			if err := beforeDelete(s.PublicID); err != nil {
+			objects := make([]domain.SecretObject, 0)
+			for _, object := range m.objects {
+				if object.PublicID == s.PublicID {
+					objects = append(objects, object)
+				}
+			}
+			if err := beforeDelete(s.PublicID, objects); err != nil {
 				continue
 			}
 			delete(m.secrets, id)
@@ -312,6 +402,10 @@ func testEncryptedMeta() string {
 	return "v2$" + nonce + "$" + ciphertext
 }
 
+func objectKey(publicID, objectKind string, objectIndex int32) string {
+	return fmt.Sprintf("%s/%s/%d", publicID, objectKind, objectIndex)
+}
+
 func validCreateMetadata() map[string]string {
 	return map[string]string{
 		"public_id":       testPublicID("create"),
@@ -342,6 +436,47 @@ func seedSecretWithTokens(repo *mockSecretRepo, fs *mockFileStore, publicID, met
 	}
 	fs.objects[storageKey(publicID)] = blobData
 	repo.secrets[publicID] = secret
+}
+
+func seedPendingUpload(repo *mockSecretRepo, publicID, uploadToken string, chunkCount int32) {
+	uploadExpiresAt := time.Now().Add(time.Hour)
+	repo.secrets[publicID] = &domain.Secret{
+		PublicID:                  publicID,
+		MetadataTokenHash:         tokencrypto.TokenHash(testToken("pending metadata")),
+		BlobTokenHash:             tokencrypto.TokenHash(testToken("pending blob")),
+		DeletionTokenHash:         tokencrypto.TokenHash(testToken("pending deletion")),
+		EncryptedMeta:             testEncryptedMeta(),
+		BlobSize:                  1024,
+		BurnAfterRead:             false,
+		ExpiresAt:                 uploadExpiresAt,
+		StorageVersion:            domain.StorageVersionChunked,
+		Status:                    domain.SecretStatusPending,
+		ExpirationDurationSeconds: int64(time.Hour / time.Second),
+		UploadTokenHash:           tokencrypto.TokenHash(uploadToken),
+		UploadExpiresAt:           &uploadExpiresAt,
+		ChunkSize:                 16 * 1024 * 1024,
+		ChunkCount:                chunkCount,
+		EncryptedTotalSize:        1024,
+	}
+}
+
+func createJSONRequest(t *testing.T, method, target string, body any) *http.Request {
+	t.Helper()
+	payload, err := json.Marshal(body)
+	if err != nil {
+		t.Fatalf("marshal JSON: %v", err)
+	}
+	req := httptest.NewRequest(method, target, bytes.NewReader(payload))
+	req.Header.Set("Content-Type", "application/json")
+	return req
+}
+
+func chunkUploadRequest(method, target, uploadToken string, body []byte) *http.Request {
+	req := httptest.NewRequest(method, target, bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+uploadToken)
+	req.Header.Set("Content-Type", "application/octet-stream")
+	req.Header.Set(HeaderEncryptedSHA256, sha256Hex(body))
+	return req
 }
 
 // --- Create Tests ---
@@ -386,6 +521,288 @@ func TestCreateSecret_Success(t *testing.T) {
 	}
 	if secret.DeletionTokenHash != tokencrypto.TokenHash(meta["deletion_token"]) {
 		t.Error("deletion token should be stored as a hash")
+	}
+}
+
+func TestCreateUpload_Success(t *testing.T) {
+	repo := newMockRepo()
+	fs := newMockFileStore()
+	h := NewSecretHandler(repo, fs, 100*1024*1024, testMetrics())
+
+	publicID := testPublicID("chunked create")
+	req := createJSONRequest(t, http.MethodPost, "/api/v2/secrets/uploads", map[string]any{
+		"public_id":            publicID,
+		"metadata_token":       testToken("chunked metadata"),
+		"blob_token":           testToken("chunked blob"),
+		"deletion_token":       testToken("chunked deletion"),
+		"encrypted_meta":       testEncryptedMeta(),
+		"expiration":           "1d",
+		"burn_after_read":      true,
+		"chunk_size":           16 * 1024 * 1024,
+		"chunk_count":          2,
+		"encrypted_total_size": 12345,
+	})
+	rec := httptest.NewRecorder()
+	c := newEchoContext(req, rec)
+
+	callHandler(c, h.CreateUpload)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want %d. body: %s", rec.Code, http.StatusCreated, rec.Body.String())
+	}
+	var body struct {
+		UploadToken string `json:"upload_token"`
+		ChunkSize   int64  `json:"chunk_size"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if !domain.ValidToken(body.UploadToken) {
+		t.Fatalf("upload token is not valid: %q", body.UploadToken)
+	}
+	secret := repo.secrets[publicID]
+	if secret.Status != domain.SecretStatusPending || secret.StorageVersion != domain.StorageVersionChunked {
+		t.Fatalf("secret status/version = %s/%s", secret.Status, secret.StorageVersion)
+	}
+	if secret.BurnAfterRead != true || secret.ChunkCount != 2 || secret.ChunkSize != 16*1024*1024 {
+		t.Fatalf("unexpected upload metadata: %+v", secret)
+	}
+}
+
+func TestChunkedUpload_WrongTokenForbidden(t *testing.T) {
+	repo := newMockRepo()
+	fs := newMockFileStore()
+	h := NewSecretHandler(repo, fs, 100*1024*1024, testMetrics())
+	publicID := testPublicID("wrong upload token")
+	seedPendingUpload(repo, publicID, testToken("right upload"), 1)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v2/secrets/"+publicID+"/upload", nil)
+	req.Header.Set("Authorization", "Bearer "+testToken("wrong upload"))
+	rec := httptest.NewRecorder()
+	c := newEchoContext(req, rec)
+	c.SetParamNames("publicID")
+	c.SetParamValues(publicID)
+
+	callHandler(c, h.UploadStatus)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want %d. body: %s", rec.Code, http.StatusForbidden, rec.Body.String())
+	}
+}
+
+func TestChunkedUpload_MissingTokenForbidden(t *testing.T) {
+	repo := newMockRepo()
+	fs := newMockFileStore()
+	h := NewSecretHandler(repo, fs, 100*1024*1024, testMetrics())
+	publicID := testPublicID("missing upload token")
+	seedPendingUpload(repo, publicID, testToken("right upload missing"), 1)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v2/secrets/"+publicID+"/upload", nil)
+	rec := httptest.NewRecorder()
+	c := newEchoContext(req, rec)
+	c.SetParamNames("publicID")
+	c.SetParamValues(publicID)
+
+	callHandler(c, h.UploadStatus)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want %d. body: %s", rec.Code, http.StatusForbidden, rec.Body.String())
+	}
+}
+
+func TestChunkUpload_IdempotentConflictAndHashMismatch(t *testing.T) {
+	repo := newMockRepo()
+	fs := newMockFileStore()
+	h := NewSecretHandler(repo, fs, 100*1024*1024, testMetrics())
+	publicID := testPublicID("chunk upload")
+	uploadToken := testToken("chunk upload")
+	seedPendingUpload(repo, publicID, uploadToken, 2)
+
+	body := []byte("encrypted chunk")
+	req := chunkUploadRequest(http.MethodPut, "/api/v2/secrets/"+publicID+"/chunks/0", uploadToken, body)
+	rec := httptest.NewRecorder()
+	c := newEchoContext(req, rec)
+	c.SetParamNames("publicID", "index")
+	c.SetParamValues(publicID, "0")
+	callHandler(c, h.UploadChunk)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("first status = %d, want %d. body: %s", rec.Code, http.StatusCreated, rec.Body.String())
+	}
+
+	req = chunkUploadRequest(http.MethodPut, "/api/v2/secrets/"+publicID+"/chunks/0", uploadToken, body)
+	rec = httptest.NewRecorder()
+	c = newEchoContext(req, rec)
+	c.SetParamNames("publicID", "index")
+	c.SetParamValues(publicID, "0")
+	callHandler(c, h.UploadChunk)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("idempotent status = %d, want %d. body: %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+
+	req = chunkUploadRequest(http.MethodPut, "/api/v2/secrets/"+publicID+"/chunks/0", uploadToken, []byte("different"))
+	rec = httptest.NewRecorder()
+	c = newEchoContext(req, rec)
+	c.SetParamNames("publicID", "index")
+	c.SetParamValues(publicID, "0")
+	callHandler(c, h.UploadChunk)
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("conflict status = %d, want %d. body: %s", rec.Code, http.StatusConflict, rec.Body.String())
+	}
+
+	req = chunkUploadRequest(http.MethodPut, "/api/v2/secrets/"+publicID+"/chunks/1", uploadToken, []byte("bad hash"))
+	req.Header.Set(HeaderEncryptedSHA256, strings.Repeat("0", 64))
+	rec = httptest.NewRecorder()
+	c = newEchoContext(req, rec)
+	c.SetParamNames("publicID", "index")
+	c.SetParamValues(publicID, "1")
+	callHandler(c, h.UploadChunk)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("hash mismatch status = %d, want %d. body: %s", rec.Code, http.StatusBadRequest, rec.Body.String())
+	}
+	if _, ok := fs.objects[chunkedObjectKey(publicID, domain.ObjectKindChunk, 1)]; ok {
+		t.Fatal("hash-mismatched object should not be stored")
+	}
+}
+
+func TestCompleteUpload_RequiresManifestAndAllChunks(t *testing.T) {
+	repo := newMockRepo()
+	fs := newMockFileStore()
+	h := NewSecretHandler(repo, fs, 100*1024*1024, testMetrics())
+	publicID := testPublicID("complete missing")
+	uploadToken := testToken("complete missing")
+	seedPendingUpload(repo, publicID, uploadToken, 2)
+
+	body := []byte("encrypted chunk")
+	req := chunkUploadRequest(http.MethodPut, "/api/v2/secrets/"+publicID+"/chunks/0", uploadToken, body)
+	rec := httptest.NewRecorder()
+	c := newEchoContext(req, rec)
+	c.SetParamNames("publicID", "index")
+	c.SetParamValues(publicID, "0")
+	callHandler(c, h.UploadChunk)
+
+	req = httptest.NewRequest(http.MethodPost, "/api/v2/secrets/"+publicID+"/complete", nil)
+	req.Header.Set("Authorization", "Bearer "+uploadToken)
+	rec = httptest.NewRecorder()
+	c = newEchoContext(req, rec)
+	c.SetParamNames("publicID")
+	c.SetParamValues(publicID)
+	callHandler(c, h.CompleteUpload)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("missing manifest status = %d, want %d. body: %s", rec.Code, http.StatusBadRequest, rec.Body.String())
+	}
+
+	manifest := []byte("encrypted manifest")
+	req = chunkUploadRequest(http.MethodPut, "/api/v2/secrets/"+publicID+"/manifest", uploadToken, manifest)
+	rec = httptest.NewRecorder()
+	c = newEchoContext(req, rec)
+	c.SetParamNames("publicID")
+	c.SetParamValues(publicID)
+	callHandler(c, h.UploadManifest)
+
+	req = httptest.NewRequest(http.MethodPost, "/api/v2/secrets/"+publicID+"/complete", nil)
+	req.Header.Set("Authorization", "Bearer "+uploadToken)
+	rec = httptest.NewRecorder()
+	c = newEchoContext(req, rec)
+	c.SetParamNames("publicID")
+	c.SetParamValues(publicID)
+	callHandler(c, h.CompleteUpload)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("missing chunk status = %d, want %d. body: %s", rec.Code, http.StatusBadRequest, rec.Body.String())
+	}
+}
+
+func TestCompleteUpload_ActivatesSecret(t *testing.T) {
+	repo := newMockRepo()
+	fs := newMockFileStore()
+	h := NewSecretHandler(repo, fs, 100*1024*1024, testMetrics())
+	publicID := testPublicID("complete success")
+	uploadToken := testToken("complete success")
+	seedPendingUpload(repo, publicID, uploadToken, 1)
+
+	for _, upload := range []struct {
+		target string
+		body   []byte
+		params []string
+	}{
+		{
+			target: "/api/v2/secrets/" + publicID + "/chunks/0",
+			body:   []byte("encrypted chunk"),
+			params: []string{"publicID", "index", publicID, "0"},
+		},
+		{
+			target: "/api/v2/secrets/" + publicID + "/manifest",
+			body:   []byte("encrypted manifest"),
+			params: []string{"publicID", publicID},
+		},
+	} {
+		req := chunkUploadRequest(http.MethodPut, upload.target, uploadToken, upload.body)
+		rec := httptest.NewRecorder()
+		c := newEchoContext(req, rec)
+		if len(upload.params) == 4 {
+			c.SetParamNames(upload.params[0], upload.params[1])
+			c.SetParamValues(upload.params[2], upload.params[3])
+			callHandler(c, h.UploadChunk)
+		} else {
+			c.SetParamNames(upload.params[0])
+			c.SetParamValues(upload.params[1])
+			callHandler(c, h.UploadManifest)
+		}
+		if rec.Code != http.StatusCreated {
+			t.Fatalf("upload %s status = %d, want %d. body: %s", upload.target, rec.Code, http.StatusCreated, rec.Body.String())
+		}
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v2/secrets/"+publicID+"/complete", nil)
+	req.Header.Set("Authorization", "Bearer "+uploadToken)
+	rec := httptest.NewRecorder()
+	c := newEchoContext(req, rec)
+	c.SetParamNames("publicID")
+	c.SetParamValues(publicID)
+	callHandler(c, h.CompleteUpload)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("complete status = %d, want %d. body: %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	if repo.secrets[publicID].Status != domain.SecretStatusActive {
+		t.Fatalf("secret status = %s, want active", repo.secrets[publicID].Status)
+	}
+}
+
+func TestPendingUpload_NotRetrievableAndCancelDeletesObjects(t *testing.T) {
+	repo := newMockRepo()
+	fs := newMockFileStore()
+	h := NewSecretHandler(repo, fs, 100*1024*1024, testMetrics())
+	publicID := testPublicID("pending not retrievable")
+	uploadToken := testToken("pending not retrievable")
+	seedPendingUpload(repo, publicID, uploadToken, 1)
+	fs.objects[chunkedObjectKey(publicID, domain.ObjectKindChunk, 0)] = []byte("chunk")
+	fs.objects[chunkedObjectKey(publicID, domain.ObjectKindManifest, domain.ManifestObjectIndex)] = []byte("manifest")
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/secrets/"+publicID+"/meta", nil)
+	req.Header.Set(HeaderMetadataToken, testToken("pending metadata"))
+	rec := httptest.NewRecorder()
+	c := newEchoContext(req, rec)
+	c.SetParamNames("publicID")
+	c.SetParamValues(publicID)
+	callHandler(c, h.SecretMetadata)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("pending metadata status = %d, want %d. body: %s", rec.Code, http.StatusNotFound, rec.Body.String())
+	}
+
+	req = httptest.NewRequest(http.MethodDelete, "/api/v2/secrets/"+publicID+"/upload", nil)
+	req.Header.Set("Authorization", "Bearer "+uploadToken)
+	rec = httptest.NewRecorder()
+	c = newEchoContext(req, rec)
+	c.SetParamNames("publicID")
+	c.SetParamValues(publicID)
+	callHandler(c, h.CancelUpload)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("cancel status = %d, want %d. body: %s", rec.Code, http.StatusNoContent, rec.Body.String())
+	}
+	if _, ok := repo.secrets[publicID]; ok {
+		t.Fatal("pending secret should be deleted")
+	}
+	if len(fs.objects) != 0 {
+		t.Fatalf("objects should be deleted, got %v", fs.objects)
 	}
 }
 

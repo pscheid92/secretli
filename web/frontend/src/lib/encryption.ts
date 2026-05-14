@@ -16,6 +16,12 @@ export interface SecretMeta {
   readonly type: "text" | "bundle";
   readonly password_protected: boolean;
   readonly bundle_name?: string;
+  readonly storage_version?: "single-v1" | "chunked-v1";
+}
+
+export interface ChunkedEncryptionMaterial {
+  readonly blobKey: Uint8Array;
+  readonly publicID: Uint8Array;
 }
 
 const ENVELOPE_VERSION = "v2";
@@ -185,6 +191,35 @@ export class KeySet {
     return cipher.decrypt(ciphertext);
   }
 
+  encryptChunkedPart(data: Uint8Array, aadSuffix: Uint8Array): Uint8Array {
+    const nonce = crypto.getRandomValues(new Uint8Array(V2_NONCE_LENGTH));
+    const aad = chunkedAad(this.publicID, aadSuffix);
+    const cipher = xchacha20poly1305(this.blobKey, nonce, aad);
+    const ciphertext = cipher.encrypt(data);
+    const output = new Uint8Array(nonce.length + ciphertext.length);
+    output.set(nonce, 0);
+    output.set(ciphertext, nonce.length);
+    return output;
+  }
+
+  decryptChunkedPart(record: Uint8Array, aadSuffix: Uint8Array): Uint8Array {
+    if (record.length < V2_NONCE_LENGTH + POLY1305_TAG_LENGTH) {
+      throw new Error("invalid chunked record");
+    }
+    const nonce = record.slice(0, V2_NONCE_LENGTH);
+    const ciphertext = record.slice(V2_NONCE_LENGTH);
+    const aad = chunkedAad(this.publicID, aadSuffix);
+    const cipher = xchacha20poly1305(this.blobKey, nonce, aad);
+    return cipher.decrypt(ciphertext);
+  }
+
+  getChunkedEncryptionMaterial(): ChunkedEncryptionMaterial {
+    return {
+      blobKey: this.blobKey.slice(),
+      publicID: this.publicID.slice(),
+    };
+  }
+
   getEncoded(): EncodedKeySet {
     return {
       shareSecret: base64UrlEncode(this.shareSecret),
@@ -205,7 +240,19 @@ function bundleAad(publicID: Uint8Array, suffix: Uint8Array): Uint8Array {
   return aad;
 }
 
+export function chunkedAad(publicID: Uint8Array, suffix: Uint8Array): Uint8Array {
+  const version = textEncoder.encode("chunked-v1");
+  const aad = new Uint8Array(publicID.length + 1 + version.length + 1 + suffix.length);
+  aad.set(publicID, 0);
+  aad[publicID.length] = 0;
+  aad.set(version, publicID.length + 1);
+  aad[publicID.length + 1 + version.length] = 0;
+  aad.set(suffix, publicID.length + 1 + version.length + 1);
+  return aad;
+}
+
 const encoder = new TextEncoder();
+const textEncoder = new TextEncoder();
 
 function deriveBaseKeys(keyBytes: Uint8Array): {
   metaKey: Uint8Array;
