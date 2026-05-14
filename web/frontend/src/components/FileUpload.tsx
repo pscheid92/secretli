@@ -172,26 +172,33 @@ export default function FileUpload({ onSelect }: FileUploadProps) {
           }}
           onDragLeave={() => setDragOver(false)}
           onDrop={handleDrop}
-          className={`rounded-lg border-2 border-dashed p-4 transition-all duration-150 ${
+          className={`rounded-md border p-4 transition-all duration-150 ${
             dragOver
               ? "border-amber-400 bg-amber-400/5"
-              : "border-zinc-300 dark:border-zinc-500 bg-white dark:bg-zinc-900"
+              : "border-zinc-200 bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-950"
           }`}
         >
-          <div className="space-y-0.5">
+          <div className="mb-2 grid grid-cols-[1fr_auto_1.5rem] gap-3 px-1 text-xs font-semibold uppercase tracking-widest text-zinc-500 dark:text-zinc-400">
+            <span>Name</span>
+            <span>Size</span>
+            <span />
+          </div>
+          <div className="divide-y divide-zinc-200 rounded-md border border-zinc-200 bg-white dark:divide-zinc-800 dark:border-zinc-800 dark:bg-zinc-900">
             {selectedFiles.map((f, i) => (
               <div
                 key={`${f.name}-${f.size}-${i}`}
-                className="flex items-center gap-2 py-1.5 px-1 rounded text-xs group hover:bg-zinc-50 dark:hover:bg-zinc-800/50 transition-colors duration-100"
+                className="group grid grid-cols-[1fr_auto_1.5rem] items-center gap-3 px-3 py-2 text-xs transition-colors duration-100 hover:bg-zinc-50 dark:hover:bg-zinc-800/50"
               >
-                <FileIcon name={f.name} />
-                <span
-                  className="font-medium text-zinc-700 dark:text-zinc-100 truncate flex-1"
-                  title={f.name}
-                >
-                  {f.name}
+                <span className="flex min-w-0 items-center gap-2">
+                  <FileIcon name={f.name} />
+                  <span
+                    className="truncate font-medium text-zinc-700 dark:text-zinc-100"
+                    title={f.name}
+                  >
+                    {f.name}
+                  </span>
                 </span>
-                <span className="text-zinc-500 dark:text-zinc-400 flex-shrink-0 tabular-nums">
+                <span className="tabular-nums text-zinc-500 dark:text-zinc-400">
                   {formatSize(f.size)}
                 </span>
                 <button
@@ -200,7 +207,7 @@ export default function FileUpload({ onSelect }: FileUploadProps) {
                     e.stopPropagation();
                     removeFile(i);
                   }}
-                  className="ml-0.5 p-0.5 rounded text-zinc-400 hover:text-red-400 hover:bg-red-400/10 transition-colors duration-150 opacity-0 group-hover:opacity-100 focus:opacity-100"
+                  className="rounded p-0.5 text-zinc-400 opacity-0 transition-colors duration-150 hover:bg-red-400/10 hover:text-red-400 focus:opacity-100 group-hover:opacity-100"
                   aria-label={`Remove ${f.name}`}
                 >
                   <svg
@@ -219,8 +226,8 @@ export default function FileUpload({ onSelect }: FileUploadProps) {
           </div>
 
           {/* Size usage bar */}
-          <div className="mt-3 pt-3 border-t border-zinc-200 dark:border-zinc-600">
-            <div className="flex justify-between text-xs text-zinc-500 dark:text-zinc-400 mb-1.5">
+          <div className="mt-4">
+            <div className="mb-1.5 flex justify-between text-xs text-zinc-500 dark:text-zinc-400">
               <span>
                 {selectedFiles.length} {selectedFiles.length === 1 ? "file" : "files"}
               </span>
@@ -228,7 +235,7 @@ export default function FileUpload({ onSelect }: FileUploadProps) {
                 {formatSize(totalSize)} / {MAX_UPLOAD_LABEL}
               </span>
             </div>
-            <div className="h-1 rounded-full bg-zinc-200 dark:bg-zinc-700 overflow-hidden">
+            <div className="h-1 overflow-hidden rounded-full bg-zinc-200 dark:bg-zinc-700">
               <div
                 className={`h-full rounded-full transition-all duration-300 ${
                   usagePercent > 90 ? "bg-red-400" : "bg-amber-400"

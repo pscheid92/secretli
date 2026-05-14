@@ -1,8 +1,8 @@
 import { useState } from "react";
-import { Link } from "react-router";
 import { toast } from "sonner";
 import SecretForm, { type SecretFormData } from "../components/SecretForm";
 import SecretResult from "../components/SecretResult";
+import ShareModeTabs from "../components/ShareModeTabs";
 import { ApiError, createSecret } from "../lib/api";
 import { KeySet } from "../lib/encryption";
 
@@ -13,28 +13,14 @@ interface ShareResult {
   deletionToken: string;
 }
 
-function ShareTabBar() {
-  return (
-    <div className="flex border-b border-zinc-200 dark:border-zinc-500/50 mb-6">
-      <div className="px-1 pb-3 mr-6 text-sm font-medium text-zinc-900 dark:text-zinc-100 border-b-2 border-amber-400">
-        Text
-      </div>
-      <Link
-        to="/file"
-        className="px-1 pb-3 text-sm text-zinc-600 dark:text-zinc-100 hover:text-zinc-900 dark:hover:text-white border-b-2 border-transparent transition-colors duration-150"
-      >
-        File
-      </Link>
-    </div>
-  );
-}
-
 export default function SharePage() {
   const [loading, setLoading] = useState(false);
+  const [stage, setStage] = useState<"idle" | "encrypting" | "uploading">("idle");
   const [result, setResult] = useState<ShareResult | null>(null);
 
   async function handleSubmit(data: SecretFormData) {
     setLoading(true);
+    setStage("encrypting");
 
     try {
       const keySet = await KeySet.generateRandom();
@@ -54,6 +40,7 @@ export default function SharePage() {
       });
 
       const encoded = keySet.getEncoded();
+      setStage("uploading");
 
       const response = await createSecret(
         {
@@ -74,7 +61,7 @@ export default function SharePage() {
         burnAfterRead: data.burnAfterRead,
         deletionToken: encoded.deletionToken,
       });
-      toast.success("Secret created");
+      toast.success("Share created");
     } catch (err) {
       if (err instanceof ApiError) {
         toast.error(err.message);
@@ -83,6 +70,7 @@ export default function SharePage() {
       }
     } finally {
       setLoading(false);
+      setStage("idle");
     }
   }
 
@@ -100,16 +88,23 @@ export default function SharePage() {
           onClick={() => setResult(null)}
           className="text-xs text-zinc-500 dark:text-zinc-100 hover:text-amber-500 dark:hover:text-amber-400 transition-colors duration-150"
         >
-          ← Share another secret
+          ← Create another share
         </button>
       </div>
     );
   }
 
   return (
-    <div>
-      <ShareTabBar />
-      <SecretForm onSubmit={handleSubmit} loading={loading} />
+    <div className="space-y-6">
+      <div className="flex flex-col gap-4 border-b border-zinc-200 pb-5 dark:border-zinc-800 md:flex-row md:items-end md:justify-between">
+        <h1 className="font-display text-2xl font-semibold text-zinc-800 dark:text-zinc-100">
+          Create Share
+        </h1>
+        <div className="w-full md:w-72">
+          <ShareModeTabs active="text" />
+        </div>
+      </div>
+      <SecretForm onSubmit={handleSubmit} loading={loading} stage={stage} />
     </div>
   );
 }
