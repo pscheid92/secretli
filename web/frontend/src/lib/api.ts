@@ -62,112 +62,6 @@ export function createSecret(
   });
 }
 
-// --- Chunked v2 upload ---
-
-export interface CreateChunkedUploadParams extends CreateSecretParams {
-  chunk_size: number;
-  chunk_count: number;
-  encrypted_total_size: number;
-}
-
-export interface CreateChunkedUploadResponse {
-  public_id: string;
-  upload_token: string;
-  upload_expires_at: string;
-  chunk_size: number;
-}
-
-export interface UploadedChunkStatus {
-  index: number;
-  encrypted_size: number;
-  sha256: string;
-}
-
-export interface UploadedManifestStatus {
-  encrypted_size: number;
-  sha256: string;
-}
-
-export interface ChunkedUploadStatus {
-  public_id: string;
-  upload_expires_at: string;
-  chunk_size: number;
-  chunk_count: number;
-  encrypted_total_size: number;
-  chunks: UploadedChunkStatus[];
-  manifest: UploadedManifestStatus | null;
-}
-
-export function createChunkedUpload(
-  params: CreateChunkedUploadParams,
-): Promise<CreateChunkedUploadResponse> {
-  return request("/api/v2/secrets/uploads", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(params),
-  });
-}
-
-export function getChunkedUploadStatus(
-  publicID: string,
-  uploadToken: string,
-): Promise<ChunkedUploadStatus> {
-  return request(`/api/v2/secrets/${publicID}/upload`, {
-    method: "GET",
-    headers: { Authorization: `Bearer ${uploadToken}` },
-  });
-}
-
-export function uploadEncryptedChunk(
-  publicID: string,
-  uploadToken: string,
-  index: number,
-  bytes: Uint8Array,
-  sha256: string,
-  onProgress?: (loaded: number, total: number) => void,
-): Promise<UploadedChunkStatus> {
-  return uploadEncryptedObject(
-    `/api/v2/secrets/${publicID}/chunks/${index}`,
-    uploadToken,
-    bytes,
-    sha256,
-    onProgress,
-  );
-}
-
-export function uploadEncryptedManifest(
-  publicID: string,
-  uploadToken: string,
-  bytes: Uint8Array,
-  sha256: string,
-  onProgress?: (loaded: number, total: number) => void,
-): Promise<UploadedChunkStatus> {
-  return uploadEncryptedObject(
-    `/api/v2/secrets/${publicID}/manifest`,
-    uploadToken,
-    bytes,
-    sha256,
-    onProgress,
-  );
-}
-
-export function completeChunkedUpload(
-  publicID: string,
-  uploadToken: string,
-): Promise<CreateSecretResponse> {
-  return request(`/api/v2/secrets/${publicID}/complete`, {
-    method: "POST",
-    headers: { Authorization: `Bearer ${uploadToken}` },
-  });
-}
-
-export function cancelChunkedUpload(publicID: string, uploadToken: string): Promise<void> {
-  return request(`/api/v2/secrets/${publicID}/upload`, {
-    method: "DELETE",
-    headers: { Authorization: `Bearer ${uploadToken}` },
-  });
-}
-
 // --- Retrieve (streams blob) ---
 
 export interface RetrieveSecretResponse {
@@ -210,7 +104,6 @@ export interface RetrievalSessionResponse {
   blob_size: number;
   expires_at: string;
   burn_after_read: boolean;
-  storage_version?: "single-v1" | "chunked-v1";
 }
 
 export async function startRetrievalSession(
@@ -255,31 +148,6 @@ export async function retrieveSecretRange(
   return new Uint8Array(await res.arrayBuffer());
 }
 
-export async function startChunkedRetrievalSession(
-  publicID: string,
-  blobToken: string,
-): Promise<RetrievalSessionResponse> {
-  return request(`/api/v2/secrets/${publicID}/retrieval-session`, {
-    method: "POST",
-    headers: { "X-Blob-Token": blobToken },
-  });
-}
-
-export async function retrieveChunkedManifest(
-  publicID: string,
-  sessionToken: string,
-): Promise<Uint8Array> {
-  return retrieveChunkedObject(`/api/v2/secrets/${publicID}/manifest`, sessionToken);
-}
-
-export async function retrieveChunkedChunk(
-  publicID: string,
-  sessionToken: string,
-  index: number,
-): Promise<Uint8Array> {
-  return retrieveChunkedObject(`/api/v2/secrets/${publicID}/chunks/${index}`, sessionToken);
-}
-
 // --- Metadata ---
 
 export interface SecretMetadataResponse {
@@ -288,7 +156,6 @@ export interface SecretMetadataResponse {
   burn_after_read: boolean;
   expires_at: string;
   created_at: string;
-  storage_version?: "single-v1" | "chunked-v1";
 }
 
 export function getSecretMetadata(
@@ -315,63 +182,4 @@ export function deleteSecret(
       "X-Deletion-Token": deletionToken,
     },
   });
-}
-
-function uploadEncryptedObject(
-  url: string,
-  uploadToken: string,
-  bytes: Uint8Array,
-  sha256: string,
-  onProgress?: (loaded: number, total: number) => void,
-): Promise<UploadedChunkStatus> {
-  return new Promise((resolve, reject) => {
-    const xhr = new XMLHttpRequest();
-    xhr.open("PUT", url);
-    xhr.withCredentials = true;
-    xhr.responseType = "json";
-    xhr.setRequestHeader("Authorization", `Bearer ${uploadToken}`);
-    xhr.setRequestHeader("Content-Type", "application/octet-stream");
-    xhr.setRequestHeader("X-Encrypted-SHA256", sha256);
-    xhr.upload.onprogress = (event) => {
-      onProgress?.(event.loaded, event.lengthComputable ? event.total : bytes.byteLength);
-    };
-    xhr.onerror = () => reject(new ApiError(0, "Network error — please check your connection"));
-    xhr.onload = () => {
-      if (xhr.status < 200 || xhr.status >= 300) {
-        const response =
-          typeof xhr.response === "object" && xhr.response !== null ? xhr.response : null;
-        const message =
-          (response as { error?: string } | null)?.error ?? `Request failed (${xhr.status})`;
-        reject(new ApiError(xhr.status, message));
-        return;
-      }
-      resolve(xhr.response as UploadedChunkStatus);
-    };
-    xhr.send(new Blob([arrayBufferFromBytes(bytes)]));
-  });
-}
-
-async function retrieveChunkedObject(url: string, sessionToken: string): Promise<Uint8Array> {
-  let res: Response;
-  try {
-    res = await fetch(url, {
-      method: "GET",
-      credentials: "same-origin",
-      headers: { Authorization: `Bearer ${sessionToken}` },
-    });
-  } catch {
-    throw new ApiError(0, "Network error — please check your connection");
-  }
-
-  if (!res.ok) {
-    const body = await res.json().catch(() => null);
-    const message = body?.error ?? `Request failed (${res.status})`;
-    throw new ApiError(res.status, message);
-  }
-
-  return new Uint8Array(await res.arrayBuffer());
-}
-
-function arrayBufferFromBytes(bytes: Uint8Array): ArrayBuffer {
-  return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
 }

@@ -8,12 +8,9 @@ import {
   ApiError,
   deleteSecret,
   getSecretMetadata,
-  retrieveChunkedChunk,
-  retrieveChunkedManifest,
   retrieveSecret,
   retrieveSecretRange,
   type SecretMetadataResponse,
-  startChunkedRetrievalSession,
   startRetrievalSession,
 } from "../lib/api";
 import {
@@ -22,11 +19,6 @@ import {
   decryptBundleFiles,
   readBundleManifest,
 } from "../lib/bundle";
-import {
-  type ChunkedManifest,
-  decryptChunkedFiles,
-  decryptChunkedManifest,
-} from "../lib/chunkedBundle";
 import { KeySet, type SecretMeta } from "../lib/encryption";
 import { formatRelativeTime, formatSize } from "../lib/format";
 
@@ -43,11 +35,10 @@ type State =
   | { stage: "decrypted"; text: string; shareSecret: string; deletionToken: string }
   | {
       stage: "bundle-ready";
-      manifest: BundleManifest | ChunkedManifest;
+      manifest: BundleManifest;
       keySet: KeySet;
       publicID: string;
       sessionToken: string;
-      storageVersion: "single-v1" | "chunked-v1";
       shareSecret: string;
       deletionToken: string;
     }
@@ -71,7 +62,7 @@ function MetaRow({ label, value, accent }: { label: string; value: string; accen
   );
 }
 
-function manifestTotalSize(manifest: BundleManifest | ChunkedManifest): number {
+function manifestTotalSize(manifest: BundleManifest): number {
   return manifest.files.reduce((sum, file) => sum + file.size, 0);
 }
 
@@ -148,13 +139,7 @@ export default function RetrievePage() {
       }
 
       const keySet = await KeySet.fromShareSecret(shareSecret);
-      await revealWithKeySet(
-        keySet,
-        shareSecret,
-        deletionToken,
-        meta.clientMeta,
-        meta.serverMeta.storage_version,
-      );
+      await revealWithKeySet(keySet, shareSecret, deletionToken, meta.clientMeta);
     } catch (err) {
       handleRevealError(err);
     } finally {
@@ -169,13 +154,7 @@ export default function RetrievePage() {
 
     try {
       const keySet = await KeySet.fromShareSecret(state.shareSecret, data.password);
-      await revealWithKeySet(
-        keySet,
-        state.shareSecret,
-        state.deletionToken,
-        state.meta.clientMeta,
-        state.meta.serverMeta.storage_version,
-      );
+      await revealWithKeySet(keySet, state.shareSecret, state.deletionToken, state.meta.clientMeta);
     } catch {
       setPasswordFormError("password", { message: "Wrong password. Please try again." });
     } finally {
@@ -188,7 +167,6 @@ export default function RetrievePage() {
     shareSecret: string,
     deletionToken: string,
     clientMeta: SecretMeta,
-    serverStorageVersion?: "single-v1" | "chunked-v1",
   ) {
     // Public ID is always derived from the share secret; blob access may be password-derived.
     const baseKeySet = await KeySet.fromShareSecret(shareSecret);
@@ -196,30 +174,6 @@ export default function RetrievePage() {
     const blobEncoded = keySet.getEncoded();
 
     if (clientMeta.type === "bundle") {
-      const storageVersion = clientMeta.storage_version ?? serverStorageVersion ?? "single-v1";
-      if (storageVersion === "chunked-v1") {
-        const session = await startChunkedRetrievalSession(
-          baseEncoded.publicID,
-          blobEncoded.blobToken,
-        );
-        const encryptedManifest = await retrieveChunkedManifest(
-          baseEncoded.publicID,
-          session.session_token,
-        );
-        const manifest = decryptChunkedManifest(encryptedManifest, keySet);
-        setState({
-          stage: "bundle-ready",
-          manifest,
-          keySet,
-          publicID: baseEncoded.publicID,
-          sessionToken: session.session_token,
-          storageVersion: "chunked-v1",
-          shareSecret,
-          deletionToken,
-        });
-        return;
-      }
-
       const session = await startRetrievalSession(baseEncoded.publicID, blobEncoded.blobToken);
       const fetchRange = (start: number, end: number) =>
         retrieveSecretRange(baseEncoded.publicID, session.session_token, start, end);
@@ -230,7 +184,6 @@ export default function RetrievePage() {
         keySet,
         publicID: baseEncoded.publicID,
         sessionToken: session.session_token,
-        storageVersion: "single-v1",
         shareSecret,
         deletionToken,
       });
@@ -601,7 +554,7 @@ export default function RetrievePage() {
   // -- Bundle ready --
 
   if (state.stage === "bundle-ready") {
-    const { keySet, manifest, publicID, sessionToken, storageVersion } = state;
+    const { keySet, manifest, publicID, sessionToken } = state;
     const isMulti = manifest.files.length > 1;
     const totalSize = manifestTotalSize(manifest);
 
@@ -619,20 +572,11 @@ export default function RetrievePage() {
     async function downloadAll() {
       setDownloadingBundle(true);
       try {
-        const decrypted =
-          storageVersion === "chunked-v1"
-            ? await decryptChunkedFiles(manifest as ChunkedManifest, keySet, (index) =>
-                retrieveChunkedChunk(publicID, sessionToken, index),
-              )
-            : await decryptBundleFiles(
-                (manifest as BundleManifest).files,
-                keySet,
-                (start, end) => retrieveSecretRange(publicID, sessionToken, start, end),
-                {
-                  maxCoalescedPlaintextBytes: DOWNLOAD_ALL_BUNDLE_COALESCED_PLAINTEXT_BYTES,
-                },
-              );
-        for (const { file, blob } of decrypted) {
+        const fetchRange = (start: number, end: number) =>
+          retrieveSecretRange(publicID, sessionToken, start, end);
+        for (const { file, blob } of await decryptBundleFiles(manifest.files, keySet, fetchRange, {
+          maxCoalescedPlaintextBytes: DOWNLOAD_ALL_BUNDLE_COALESCED_PLAINTEXT_BYTES,
+        })) {
           saveBlob(blob, file.name);
         }
       } catch {

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Controller, useForm } from "react-hook-form";
 import { toast } from "sonner";
 import ExpirationPicker from "../components/ExpirationPicker";
@@ -10,14 +10,6 @@ import Toggle from "../components/Toggle";
 import TransferStatus, { type TransferStep } from "../components/TransferStatus";
 import { ApiError, createSecret } from "../lib/api";
 import { createEncryptedBundle } from "../lib/bundle";
-import {
-  type ChunkedUploadProgress,
-  type ChunkedUploadResumeState,
-  fileFingerprints,
-  fingerprintsMatch,
-  listPendingChunkedUploadStates,
-  uploadChunkedShare,
-} from "../lib/chunkedUpload";
 import { KeySet } from "../lib/encryption";
 import { formatExpiration } from "../lib/expiration";
 import { formatSize } from "../lib/format";
@@ -25,7 +17,6 @@ import {
   fitsBundleUploadLimit,
   MAX_ENCRYPTED_UPLOAD_BYTES,
   MAX_UPLOAD_LABEL,
-  shouldUseChunkedUpload,
 } from "../lib/uploadLimits";
 
 interface FileFormData {
@@ -80,9 +71,6 @@ export default function FilePage() {
   const [loading, setLoading] = useState(false);
   const [stage, setStage] = useState<"idle" | "encrypting" | "uploading">("idle");
   const [result, setResult] = useState<FileResult | null>(null);
-  const [pendingUploads, setPendingUploads] = useState<ChunkedUploadResumeState[]>([]);
-  const [resumeState, setResumeState] = useState<ChunkedUploadResumeState | null>(null);
-  const [uploadProgress, setUploadProgress] = useState<ChunkedUploadProgress | null>(null);
 
   const {
     register,
@@ -106,11 +94,6 @@ export default function FilePage() {
   const expiration = watch("expiration");
   const password = watch("password");
   const totalSize = files.reduce((sum, file) => sum + file.size, 0);
-  const matchingPendingUpload = pendingUploads.find((pending) =>
-    fingerprintsMatch(pending.fileFingerprints, fileFingerprints(files)),
-  );
-  const activeResumeState =
-    resumeState && matchingPendingUpload?.publicID === resumeState.publicID ? resumeState : null;
   const steps: TransferStep[] = [
     {
       label: "Encrypting",
@@ -119,16 +102,6 @@ export default function FilePage() {
     { label: "Uploading", state: stage === "uploading" ? "active" : "pending" },
     { label: "Finalize", state: "pending" },
   ];
-  const progressPercent =
-    uploadProgress && uploadProgress.totalBytes > 0
-      ? (uploadProgress.uploadedBytes / uploadProgress.totalBytes) * 100
-      : undefined;
-
-  useEffect(() => {
-    listPendingChunkedUploadStates()
-      .then(setPendingUploads)
-      .catch(() => setPendingUploads([]));
-  }, []);
 
   async function onSubmit(data: FileFormData) {
     setLoading(true);
@@ -145,60 +118,13 @@ export default function FilePage() {
         return;
       }
 
-      const useChunkedUpload = shouldUseChunkedUpload(data.files.map((file) => file.size));
-      if (activeResumeState && !useChunkedUpload) {
-        toast.error("Pending upload no longer matches the selected files.");
-        return;
-      }
-      if (activeResumeState?.passwordProtected && data.password.length === 0) {
-        toast.error("Enter the password used for the pending upload.");
-        return;
-      }
-
-      const keySet = activeResumeState
-        ? await KeySet.fromShareSecret(activeResumeState.shareSecret)
-        : await KeySet.generateRandom();
-      const hasPassword = activeResumeState
-        ? activeResumeState.passwordProtected
-        : data.password.length > 0;
+      const keySet = await KeySet.generateRandom();
+      const hasPassword = data.password.length > 0;
 
       let encryptKeySet = keySet;
       if (hasPassword) {
         const encoded = keySet.getEncoded();
         encryptKeySet = await KeySet.fromShareSecret(encoded.shareSecret, data.password);
-      }
-
-      if (useChunkedUpload) {
-        const encryptedMeta = await keySet.encryptMeta({
-          type: "bundle",
-          storage_version: "chunked-v1",
-          password_protected: hasPassword || Boolean(activeResumeState?.passwordProtected),
-        });
-        setStage("uploading");
-        const response = await uploadChunkedShare({
-          files: data.files,
-          baseKeySet: keySet,
-          encryptKeySet,
-          encryptedMeta,
-          expiration: data.expiration,
-          burnAfterRead: data.burnAfterRead,
-          passwordProtected: hasPassword || Boolean(activeResumeState?.passwordProtected),
-          resumeState: activeResumeState,
-          onProgress: setUploadProgress,
-        });
-        const deletionToken = activeResumeState?.deletionToken ?? response.encoded.deletionToken;
-        setResult({
-          url: `${window.location.origin}/s#${response.encoded.shareSecret}`,
-          expiresAt: response.expiresAt,
-          burnAfterRead: activeResumeState?.burnAfterRead ?? data.burnAfterRead,
-          deletionToken,
-        });
-        setPendingUploads((uploads) =>
-          uploads.filter((upload) => upload.publicID !== response.encoded.publicID),
-        );
-        setResumeState(null);
-        toast.success("Share created");
-        return;
       }
 
       const { blob, manifest } = await createEncryptedBundle(data.files, encryptKeySet);
@@ -245,7 +171,6 @@ export default function FilePage() {
     } finally {
       setLoading(false);
       setStage("idle");
-      setUploadProgress(null);
     }
   }
 
@@ -302,31 +227,8 @@ export default function FilePage() {
               <FileUpload
                 onSelect={(selected) => {
                   setValue("files", selected, { shouldValidate: true });
-                  setResumeState(null);
                 }}
               />
-              {matchingPendingUpload && !resumeState && (
-                <div className="mt-3 flex items-center justify-between gap-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 dark:border-amber-900/40 dark:bg-amber-900/10">
-                  <p className="text-xs text-amber-700 dark:text-amber-400">
-                    Pending chunked upload found for these files.
-                  </p>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setResumeState(matchingPendingUpload);
-                      if (matchingPendingUpload.passwordProtected) setShowPassword(true);
-                    }}
-                    className="rounded-md bg-amber-400 px-2.5 py-1.5 text-xs font-semibold text-zinc-950 transition-colors duration-150 hover:bg-amber-300"
-                  >
-                    Resume
-                  </button>
-                </div>
-              )}
-              {activeResumeState && (
-                <div className="mt-3 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-700 dark:border-emerald-900/40 dark:bg-emerald-900/10 dark:text-emerald-400">
-                  Resuming pending upload.
-                </div>
-              )}
               {errors.files && (
                 <p className="mt-2 text-xs text-red-500 dark:text-red-400">
                   {errors.files.message}
@@ -419,12 +321,7 @@ export default function FilePage() {
           </section>
 
           {loading ? (
-            <TransferStatus
-              title="Creating secure link"
-              steps={steps}
-              progress={progressPercent}
-              detail={uploadProgress ? `${Math.floor(progressPercent ?? 0)}% uploaded` : undefined}
-            />
+            <TransferStatus title="Creating secure link" steps={steps} />
           ) : (
             <TransferPreview />
           )}
