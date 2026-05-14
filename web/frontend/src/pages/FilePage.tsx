@@ -100,7 +100,7 @@ export default function FilePage() {
       state: stage === "idle" ? "pending" : stage === "encrypting" ? "active" : "done",
     },
     { label: "Uploading", state: stage === "uploading" ? "active" : "pending" },
-    { label: "Creating link", state: "pending" },
+    { label: "Finalize", state: "pending" },
   ];
 
   async function onSubmit(data: FileFormData) {
