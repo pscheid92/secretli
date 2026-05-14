@@ -7,7 +7,7 @@ Secrets are encrypted entirely in the browser — the server never sees plaintex
 ## Features
 
 - **Zero-knowledge encryption** — XChaCha20-Poly1305 encryption happens client-side; the server stores only opaque blobs
-- **Text and file sharing** — share secrets as text or upload files (up to 100 MB)
+- **Text and file sharing** — share secrets as text or upload files (up to 1 GiB)
 - **Multi-file support** — select multiple files and store them as an encrypted random-access bundle
 - **Burn after reading** — optionally destroy the secret after the first view
 - **Password protection** — add a password for an extra layer of encryption (scrypt)
@@ -75,7 +75,7 @@ make clean            # Remove build artifacts
 Large-file E2E is intentionally separate from PR CI. Run it against a local app with:
 
 ```bash
-LARGE_E2E_SIZE_MB=99 make e2e-large
+LARGE_E2E_SIZE_MB=1023 make e2e-large
 ```
 
 It uploads and downloads a synthetic near-limit file, verifies the SHA-256 hash, and prints timing and browser heap samples. GitHub Actions also has a manual **Large E2E** workflow for this check.
@@ -98,7 +98,7 @@ Configuration is done via environment variables. See [`.env.example`](.env.examp
 | `S3_BUCKET` | S3 bucket name | — |
 | `S3_ACCESS_KEY` / `S3_SECRET_KEY` | S3 credentials | — |
 | `S3_USE_SSL` | Enable TLS for S3 | `false` |
-| `MAX_FILE_SIZE` | Upload size limit in bytes | `104857600` (100 MB) |
+| `MAX_FILE_SIZE` | Encrypted upload size limit in bytes | `1073741824` (1 GiB) |
 | `CLEANUP_INTERVAL` | Expired secret cleanup frequency | `1m` |
 | `ALLOWED_ORIGINS` | CORS allowed origins | — |
 | `METRICS_TOKEN` | Optional bearer token required for `/metrics` | — |

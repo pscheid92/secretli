@@ -4,7 +4,7 @@ import { mkdir, stat } from "node:fs/promises";
 import { dirname } from "node:path";
 import { expect, type Page, test } from "@playwright/test";
 
-const DEFAULT_SIZE_MIB = 99;
+const DEFAULT_SIZE_MIB = 1023;
 const TEST_TIMEOUT_MS = 10 * 60 * 1000;
 const MIB = 1024 * 1024;
 
@@ -60,13 +60,13 @@ test.describe("Large-file performance", () => {
 
     await page.goto("/file");
     await page.setInputFiles('input[type="file"]', sourcePath);
-    await expect(page.getByText(`${sizeMiB.toFixed(1)} MB / 100 MB`)).toBeVisible({
+    await expect(page.getByText(`${sizeMiB.toFixed(1)} MB / 1 GiB`)).toBeVisible({
       timeout: 10000,
     });
 
     const uploadStartedAt = performance.now();
     await page.click('button[type="submit"]');
-    await expect(page.getByRole("main").getByText("Secret created")).toBeVisible({
+    await expect(page.getByRole("main").getByText("Secure link created")).toBeVisible({
       timeout: TEST_TIMEOUT_MS,
     });
     const uploadMs = performance.now() - uploadStartedAt;
@@ -74,7 +74,7 @@ test.describe("Large-file performance", () => {
 
     const shareUrl = await page.locator("input[readonly]").first().inputValue();
     await page.goto(shareUrl);
-    await expect(page.locator("h1")).toHaveText("Secret Ready", { timeout: 10000 });
+    await expect(page.locator("h1")).toHaveText("File Share", { timeout: 10000 });
 
     const outputPath = testInfo.outputPath("downloaded", filename);
     const retrieveStartedAt = performance.now();
@@ -115,8 +115,8 @@ async function retrieveBundle(
   sampleHeap: (label: string) => Promise<void>,
 ): Promise<{ revealMs: number; downloadMs: number }> {
   const revealStartedAt = performance.now();
-  await page.getByRole("button", { name: /Download/ }).click();
-  await expect(page.locator("h1")).toHaveText("File Ready", { timeout: TEST_TIMEOUT_MS });
+  await page.getByRole("button", { name: /Prepare Download/ }).click();
+  await expect(page.locator("h1")).toHaveText("Download File", { timeout: TEST_TIMEOUT_MS });
   const revealMs = performance.now() - revealStartedAt;
   await sampleHeap("after manifest");
 

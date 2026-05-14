@@ -34,8 +34,8 @@ func TestLoadDefaults(t *testing.T) {
 	if cfg.S3.Region != "us-east-1" {
 		t.Errorf("S3Region = %q, want %q", cfg.S3.Region, "us-east-1")
 	}
-	if cfg.MaxFileSize != 104857600 {
-		t.Errorf("MaxFileSize = %d, want %d", cfg.MaxFileSize, 104857600)
+	if cfg.MaxFileSize != 1073741824 {
+		t.Errorf("MaxFileSize = %d, want %d", cfg.MaxFileSize, 1073741824)
 	}
 	if cfg.CleanupInterval != time.Minute {
 		t.Errorf("CleanupInterval = %v, want %v", cfg.CleanupInterval, time.Minute)

@@ -40,7 +40,7 @@ async function createFileSecretLinks(
   }
 
   await page.click('button[type="submit"]');
-  await expect(page.getByRole("main").getByText("Secret created")).toBeVisible({
+  await expect(page.getByRole("main").getByText("Secure link created")).toBeVisible({
     timeout: 10000,
   });
 
@@ -52,15 +52,15 @@ async function createFileSecretLinks(
 
 async function revealBundle(page: Page, shareUrl: string, password?: string) {
   await page.goto(shareUrl);
-  await expect(page.locator("h1")).toHaveText("Secret Ready", { timeout: 10000 });
+  await expect(page.locator("h1")).toHaveText("File Share", { timeout: 10000 });
 
   if (password) {
-    await page.getByRole("button", { name: "Enter Password" }).click();
-    await expect(page.locator("h1")).toHaveText("Password Required", { timeout: 10000 });
+    await page.getByRole("button", { name: "Unlock Share" }).click();
+    await expect(page.locator("h1")).toHaveText("Unlock Share", { timeout: 10000 });
     await page.fill('input[type="password"]', password);
     await page.click('button[type="submit"]');
   } else {
-    await page.getByRole("button", { name: /Download/ }).click();
+    await page.getByRole("button", { name: /Prepare Download/ }).click();
   }
 }
 
@@ -73,7 +73,7 @@ async function downloadBundleFiles(
   page.on("download", (download) => downloads.push(download));
 
   await page
-    .getByRole("button", { name: files.length > 1 ? "Download All" : "Download File" })
+    .getByRole("button", { name: files.length > 1 ? "Download Files" : "Download File" })
     .click();
   await expect.poll(() => downloads.length, { timeout: 10000 }).toBe(files.length);
 
@@ -97,7 +97,7 @@ test.describe("File bundle sharing", () => {
     const shareUrl = await createFileSecret(page, [file]);
     await revealBundle(page, shareUrl);
 
-    await expect(page.locator("h1")).toHaveText("File Ready", { timeout: 10000 });
+    await expect(page.locator("h1")).toHaveText("Download File", { timeout: 10000 });
     await expect(page.getByTestId("bundle-file-0").getByText(file.name)).toBeVisible();
 
     await downloadBundleFiles(page, [file], (filename) => testInfo.outputPath(filename));
@@ -111,7 +111,7 @@ test.describe("File bundle sharing", () => {
 
     const shareUrl = await createFileSecret(page, files);
     await revealBundle(page, shareUrl);
-    await expect(page.locator("h1")).toHaveText("Files Ready", { timeout: 10000 });
+    await expect(page.locator("h1")).toHaveText("Download Files", { timeout: 10000 });
     await expect(page.getByText("all-alpha.txt")).toBeVisible();
     await expect(page.getByText("all-bravo.txt")).toBeVisible();
 
@@ -129,7 +129,7 @@ test.describe("File bundle sharing", () => {
     const shareUrl = await createFileSecret(page, [file], { password });
     await revealBundle(page, shareUrl, password);
 
-    await expect(page.locator("h1")).toHaveText("File Ready", { timeout: 10000 });
+    await expect(page.locator("h1")).toHaveText("Download File", { timeout: 10000 });
     await downloadBundleFiles(page, [file], (filename) => testInfo.outputPath(filename));
   });
 
@@ -145,11 +145,11 @@ test.describe("File bundle sharing", () => {
 
     const shareUrl = await createFileSecret(page, [file], { burnAfterRead: true });
     await revealBundle(page, shareUrl);
-    await expect(page.locator("h1")).toHaveText("File Ready", { timeout: 10000 });
+    await expect(page.locator("h1")).toHaveText("Download File", { timeout: 10000 });
 
     const secondPage = await context.newPage();
     await secondPage.goto(shareUrl);
-    await expect(secondPage.getByText("This secret has expired or does not exist.")).toBeVisible({
+    await expect(secondPage.getByText("This share has expired or does not exist.")).toBeVisible({
       timeout: 10000,
     });
   });
@@ -166,17 +166,17 @@ test.describe("File bundle sharing", () => {
 
     const { shareUrl, ownerUrl } = await createFileSecretLinks(page, [file]);
     await revealBundle(page, ownerUrl);
-    await expect(page.locator("h1")).toHaveText("File Ready", { timeout: 10000 });
+    await expect(page.locator("h1")).toHaveText("Download File", { timeout: 10000 });
 
-    await page.getByRole("button", { name: "Delete this secret" }).click();
-    await expect(page.getByRole("main").getByText("Secret deleted")).toBeVisible({
+    await page.getByRole("button", { name: "Delete share" }).click();
+    await expect(page.getByRole("main").getByText("Share deleted")).toBeVisible({
       timeout: 10000,
     });
 
     const recipientPage = await context.newPage();
     await recipientPage.goto(shareUrl);
-    await expect(recipientPage.getByText("This secret has expired or does not exist.")).toBeVisible(
-      { timeout: 10000 },
-    );
+    await expect(recipientPage.getByText("This share has expired or does not exist.")).toBeVisible({
+      timeout: 10000,
+    });
   });
 });

@@ -62,13 +62,14 @@ export default function Layout() {
   const [menuOpen, setMenuOpen] = useState(false);
   const location = useLocation();
 
-  const isShareActive = location.pathname === "/share" || location.pathname === "/file";
+  const isShareActive =
+    location.pathname === "/" || location.pathname === "/share" || location.pathname === "/file";
   const isRetrieveActive = location.pathname === "/s";
 
   return (
     <div className="min-h-screen flex flex-col bg-zinc-50 dark:bg-zinc-950 text-zinc-800 dark:text-zinc-100">
       <header className="sticky top-0 z-50 border-b border-zinc-200 dark:border-zinc-500/50 bg-white/90 dark:bg-zinc-950/90 backdrop-blur-md">
-        <nav className="mx-auto flex max-w-2xl items-center justify-between px-4 sm:px-6 py-4">
+        <nav className="mx-auto flex max-w-6xl items-center justify-between px-4 py-4 sm:px-6">
           <Link to="/" className="flex items-center gap-2 group">
             <span className="font-display text-sm font-semibold tracking-[0.2em] uppercase text-zinc-800 dark:text-zinc-100">
               Secretli
@@ -161,7 +162,7 @@ export default function Layout() {
         )}
       </header>
 
-      <main className="mx-auto w-full max-w-2xl flex-1 px-4 sm:px-6 py-10">
+      <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-8 sm:px-6 lg:py-10">
         <Outlet />
       </main>
 

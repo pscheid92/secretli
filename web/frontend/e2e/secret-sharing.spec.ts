@@ -9,7 +9,7 @@ test.describe("Text secret sharing", () => {
     await page.fill("#secret-text", secretText);
     await page.click('button[type="submit"]');
 
-    await expect(page.getByRole("main").getByText("Secret created")).toBeVisible({
+    await expect(page.getByRole("main").getByText("Secure link created")).toBeVisible({
       timeout: 10000,
     });
 
@@ -19,11 +19,11 @@ test.describe("Text secret sharing", () => {
 
     await page.goto(shareUrl);
 
-    await expect(page.locator("h1")).toHaveText("Secret Ready", { timeout: 10000 });
+    await expect(page.locator("h1")).toHaveText("Text Share", { timeout: 10000 });
 
-    await page.getByRole("button", { name: "Reveal Secret" }).click();
+    await page.getByRole("button", { name: "Reveal Text" }).click();
 
-    await expect(page.locator("h1")).toHaveText("Secret", { timeout: 10000 });
+    await expect(page.locator("h1")).toHaveText("Decrypted Text", { timeout: 10000 });
 
     const decryptedText = await page.locator("pre").textContent();
     expect(decryptedText).toBe(secretText);
@@ -40,23 +40,23 @@ test.describe("Text secret sharing", () => {
     await page.fill('input[type="password"]', password);
     await page.click('button[type="submit"]');
 
-    await expect(page.getByRole("main").getByText("Secret created")).toBeVisible({
+    await expect(page.getByRole("main").getByText("Secure link created")).toBeVisible({
       timeout: 10000,
     });
 
     const shareUrl = await page.locator("input[readonly]").first().inputValue();
     await page.goto(shareUrl);
 
-    await expect(page.locator("h1")).toHaveText("Secret Ready", { timeout: 10000 });
+    await expect(page.locator("h1")).toHaveText("Text Share", { timeout: 10000 });
 
-    await page.getByRole("button", { name: "Enter Password" }).click();
+    await page.getByRole("button", { name: "Unlock Share" }).click();
 
-    await expect(page.locator("h1")).toHaveText("Password Required", { timeout: 10000 });
+    await expect(page.locator("h1")).toHaveText("Unlock Share", { timeout: 10000 });
 
     await page.fill('input[type="password"]', password);
     await page.click('button[type="submit"]');
 
-    await expect(page.locator("h1")).toHaveText("Secret", { timeout: 10000 });
+    await expect(page.locator("h1")).toHaveText("Decrypted Text", { timeout: 10000 });
     const decryptedText = await page.locator("pre").textContent();
     expect(decryptedText).toBe(secretText);
   });
@@ -70,7 +70,7 @@ test.describe("Text secret sharing", () => {
     await page.goto("/share");
     await page.fill("#secret-text", secretText);
     await page.click('button[type="submit"]');
-    await expect(page.getByRole("main").getByText("Secret created")).toBeVisible({
+    await expect(page.getByRole("main").getByText("Secure link created")).toBeVisible({
       timeout: 10000,
     });
 
@@ -79,19 +79,19 @@ test.describe("Text secret sharing", () => {
     expect(ownerUrl).toContain("!");
 
     await page.goto(ownerUrl);
-    await expect(page.locator("h1")).toHaveText("Secret Ready", { timeout: 10000 });
-    await page.getByRole("button", { name: "Reveal Secret" }).click();
-    await expect(page.locator("h1")).toHaveText("Secret", { timeout: 10000 });
+    await expect(page.locator("h1")).toHaveText("Text Share", { timeout: 10000 });
+    await page.getByRole("button", { name: "Reveal Text" }).click();
+    await expect(page.locator("h1")).toHaveText("Decrypted Text", { timeout: 10000 });
 
-    await page.getByRole("button", { name: "Delete this secret" }).click();
-    await expect(page.getByRole("main").getByText("Secret deleted")).toBeVisible({
+    await page.getByRole("button", { name: "Delete share" }).click();
+    await expect(page.getByRole("main").getByText("Share deleted")).toBeVisible({
       timeout: 10000,
     });
 
     const recipientPage = await context.newPage();
     await recipientPage.goto(shareUrl);
-    await expect(recipientPage.getByText("This secret has expired or does not exist.")).toBeVisible(
-      { timeout: 10000 },
-    );
+    await expect(recipientPage.getByText("This share has expired or does not exist.")).toBeVisible({
+      timeout: 10000,
+    });
   });
 });

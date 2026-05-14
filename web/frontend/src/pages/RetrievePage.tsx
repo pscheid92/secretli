@@ -3,6 +3,7 @@ import { useForm } from "react-hook-form";
 import { toast } from "sonner";
 import SecretTypeIcon from "../components/SecretTypeIcon";
 import Spinner from "../components/Spinner";
+import TransferStatus from "../components/TransferStatus";
 import {
   ApiError,
   deleteSecret,
@@ -61,6 +62,10 @@ function MetaRow({ label, value, accent }: { label: string; value: string; accen
   );
 }
 
+function manifestTotalSize(manifest: BundleManifest): number {
+  return manifest.files.reduce((sum, file) => sum + file.size, 0);
+}
+
 export default function RetrievePage() {
   const hash = window.location.hash.slice(1);
   const [state, setState] = useState<State>(hash ? { stage: "loading" } : { stage: "prompt" });
@@ -105,7 +110,7 @@ export default function RetrievePage() {
     } catch (err) {
       if (err instanceof ApiError) {
         if (err.status === 404) {
-          setState({ stage: "error", message: "This secret has expired or does not exist." });
+          setState({ stage: "error", message: "This share has expired or does not exist." });
         } else if (err.status === 403) {
           setState({ stage: "error", message: "Invalid metadata token." });
         } else {
@@ -202,7 +207,7 @@ export default function RetrievePage() {
   function handleRevealError(err: unknown) {
     if (err instanceof ApiError) {
       if (err.status === 404) {
-        setState({ stage: "error", message: "This secret has expired or does not exist." });
+        setState({ stage: "error", message: "This share has expired or does not exist." });
       } else {
         setState({ stage: "error", message: err.message });
       }
@@ -223,12 +228,12 @@ export default function RetrievePage() {
       const encoded = keySet.getEncoded();
       await deleteSecret(encoded.publicID, encoded.metadataToken, state.deletionToken);
       setState({ stage: "deleted" });
-      toast.success("Secret deleted");
+      toast.success("Share deleted");
     } catch (err) {
       if (err instanceof ApiError) {
         toast.error(err.message);
       } else {
-        toast.error("Failed to delete secret.");
+        toast.error("Failed to delete share.");
       }
     } finally {
       setDeleting(false);
@@ -250,7 +255,7 @@ export default function RetrievePage() {
         const url = new URL(linkInput.trim());
         const fragment = url.hash.slice(1);
         if (!fragment) {
-          toast.error("That link doesn't contain a secret key.");
+          toast.error("That link doesn't contain a share key.");
           return;
         }
         window.location.href = `${window.location.pathname}#${fragment}`;
@@ -261,13 +266,13 @@ export default function RetrievePage() {
     }
 
     return (
-      <div className="space-y-6">
+      <div className="mx-auto max-w-2xl space-y-6">
         <div>
           <h1 className="font-display text-2xl font-semibold text-zinc-800 dark:text-zinc-100">
-            Retrieve a Secret
+            Open a Share
           </h1>
           <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-100">
-            Paste the link you received to decrypt it.
+            Paste a Secretli link to decrypt it in this browser.
           </p>
         </div>
         <form onSubmit={handleLinkSubmit} className="space-y-4">
@@ -284,7 +289,7 @@ export default function RetrievePage() {
             type="submit"
             className="flex w-full items-center justify-center gap-2 rounded-lg bg-amber-400 px-4 py-3 text-sm font-medium text-zinc-900 hover:bg-amber-300 focus:outline-none focus:ring-2 focus:ring-amber-400/50 transition-all duration-150"
           >
-            Retrieve Secret
+            Open Share
           </button>
         </form>
       </div>
@@ -297,7 +302,7 @@ export default function RetrievePage() {
     return (
       <div className="flex flex-col items-center justify-center gap-3 py-20">
         <Spinner size="lg" className="text-amber-400" />
-        <p className="text-sm text-zinc-600 dark:text-zinc-100">Loading...</p>
+        <p className="text-sm text-zinc-600 dark:text-zinc-100">Checking share...</p>
       </div>
     );
   }
@@ -325,7 +330,7 @@ export default function RetrievePage() {
             </svg>
             <div>
               <p className="text-sm font-medium text-red-700 dark:text-red-400">
-                Unable to retrieve secret
+                Unable to open share
               </p>
               <p className="text-sm text-red-600 dark:text-red-500 mt-0.5">{state.message}</p>
             </div>
@@ -335,7 +340,7 @@ export default function RetrievePage() {
           href="/share"
           className="text-xs text-zinc-500 dark:text-zinc-100 hover:text-amber-500 dark:hover:text-amber-400 transition-colors duration-150"
         >
-          ← Share a new secret
+          ← Create a new share
         </a>
       </div>
     );
@@ -347,86 +352,100 @@ export default function RetrievePage() {
     const { serverMeta, clientMeta } = state.meta;
     const isBundle = clientMeta.type === "bundle";
     const revealLabel = clientMeta.password_protected
-      ? "Enter Password"
+      ? "Unlock Share"
       : serverMeta.burn_after_read
         ? isBundle
-          ? "Download & Burn"
+          ? "Prepare Download & Burn"
           : "Reveal & Burn"
         : isBundle
-          ? "Download & Decrypt"
-          : "Reveal Secret";
+          ? "Prepare Download"
+          : "Reveal Text";
 
     return (
-      <div className="space-y-5">
-        <div>
-          <h1 className="font-display text-2xl font-semibold text-zinc-800 dark:text-zinc-100">
-            Secret Ready
-          </h1>
-          <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-100">
-            Review the details, then reveal.
-          </p>
-        </div>
-
-        <div className="rounded-lg border border-zinc-200 dark:border-zinc-500/50 divide-y divide-zinc-200 dark:divide-zinc-500/50 overflow-hidden">
-          <div className="flex items-center gap-2.5 px-4 py-3">
-            <SecretTypeIcon
-              type={clientMeta.type}
-              className="h-4 w-4 text-zinc-500 dark:text-zinc-100"
-            />
-            <span className="text-sm font-medium text-zinc-600 dark:text-zinc-100">
-              {isBundle ? "File bundle" : "Text"} secret
-            </span>
-          </div>
-          <div className="px-4">
-            <MetaRow label="Created" value={formatRelativeTime(serverMeta.created_at)} />
-          </div>
-          <div className="px-4">
-            <MetaRow label="Expires" value={formatRelativeTime(serverMeta.expires_at)} />
-          </div>
-          {isBundle && serverMeta.blob_size > 0 && (
-            <div className="px-4">
-              <MetaRow label="Size" value={formatSize(serverMeta.blob_size)} />
-            </div>
-          )}
-          {clientMeta.password_protected && (
-            <div className="px-4">
-              <MetaRow label="Password" value="Required" accent />
-            </div>
-          )}
-        </div>
-
-        {serverMeta.burn_after_read && (
-          <div className="flex items-start gap-3 rounded-lg border border-amber-200 dark:border-amber-900/40 bg-amber-50 dark:bg-amber-900/10 px-4 py-3">
-            <svg
-              className="h-4 w-4 text-amber-500 flex-shrink-0 mt-0.5"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-              strokeWidth={2}
-              aria-hidden="true"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
-              />
-            </svg>
-            <p className="text-xs text-amber-700 dark:text-amber-400">
-              This secret will be permanently consumed when reveal starts. If the download is
-              interrupted after that, the link may not work again.
+      <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_320px] lg:items-start">
+        <section className="space-y-5 rounded-lg border border-zinc-200 bg-white p-5 dark:border-zinc-700 dark:bg-zinc-900">
+          <div>
+            <h1 className="font-display text-2xl font-semibold text-zinc-800 dark:text-zinc-100">
+              {isBundle ? "File Share" : "Text Share"}
+            </h1>
+            <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-100">
+              Review the details before this browser decrypts the content.
             </p>
           </div>
-        )}
 
-        <button
-          type="button"
-          onClick={handleReveal}
-          disabled={revealing}
-          className="flex w-full items-center justify-center gap-2 rounded-lg bg-amber-400 px-4 py-3 text-sm font-medium text-zinc-900 hover:bg-amber-300 focus:outline-none focus:ring-2 focus:ring-amber-400/50 disabled:opacity-40 disabled:cursor-not-allowed transition-all duration-150"
-        >
-          {revealing && <Spinner size="sm" className="text-zinc-700" />}
-          {revealing ? "Decrypting..." : revealLabel}
-        </button>
+          <div className="divide-y divide-zinc-200 rounded-lg border border-zinc-200 dark:divide-zinc-700 dark:border-zinc-700">
+            <div className="flex items-center gap-2.5 px-4 py-3">
+              <SecretTypeIcon
+                type={clientMeta.type}
+                className="h-4 w-4 text-zinc-500 dark:text-zinc-100"
+              />
+              <span className="text-sm font-medium text-zinc-700 dark:text-zinc-100">
+                {isBundle ? "Files" : "Text"}
+              </span>
+            </div>
+            <div className="px-4">
+              <MetaRow label="Created" value={formatRelativeTime(serverMeta.created_at)} />
+            </div>
+            <div className="px-4">
+              <MetaRow label="Expires" value={formatRelativeTime(serverMeta.expires_at)} />
+            </div>
+            {isBundle && serverMeta.blob_size > 0 && (
+              <div className="px-4">
+                <MetaRow label="Size" value={formatSize(serverMeta.blob_size)} />
+              </div>
+            )}
+            {clientMeta.password_protected && (
+              <div className="px-4">
+                <MetaRow label="Password" value="Required" accent />
+              </div>
+            )}
+          </div>
+
+          {isBundle && (
+            <p className="text-xs leading-relaxed text-zinc-500 dark:text-zinc-400">
+              File names and sizes are hidden until the encrypted manifest is opened.
+            </p>
+          )}
+        </section>
+
+        <aside className="space-y-4 lg:sticky lg:top-24">
+          {serverMeta.burn_after_read && (
+            <div className="flex items-start gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 dark:border-amber-900/40 dark:bg-amber-900/10">
+              <svg
+                className="mt-0.5 h-4 w-4 flex-shrink-0 text-amber-500"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                strokeWidth={2}
+                aria-hidden="true"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+                />
+              </svg>
+              <p className="text-xs text-amber-700 dark:text-amber-400">
+                This share will be permanently consumed when reveal starts. If the download is
+                interrupted after that, the link may not work again.
+              </p>
+            </div>
+          )}
+          <section className="rounded-lg border border-zinc-200 bg-white px-4 py-4 dark:border-zinc-700 dark:bg-zinc-900">
+            <h2 className="text-xs font-semibold uppercase tracking-widest text-zinc-500 dark:text-zinc-400">
+              Next step
+            </h2>
+            <button
+              type="button"
+              onClick={handleReveal}
+              disabled={revealing}
+              className="mt-4 flex w-full items-center justify-center gap-2 rounded-lg bg-amber-400 px-4 py-3 text-sm font-semibold text-zinc-950 transition-all duration-150 hover:bg-amber-300 focus:outline-none focus:ring-2 focus:ring-amber-400/50 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              {revealing && <Spinner size="sm" className="text-zinc-700" />}
+              {revealing ? "Decrypting..." : revealLabel}
+            </button>
+          </section>
+        </aside>
       </div>
     );
   }
@@ -438,18 +457,20 @@ export default function RetrievePage() {
     const isBundle = state.meta.clientMeta.type === "bundle";
     const submitLabel = isBurnAfterRead
       ? isBundle
-        ? "Download & Burn"
+        ? "Prepare Download & Burn"
         : "Reveal & Burn"
-      : "Decrypt";
+      : isBundle
+        ? "Prepare Download"
+        : "Reveal Text";
 
     return (
-      <div className="space-y-5">
+      <div className="mx-auto max-w-xl space-y-5 rounded-lg border border-zinc-200 bg-white p-5 dark:border-zinc-700 dark:bg-zinc-900">
         <div>
           <h1 className="font-display text-2xl font-semibold text-zinc-800 dark:text-zinc-100">
-            Password Required
+            Unlock Share
           </h1>
           <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-100">
-            This secret is password-protected.
+            Enter the password to decrypt the protected content.
           </p>
         </div>
         <form onSubmit={handlePasswordFormSubmit(handlePasswordSubmit)} className="space-y-4">
@@ -487,7 +508,7 @@ export default function RetrievePage() {
                 />
               </svg>
               <p className="text-xs text-amber-700 dark:text-amber-400">
-                Submitting the password starts retrieval and permanently consumes this secret.
+                Submitting the password starts retrieval and permanently consumes this share.
               </p>
             </div>
           )}
@@ -512,19 +533,19 @@ export default function RetrievePage() {
         <div className="flex items-center gap-2.5">
           <div className="w-2 h-2 rounded-full bg-emerald-400" />
           <span className="text-sm font-medium text-zinc-600 dark:text-zinc-100">
-            Secret deleted
+            Share deleted
           </span>
         </div>
         <div className="rounded-lg border border-zinc-200 dark:border-zinc-500/50 px-4 py-4">
           <p className="text-sm text-zinc-600 dark:text-zinc-100">
-            The secret has been permanently destroyed.
+            The share has been permanently destroyed.
           </p>
         </div>
         <a
           href="/"
           className="text-xs text-zinc-500 dark:text-zinc-100 hover:text-amber-500 dark:hover:text-amber-400 transition-colors duration-150"
         >
-          ← Share a new secret
+          ← Create a new share
         </a>
       </div>
     );
@@ -535,6 +556,7 @@ export default function RetrievePage() {
   if (state.stage === "bundle-ready") {
     const { keySet, manifest, publicID, sessionToken } = state;
     const isMulti = manifest.files.length > 1;
+    const totalSize = manifestTotalSize(manifest);
 
     function saveBlob(blob: Blob, name: string) {
       const url = URL.createObjectURL(blob);
@@ -565,52 +587,98 @@ export default function RetrievePage() {
     }
 
     return (
-      <div className="space-y-5">
-        <div>
-          <h1 className="font-display text-2xl font-semibold text-zinc-800 dark:text-zinc-100">
-            {isMulti ? "Files Ready" : "File Ready"}
-          </h1>
-          <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-100">{manifest.bundleName}</p>
-        </div>
-        <div className="rounded-lg border border-zinc-200 dark:border-zinc-500/50 divide-y divide-zinc-200 dark:divide-zinc-500/50 overflow-hidden">
-          {manifest.files.map((file) => (
-            <div
-              key={`${file.index}-${file.path}`}
-              data-testid={`bundle-file-${file.index}`}
-              className="flex items-center gap-3 px-4 py-3"
-            >
-              <div className="w-2 h-2 rounded-full bg-emerald-400 flex-shrink-0" />
-              <div className="flex-1 min-w-0">
-                <span className="text-sm font-medium text-zinc-600 dark:text-zinc-100 font-mono truncate block">
+      <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_320px] lg:items-start">
+        <section className="space-y-5 rounded-lg border border-zinc-200 bg-white p-5 dark:border-zinc-700 dark:bg-zinc-900">
+          <div>
+            <h1 className="font-display text-2xl font-semibold text-zinc-800 dark:text-zinc-100">
+              {isMulti ? "Download Files" : "Download File"}
+            </h1>
+            <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-100">
+              {manifest.files.length} {isMulti ? "files" : "file"} · {formatSize(totalSize)}
+            </p>
+          </div>
+
+          <div className="divide-y divide-zinc-200 rounded-lg border border-zinc-200 dark:divide-zinc-700 dark:border-zinc-700">
+            {manifest.files.map((file) => (
+              <div
+                key={`${file.index}-${file.path}`}
+                data-testid={`bundle-file-${file.index}`}
+                className="grid grid-cols-[1fr_auto] items-center gap-4 px-4 py-3"
+              >
+                <span className="min-w-0 truncate font-mono text-sm font-medium text-zinc-700 dark:text-zinc-100">
                   {file.path}
                 </span>
-                <span className="text-xs text-zinc-500 dark:text-zinc-400">
+                <span className="text-xs tabular-nums text-zinc-500 dark:text-zinc-400">
                   {formatSize(file.size)}
                 </span>
               </div>
+            ))}
+          </div>
+        </section>
+
+        <aside className="space-y-4 lg:sticky lg:top-24">
+          <section className="rounded-lg border border-zinc-200 bg-white px-4 py-4 dark:border-zinc-700 dark:bg-zinc-900">
+            <h2 className="text-xs font-semibold uppercase tracking-widest text-zinc-500 dark:text-zinc-400">
+              Bundle
+            </h2>
+            <div className="mt-2 divide-y divide-zinc-200 dark:divide-zinc-700">
+              <div className="py-3">
+                <div className="text-xs text-zinc-500 dark:text-zinc-400">Name</div>
+                <div className="mt-1 truncate text-sm font-medium text-zinc-900 dark:text-zinc-100">
+                  {manifest.bundleName}
+                </div>
+              </div>
+              <div className="py-3">
+                <div className="text-xs text-zinc-500 dark:text-zinc-400">Files</div>
+                <div className="mt-1 text-sm font-medium text-zinc-900 dark:text-zinc-100">
+                  {manifest.files.length}
+                </div>
+              </div>
+              <div className="py-3">
+                <div className="text-xs text-zinc-500 dark:text-zinc-400">Total size</div>
+                <div className="mt-1 text-sm font-medium text-zinc-900 dark:text-zinc-100">
+                  {formatSize(totalSize)}
+                </div>
+              </div>
             </div>
-          ))}
-        </div>
-        <button
-          type="button"
-          onClick={downloadAll}
-          disabled={downloadingBundle}
-          className="flex w-full items-center justify-center gap-2 rounded-lg bg-amber-400 px-4 py-3 text-sm font-medium text-zinc-900 hover:bg-amber-300 focus:outline-none focus:ring-2 focus:ring-amber-400/50 disabled:opacity-40 disabled:cursor-not-allowed transition-all duration-150"
-        >
-          {downloadingBundle && <Spinner size="sm" className="text-zinc-700" />}
-          {downloadingBundle ? "Downloading..." : isMulti ? "Download All" : "Download File"}
-        </button>
-        {state.deletionToken && (
+          </section>
+
+          {downloadingBundle && (
+            <TransferStatus
+              title={isMulti ? "Preparing files" : "Preparing file"}
+              steps={[
+                { label: "Reading encrypted data", state: "active" },
+                { label: "Decrypting", state: "pending" },
+                { label: "Saving", state: "pending" },
+              ]}
+            />
+          )}
+          {isMulti && (
+            <p className="text-xs leading-relaxed text-zinc-500 dark:text-zinc-400">
+              Your browser will save {manifest.files.length} files.
+            </p>
+          )}
           <button
             type="button"
-            onClick={handleDelete}
-            disabled={deleting}
-            className="flex items-center gap-2 rounded-lg border border-red-200 dark:border-red-900/40 px-4 py-2.5 text-sm text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/10 focus:outline-none focus:ring-2 focus:ring-red-500/20 disabled:opacity-40 disabled:cursor-not-allowed transition-all duration-150"
+            onClick={downloadAll}
+            disabled={downloadingBundle}
+            className="flex w-full items-center justify-center gap-2 rounded-lg bg-amber-400 px-4 py-3 text-sm font-semibold text-zinc-950 transition-all duration-150 hover:bg-amber-300 focus:outline-none focus:ring-2 focus:ring-amber-400/50 disabled:cursor-not-allowed disabled:opacity-40"
           >
-            {deleting && <Spinner size="sm" className="text-red-500" />}
-            {deleting ? "Deleting..." : "Delete this secret"}
+            {downloadingBundle && <Spinner size="sm" className="text-zinc-700" />}
+            {downloadingBundle ? "Preparing..." : isMulti ? "Download Files" : "Download File"}
           </button>
-        )}
+          {state.deletionToken && (
+            <button
+              type="button"
+              onClick={handleDelete}
+              disabled={deleting}
+              className="flex items-center gap-2 rounded-lg border border-red-200 px-4 py-2.5 text-sm text-red-600 transition-all duration-150 hover:bg-red-50 focus:outline-none focus:ring-2 focus:ring-red-500/20 disabled:cursor-not-allowed disabled:opacity-40 dark:border-red-900/40 dark:text-red-400 dark:hover:bg-red-900/10"
+            >
+              {deleting && <Spinner size="sm" className="text-red-500" />}
+              {deleting ? "Deleting..." : "Delete share"}
+            </button>
+          )}
+        </aside>
       </div>
     );
   }
@@ -618,44 +686,48 @@ export default function RetrievePage() {
   // -- Decrypted text --
 
   return (
-    <div className="space-y-5">
-      <div>
-        <h1 className="font-display text-2xl font-semibold text-zinc-800 dark:text-zinc-100">
-          Secret
-        </h1>
-        <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-100">
-          Decrypted successfully. Copy the contents below.
-        </p>
-      </div>
-
-      <div className="rounded-lg border border-zinc-200 dark:border-zinc-500/50 overflow-hidden">
-        <div className="flex items-center justify-between px-4 py-2 bg-zinc-50 dark:bg-zinc-900/50 border-b border-zinc-200 dark:border-zinc-500/50">
-          <span className="text-xs tracking-widest uppercase text-zinc-500 dark:text-zinc-100">
-            Plaintext
-          </span>
-          <button
-            type="button"
-            onClick={copyDecryptedText}
-            className="text-xs font-medium text-amber-600 dark:text-amber-400 hover:text-amber-500 dark:hover:text-amber-300 transition-colors duration-150"
-          >
-            Copy
-          </button>
+    <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_320px] lg:items-start">
+      <section className="space-y-5 rounded-lg border border-zinc-200 bg-white p-5 dark:border-zinc-700 dark:bg-zinc-900">
+        <div>
+          <h1 className="font-display text-2xl font-semibold text-zinc-800 dark:text-zinc-100">
+            Decrypted Text
+          </h1>
+          <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-100">
+            Decrypted in this browser. Copy the content below.
+          </p>
         </div>
-        <pre className="px-4 py-4 whitespace-pre-wrap break-words text-sm text-zinc-800 dark:text-zinc-100 bg-white dark:bg-zinc-800 leading-relaxed">
-          {(state as { stage: "decrypted"; text: string }).text}
-        </pre>
-      </div>
+
+        <div className="overflow-hidden rounded-lg border border-zinc-200 dark:border-zinc-700">
+          <div className="flex items-center justify-between border-b border-zinc-200 bg-zinc-50 px-4 py-2 dark:border-zinc-700 dark:bg-zinc-950">
+            <span className="text-xs uppercase tracking-widest text-zinc-500 dark:text-zinc-400">
+              Plaintext
+            </span>
+            <button
+              type="button"
+              onClick={copyDecryptedText}
+              className="text-xs font-semibold text-amber-600 transition-colors duration-150 hover:text-amber-500 dark:text-amber-400 dark:hover:text-amber-300"
+            >
+              Copy
+            </button>
+          </div>
+          <pre className="min-h-40 whitespace-pre-wrap break-words bg-white px-4 py-4 text-sm leading-relaxed text-zinc-800 dark:bg-zinc-950 dark:text-zinc-100">
+            {(state as { stage: "decrypted"; text: string }).text}
+          </pre>
+        </div>
+      </section>
 
       {(state as { stage: "decrypted"; deletionToken: string }).deletionToken && (
-        <button
-          type="button"
-          onClick={handleDelete}
-          disabled={deleting}
-          className="flex items-center gap-2 rounded-lg border border-red-200 dark:border-red-900/40 px-4 py-2.5 text-sm text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/10 focus:outline-none focus:ring-2 focus:ring-red-500/20 disabled:opacity-40 disabled:cursor-not-allowed transition-all duration-150"
-        >
-          {deleting && <Spinner size="sm" className="text-red-500" />}
-          {deleting ? "Deleting..." : "Delete this secret"}
-        </button>
+        <aside className="lg:sticky lg:top-24">
+          <button
+            type="button"
+            onClick={handleDelete}
+            disabled={deleting}
+            className="flex items-center gap-2 rounded-lg border border-red-200 px-4 py-2.5 text-sm text-red-600 transition-all duration-150 hover:bg-red-50 focus:outline-none focus:ring-2 focus:ring-red-500/20 disabled:cursor-not-allowed disabled:opacity-40 dark:border-red-900/40 dark:text-red-400 dark:hover:bg-red-900/10"
+          >
+            {deleting && <Spinner size="sm" className="text-red-500" />}
+            {deleting ? "Deleting..." : "Delete share"}
+          </button>
+        </aside>
       )}
     </div>
   );
