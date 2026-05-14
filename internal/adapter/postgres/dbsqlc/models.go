@@ -17,14 +17,33 @@ type RetrievalSession struct {
 }
 
 type Secret struct {
-	PublicID          string
-	MetadataTokenHash string
-	DeletionTokenHash string
-	EncryptedMeta     string
-	BlobSize          int64
-	BurnAfterRead     bool
-	ExpiresAt         pgtype.Timestamptz
-	CreatedAt         pgtype.Timestamptz
-	RetrievedAt       pgtype.Timestamptz
-	BlobTokenHash     string
+	PublicID                  string
+	MetadataTokenHash         string
+	DeletionTokenHash         string
+	EncryptedMeta             string
+	BlobSize                  int64
+	BurnAfterRead             bool
+	ExpiresAt                 pgtype.Timestamptz
+	CreatedAt                 pgtype.Timestamptz
+	RetrievedAt               pgtype.Timestamptz
+	BlobTokenHash             string
+	StorageVersion            string
+	Status                    string
+	ExpirationDurationSeconds pgtype.Int8
+	UploadTokenHash           pgtype.Text
+	UploadExpiresAt           pgtype.Timestamptz
+	ChunkSize                 pgtype.Int8
+	ChunkCount                pgtype.Int4
+	EncryptedTotalSize        pgtype.Int8
+	CompletedAt               pgtype.Timestamptz
+}
+
+type SecretObject struct {
+	PublicID      string
+	ObjectKind    string
+	ObjectIndex   int32
+	EncryptedSize int64
+	Sha256Hex     string
+	CreatedAt     pgtype.Timestamptz
+	UpdatedAt     pgtype.Timestamptz
 }

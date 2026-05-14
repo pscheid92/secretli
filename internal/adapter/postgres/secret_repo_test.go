@@ -71,6 +71,87 @@ func TestSecretRepo_CreateAndGet(t *testing.T) {
 	}
 }
 
+func TestSecretRepo_ChunkedUploadLifecycle(t *testing.T) {
+	pool := setupTestDB(t)
+	repo := pgadapter.NewSecretRepo(pool)
+	ctx := context.Background()
+
+	uploadExpiresAt := time.Now().Add(1 * time.Hour)
+	secret := &domain.Secret{
+		PublicID:                  "chunked-life",
+		MetadataTokenHash:         tokencrypto.TokenHash("metadata-token-chunked-life"),
+		BlobTokenHash:             tokencrypto.TokenHash("blob-token-chunked-life"),
+		DeletionTokenHash:         tokencrypto.TokenHash("deletion-token-chunked-life"),
+		EncryptedMeta:             "v2$nonce$meta-chunked-life",
+		BlobSize:                  128,
+		BurnAfterRead:             true,
+		ExpiresAt:                 uploadExpiresAt,
+		StorageVersion:            domain.StorageVersionChunked,
+		Status:                    domain.SecretStatusPending,
+		ExpirationDurationSeconds: int64(time.Hour / time.Second),
+		UploadTokenHash:           tokencrypto.TokenHash("upload-token-chunked-life"),
+		UploadExpiresAt:           &uploadExpiresAt,
+		ChunkSize:                 16 * 1024 * 1024,
+		ChunkCount:                1,
+		EncryptedTotalSize:        128,
+	}
+	if err := repo.CreateUpload(ctx, secret); err != nil {
+		t.Fatalf("create upload: %v", err)
+	}
+
+	pending, err := repo.GetPendingUploadByPublicID(ctx, "chunked-life")
+	if err != nil {
+		t.Fatalf("get pending upload: %v", err)
+	}
+	if pending.Status != domain.SecretStatusPending || pending.StorageVersion != domain.StorageVersionChunked {
+		t.Fatalf("pending status/version = %s/%s", pending.Status, pending.StorageVersion)
+	}
+
+	for _, object := range []*domain.SecretObject{
+		{
+			PublicID:      "chunked-life",
+			ObjectKind:    domain.ObjectKindChunk,
+			ObjectIndex:   0,
+			EncryptedSize: 64,
+			SHA256Hex:     "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		},
+		{
+			PublicID:      "chunked-life",
+			ObjectKind:    domain.ObjectKindManifest,
+			ObjectIndex:   domain.ManifestObjectIndex,
+			EncryptedSize: 32,
+			SHA256Hex:     "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+		},
+	} {
+		if err := repo.CreateObject(ctx, object); err != nil {
+			t.Fatalf("create object %s/%d: %v", object.ObjectKind, object.ObjectIndex, err)
+		}
+	}
+
+	objects, err := repo.ListObjects(ctx, "chunked-life")
+	if err != nil {
+		t.Fatalf("list objects: %v", err)
+	}
+	if len(objects) != 2 {
+		t.Fatalf("objects = %d, want 2", len(objects))
+	}
+
+	expiresAt := time.Now().Add(30 * time.Minute)
+	if err := repo.CompleteUpload(ctx, "chunked-life", 96, expiresAt); err != nil {
+		t.Fatalf("complete upload: %v", err)
+	}
+	if _, err := repo.GetPendingUploadByPublicID(ctx, "chunked-life"); err != domain.ErrNotFound {
+		t.Fatalf("expected pending upload to disappear, got %v", err)
+	}
+	active, err := repo.GetByPublicID(ctx, "chunked-life")
+	if err != nil {
+		t.Fatalf("get active upload: %v", err)
+	}
+	if active.Status != domain.SecretStatusActive || active.BlobSize != 96 {
+		t.Fatalf("active status/blob size = %s/%d", active.Status, active.BlobSize)
+	}
+}
+
 func TestSecretRepo_CreateDuplicate(t *testing.T) {
 	pool := setupTestDB(t)
 	repo := pgadapter.NewSecretRepo(pool)
@@ -401,7 +482,7 @@ func TestSecretRepo_DeleteExpired(t *testing.T) {
 		}
 	}
 
-	noop := func(string) error { return nil }
+	noop := func(string, []domain.SecretObject) error { return nil }
 	count, err := repo.DeleteExpired(ctx, noop)
 	if err != nil {
 		t.Fatalf("delete expired: %v", err)
@@ -445,7 +526,7 @@ func TestSecretRepo_DeleteExpired_BurnAfterRead(t *testing.T) {
 		t.Fatalf("create burn-unretrieved: %v", err)
 	}
 
-	noop := func(string) error { return nil }
+	noop := func(string, []domain.SecretObject) error { return nil }
 	count, err := repo.DeleteExpired(ctx, noop)
 	if err != nil {
 		t.Fatalf("delete expired: %v", err)
@@ -486,7 +567,7 @@ func TestSecretRepo_DeleteExpired_KeepsBurnedSecretWithActiveSession(t *testing.
 		t.Fatalf("start retrieval session: %v", err)
 	}
 
-	noop := func(string) error { return nil }
+	noop := func(string, []domain.SecretObject) error { return nil }
 	count, err := repo.DeleteExpired(ctx, noop)
 	if err != nil {
 		t.Fatalf("delete expired: %v", err)
@@ -530,7 +611,7 @@ func TestSecretRepo_DeleteExpired_HookError(t *testing.T) {
 	}
 
 	// Hook fails for hook-err-001, succeeds for hook-err-002
-	failOne := func(id string) error {
+	failOne := func(id string, _ []domain.SecretObject) error {
 		if id == "hook-err-001" {
 			return errors.New("S3 delete failed")
 		}
@@ -549,7 +630,7 @@ func TestSecretRepo_DeleteExpired_HookError(t *testing.T) {
 	// hook-err-001 should still exist (hook failed, row kept)
 	// We can't use GetByPublicID because it filters by expires_at > NOW().
 	// Instead, call DeleteExpired again with a noop — if it finds a row, it was kept.
-	noop := func(string) error { return nil }
+	noop := func(string, []domain.SecretObject) error { return nil }
 	count2, err := repo.DeleteExpired(ctx, noop)
 	if err != nil {
 		t.Fatalf("second delete expired: %v", err)

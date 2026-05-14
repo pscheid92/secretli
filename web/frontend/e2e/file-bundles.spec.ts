@@ -103,6 +103,36 @@ test.describe("File bundle sharing", () => {
     await downloadBundleFiles(page, [file], (filename) => testInfo.outputPath(filename));
   });
 
+  test("creates and retrieves a chunked bundle with threshold override", async ({
+    page,
+  }, testInfo) => {
+    await page.addInitScript(() => {
+      (
+        window as Window & { __SECRETLI_CHUNKED_UPLOAD_THRESHOLD_BYTES?: number }
+      ).__SECRETLI_CHUNKED_UPLOAD_THRESHOLD_BYTES = 0;
+    });
+    let usedChunkedAPI = false;
+    page.on("request", (request) => {
+      if (request.url().includes("/api/v2/secrets/")) {
+        usedChunkedAPI = true;
+      }
+    });
+
+    const file = {
+      name: "chunked-note.txt",
+      mimeType: "text/plain",
+      contents: `chunked file ${Date.now()}`,
+    };
+
+    const shareUrl = await createFileSecret(page, [file]);
+    expect(usedChunkedAPI).toBe(true);
+
+    await revealBundle(page, shareUrl);
+    await expect(page.locator("h1")).toHaveText("Download File", { timeout: 10000 });
+    await expect(page.getByTestId("bundle-file-0").getByText(file.name)).toBeVisible();
+    await downloadBundleFiles(page, [file], (filename) => testInfo.outputPath(filename));
+  });
+
   test("creates and downloads a multi-file bundle", async ({ page }, testInfo) => {
     const files = [
       { name: "all-alpha.txt", mimeType: "text/plain", contents: "download all alpha" },
