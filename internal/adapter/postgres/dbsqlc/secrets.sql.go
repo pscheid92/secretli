@@ -17,7 +17,6 @@ WHERE public_id = $1
   AND blob_token_hash = $2
   AND burn_after_read = true
   AND retrieved_at IS NULL
-  AND status = 'active'
   AND expires_at > NOW()
 `
 
@@ -34,90 +33,12 @@ func (q *Queries) ClaimBurnAfterRead(ctx context.Context, arg ClaimBurnAfterRead
 	return result.RowsAffected(), nil
 }
 
-const completeChunkedUpload = `-- name: CompleteChunkedUpload :execrows
-UPDATE secrets
-SET status = 'active',
-    expires_at = $2,
-    blob_size = $3,
-    completed_at = NOW(),
-    upload_token_hash = NULL
-WHERE public_id = $1
-  AND status = 'pending'
-  AND storage_version = 'chunked-v1'
-  AND upload_expires_at > NOW()
-`
-
-type CompleteChunkedUploadParams struct {
-	PublicID  string
-	ExpiresAt pgtype.Timestamptz
-	BlobSize  int64
-}
-
-func (q *Queries) CompleteChunkedUpload(ctx context.Context, arg CompleteChunkedUploadParams) (int64, error) {
-	result, err := q.db.Exec(ctx, completeChunkedUpload, arg.PublicID, arg.ExpiresAt, arg.BlobSize)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
-}
-
-const createChunkedUpload = `-- name: CreateChunkedUpload :exec
-INSERT INTO secrets (
-    public_id, metadata_token_hash, blob_token_hash, deletion_token_hash,
-    encrypted_meta, blob_size, burn_after_read, expires_at,
-    storage_version, status, expiration_duration_seconds,
-    upload_token_hash, upload_expires_at, chunk_size, chunk_count,
-    encrypted_total_size
-) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8,
-    'chunked-v1', 'pending', $9,
-    $10, $11, $12, $13, $14
-)
-`
-
-type CreateChunkedUploadParams struct {
-	PublicID                  string
-	MetadataTokenHash         string
-	BlobTokenHash             string
-	DeletionTokenHash         string
-	EncryptedMeta             string
-	BlobSize                  int64
-	BurnAfterRead             bool
-	ExpiresAt                 pgtype.Timestamptz
-	ExpirationDurationSeconds pgtype.Int8
-	UploadTokenHash           pgtype.Text
-	UploadExpiresAt           pgtype.Timestamptz
-	ChunkSize                 pgtype.Int8
-	ChunkCount                pgtype.Int4
-	EncryptedTotalSize        pgtype.Int8
-}
-
-func (q *Queries) CreateChunkedUpload(ctx context.Context, arg CreateChunkedUploadParams) error {
-	_, err := q.db.Exec(ctx, createChunkedUpload,
-		arg.PublicID,
-		arg.MetadataTokenHash,
-		arg.BlobTokenHash,
-		arg.DeletionTokenHash,
-		arg.EncryptedMeta,
-		arg.BlobSize,
-		arg.BurnAfterRead,
-		arg.ExpiresAt,
-		arg.ExpirationDurationSeconds,
-		arg.UploadTokenHash,
-		arg.UploadExpiresAt,
-		arg.ChunkSize,
-		arg.ChunkCount,
-		arg.EncryptedTotalSize,
-	)
-	return err
-}
-
 const createSecret = `-- name: CreateSecret :exec
 INSERT INTO secrets (
     public_id, metadata_token_hash, blob_token_hash, deletion_token_hash,
     encrypted_meta, blob_size,
-    burn_after_read, expires_at, storage_version, status, completed_at
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'single-v1', 'active', NOW())
+    burn_after_read, expires_at
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 `
 
 type CreateSecretParams struct {
@@ -145,31 +66,6 @@ func (q *Queries) CreateSecret(ctx context.Context, arg CreateSecretParams) erro
 	return err
 }
 
-const createSecretObject = `-- name: CreateSecretObject :exec
-INSERT INTO secret_objects (
-    public_id, object_kind, object_index, encrypted_size, sha256_hex
-) VALUES ($1, $2, $3, $4, $5)
-`
-
-type CreateSecretObjectParams struct {
-	PublicID      string
-	ObjectKind    string
-	ObjectIndex   int32
-	EncryptedSize int64
-	Sha256Hex     string
-}
-
-func (q *Queries) CreateSecretObject(ctx context.Context, arg CreateSecretObjectParams) error {
-	_, err := q.db.Exec(ctx, createSecretObject,
-		arg.PublicID,
-		arg.ObjectKind,
-		arg.ObjectIndex,
-		arg.EncryptedSize,
-		arg.Sha256Hex,
-	)
-	return err
-}
-
 const deleteSecret = `-- name: DeleteSecret :execrows
 DELETE FROM secrets WHERE public_id = $1
 `
@@ -182,102 +78,26 @@ func (q *Queries) DeleteSecret(ctx context.Context, publicID string) (int64, err
 	return result.RowsAffected(), nil
 }
 
-const getPendingUploadByPublicID = `-- name: GetPendingUploadByPublicID :one
-SELECT public_id, metadata_token_hash, blob_token_hash, deletion_token_hash,
-    encrypted_meta, blob_size,
-    burn_after_read,
-    expires_at, created_at, retrieved_at,
-    storage_version, status, expiration_duration_seconds,
-    upload_token_hash, upload_expires_at, chunk_size, chunk_count,
-    encrypted_total_size, completed_at
-FROM secrets
-WHERE public_id = $1
-  AND status = 'pending'
-  AND storage_version = 'chunked-v1'
-  AND upload_expires_at > NOW()
-`
-
-type GetPendingUploadByPublicIDRow struct {
-	PublicID                  string
-	MetadataTokenHash         string
-	BlobTokenHash             string
-	DeletionTokenHash         string
-	EncryptedMeta             string
-	BlobSize                  int64
-	BurnAfterRead             bool
-	ExpiresAt                 pgtype.Timestamptz
-	CreatedAt                 pgtype.Timestamptz
-	RetrievedAt               pgtype.Timestamptz
-	StorageVersion            string
-	Status                    string
-	ExpirationDurationSeconds pgtype.Int8
-	UploadTokenHash           pgtype.Text
-	UploadExpiresAt           pgtype.Timestamptz
-	ChunkSize                 pgtype.Int8
-	ChunkCount                pgtype.Int4
-	EncryptedTotalSize        pgtype.Int8
-	CompletedAt               pgtype.Timestamptz
-}
-
-func (q *Queries) GetPendingUploadByPublicID(ctx context.Context, publicID string) (GetPendingUploadByPublicIDRow, error) {
-	row := q.db.QueryRow(ctx, getPendingUploadByPublicID, publicID)
-	var i GetPendingUploadByPublicIDRow
-	err := row.Scan(
-		&i.PublicID,
-		&i.MetadataTokenHash,
-		&i.BlobTokenHash,
-		&i.DeletionTokenHash,
-		&i.EncryptedMeta,
-		&i.BlobSize,
-		&i.BurnAfterRead,
-		&i.ExpiresAt,
-		&i.CreatedAt,
-		&i.RetrievedAt,
-		&i.StorageVersion,
-		&i.Status,
-		&i.ExpirationDurationSeconds,
-		&i.UploadTokenHash,
-		&i.UploadExpiresAt,
-		&i.ChunkSize,
-		&i.ChunkCount,
-		&i.EncryptedTotalSize,
-		&i.CompletedAt,
-	)
-	return i, err
-}
-
 const getSecretByPublicID = `-- name: GetSecretByPublicID :one
 SELECT public_id, metadata_token_hash, blob_token_hash, deletion_token_hash,
     encrypted_meta, blob_size,
     burn_after_read,
-    expires_at, created_at, retrieved_at,
-    storage_version, status, expiration_duration_seconds,
-    upload_token_hash, upload_expires_at, chunk_size, chunk_count,
-    encrypted_total_size, completed_at
+    expires_at, created_at, retrieved_at
 FROM secrets
-WHERE public_id = $1 AND status = 'active' AND expires_at > NOW()
+WHERE public_id = $1 AND expires_at > NOW()
 `
 
 type GetSecretByPublicIDRow struct {
-	PublicID                  string
-	MetadataTokenHash         string
-	BlobTokenHash             string
-	DeletionTokenHash         string
-	EncryptedMeta             string
-	BlobSize                  int64
-	BurnAfterRead             bool
-	ExpiresAt                 pgtype.Timestamptz
-	CreatedAt                 pgtype.Timestamptz
-	RetrievedAt               pgtype.Timestamptz
-	StorageVersion            string
-	Status                    string
-	ExpirationDurationSeconds pgtype.Int8
-	UploadTokenHash           pgtype.Text
-	UploadExpiresAt           pgtype.Timestamptz
-	ChunkSize                 pgtype.Int8
-	ChunkCount                pgtype.Int4
-	EncryptedTotalSize        pgtype.Int8
-	CompletedAt               pgtype.Timestamptz
+	PublicID          string
+	MetadataTokenHash string
+	BlobTokenHash     string
+	DeletionTokenHash string
+	EncryptedMeta     string
+	BlobSize          int64
+	BurnAfterRead     bool
+	ExpiresAt         pgtype.Timestamptz
+	CreatedAt         pgtype.Timestamptz
+	RetrievedAt       pgtype.Timestamptz
 }
 
 func (q *Queries) GetSecretByPublicID(ctx context.Context, publicID string) (GetSecretByPublicIDRow, error) {
@@ -294,89 +114,14 @@ func (q *Queries) GetSecretByPublicID(ctx context.Context, publicID string) (Get
 		&i.ExpiresAt,
 		&i.CreatedAt,
 		&i.RetrievedAt,
-		&i.StorageVersion,
-		&i.Status,
-		&i.ExpirationDurationSeconds,
-		&i.UploadTokenHash,
-		&i.UploadExpiresAt,
-		&i.ChunkSize,
-		&i.ChunkCount,
-		&i.EncryptedTotalSize,
-		&i.CompletedAt,
 	)
 	return i, err
-}
-
-const getSecretObject = `-- name: GetSecretObject :one
-SELECT public_id, object_kind, object_index, encrypted_size, sha256_hex,
-    created_at, updated_at
-FROM secret_objects
-WHERE public_id = $1 AND object_kind = $2 AND object_index = $3
-`
-
-type GetSecretObjectParams struct {
-	PublicID    string
-	ObjectKind  string
-	ObjectIndex int32
-}
-
-func (q *Queries) GetSecretObject(ctx context.Context, arg GetSecretObjectParams) (SecretObject, error) {
-	row := q.db.QueryRow(ctx, getSecretObject, arg.PublicID, arg.ObjectKind, arg.ObjectIndex)
-	var i SecretObject
-	err := row.Scan(
-		&i.PublicID,
-		&i.ObjectKind,
-		&i.ObjectIndex,
-		&i.EncryptedSize,
-		&i.Sha256Hex,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-	)
-	return i, err
-}
-
-const listSecretObjects = `-- name: ListSecretObjects :many
-SELECT public_id, object_kind, object_index, encrypted_size, sha256_hex,
-    created_at, updated_at
-FROM secret_objects
-WHERE public_id = $1
-ORDER BY object_kind, object_index
-`
-
-func (q *Queries) ListSecretObjects(ctx context.Context, publicID string) ([]SecretObject, error) {
-	rows, err := q.db.Query(ctx, listSecretObjects, publicID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []SecretObject{}
-	for rows.Next() {
-		var i SecretObject
-		if err := rows.Scan(
-			&i.PublicID,
-			&i.ObjectKind,
-			&i.ObjectIndex,
-			&i.EncryptedSize,
-			&i.Sha256Hex,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
 }
 
 const selectExpiredForCleanup = `-- name: SelectExpiredForCleanup :many
 SELECT public_id FROM secrets
-WHERE (status = 'active' AND expires_at < NOW())
+WHERE expires_at < NOW()
    OR (
-       status = 'active'
-       AND
        burn_after_read = true
        AND retrieved_at IS NOT NULL
        AND NOT EXISTS (
@@ -384,10 +129,6 @@ WHERE (status = 'active' AND expires_at < NOW())
            WHERE retrieval_sessions.public_id = secrets.public_id
              AND retrieval_sessions.expires_at > NOW()
        )
-   )
-   OR (
-       status = 'pending'
-       AND upload_expires_at < NOW()
    )
 FOR UPDATE SKIP LOCKED
 `

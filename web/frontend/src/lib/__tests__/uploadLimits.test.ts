@@ -5,7 +5,6 @@ import {
   fitsEncryptedUploadLimit,
   MAX_ENCRYPTED_UPLOAD_BYTES,
   MAX_FILE_UPLOAD_BYTES,
-  shouldUseChunkedUpload,
 } from "../uploadLimits";
 
 describe("upload limits", () => {
@@ -26,10 +25,5 @@ describe("upload limits", () => {
   it("reserves bundle chunk and manifest overhead", () => {
     expect(fitsBundleUploadLimit([1024])).toBe(true);
     expect(fitsBundleUploadLimit([MAX_ENCRYPTED_UPLOAD_BYTES])).toBe(false);
-  });
-
-  it("routes file bundles to chunked upload at the 64 MiB boundary", () => {
-    expect(shouldUseChunkedUpload([63 * 1024 * 1024])).toBe(false);
-    expect(shouldUseChunkedUpload([64 * 1024 * 1024])).toBe(true);
   });
 });
