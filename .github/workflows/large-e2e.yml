@@ -6,7 +6,7 @@ on:
       size_mib:
         description: "Synthetic file size in MiB"
         required: true
-        default: "99"
+        default: "1023"
       max_total_ms:
         description: "Optional total runtime threshold in milliseconds"
         required: false

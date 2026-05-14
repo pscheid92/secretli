@@ -4,7 +4,7 @@ import { mkdir, stat } from "node:fs/promises";
 import { dirname } from "node:path";
 import { expect, type Page, test } from "@playwright/test";
 
-const DEFAULT_SIZE_MIB = 99;
+const DEFAULT_SIZE_MIB = 1023;
 const TEST_TIMEOUT_MS = 10 * 60 * 1000;
 const MIB = 1024 * 1024;
 
@@ -60,7 +60,7 @@ test.describe("Large-file performance", () => {
 
     await page.goto("/file");
     await page.setInputFiles('input[type="file"]', sourcePath);
-    await expect(page.getByText(`${sizeMiB.toFixed(1)} MB / 100 MB`)).toBeVisible({
+    await expect(page.getByText(`${sizeMiB.toFixed(1)} MB / 1 GiB`)).toBeVisible({
       timeout: 10000,
     });
 
