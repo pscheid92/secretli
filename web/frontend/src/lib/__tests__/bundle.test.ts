@@ -1,10 +1,11 @@
 import {
-  BUNDLE_HEADER_LENGTH,
+  BUNDLE_V2_FOOTER_LENGTH,
   type BundleFile,
   createEncryptedBundle,
   DEFAULT_BUNDLE_CHUNK_SIZE,
   DOWNLOAD_ALL_BUNDLE_COALESCED_PLAINTEXT_BYTES,
   decryptBundleFiles,
+  parseBundleV2Footer,
   readBundleManifest,
 } from "../bundle";
 import { KeySet } from "../encryption";
@@ -27,12 +28,26 @@ describe("encrypted bundles", () => {
     const bytes = await blobBytes(blob);
     const fetchRange = async (start: number, end: number) => bytes.slice(start, end + 1);
 
-    const { manifest } = await readBundleManifest(fetchRange, keySet);
+    const { manifest } = await readBundleManifest(fetchRange, keySet, bytes.length);
     expect(manifest.files).toHaveLength(1);
     expect(manifest.files[0].path).toBe("notes.txt");
 
     const [{ blob: decrypted }] = await decryptBundleFiles(manifest.files, keySet, fetchRange);
     await expect(decrypted.text()).resolves.toBe("hello bundle");
+  });
+
+  it("round-trips an empty file", async () => {
+    const keySet = await KeySet.generateRandom();
+    const file = new File([], "empty.txt", { type: "text/plain" });
+    const { blob } = await createEncryptedBundle([file], keySet);
+    const bytes = await blobBytes(blob);
+    const fetchRange = async (start: number, end: number) => bytes.slice(start, end + 1);
+
+    const { manifest } = await readBundleManifest(fetchRange, keySet, bytes.length);
+    const [{ blob: decrypted }] = await decryptBundleFiles(manifest.files, keySet, fetchRange);
+
+    expect(manifest.files[0].chunks).toEqual([]);
+    await expect(decrypted.arrayBuffer()).resolves.toHaveProperty("byteLength", 0);
   });
 
   it("uses 4 MiB chunks for large bundle files", async () => {
@@ -43,7 +58,7 @@ describe("encrypted bundles", () => {
     const bytes = await blobBytes(blob);
     const fetchRange = async (start: number, end: number) => bytes.slice(start, end + 1);
 
-    const { manifest } = await readBundleManifest(fetchRange, keySet);
+    const { manifest } = await readBundleManifest(fetchRange, keySet, bytes.length);
 
     expect(DEFAULT_BUNDLE_CHUNK_SIZE).toBe(4 * 1024 * 1024);
     expect(manifest.chunkSize).toBe(DEFAULT_BUNDLE_CHUNK_SIZE);
@@ -63,7 +78,7 @@ describe("encrypted bundles", () => {
     const { blob } = await createEncryptedBundle([file], keySet);
     const bytes = await blobBytes(blob);
     const fetchRange = async (start: number, end: number) => bytes.slice(start, end + 1);
-    const { manifest } = await readBundleManifest(fetchRange, keySet);
+    const { manifest } = await readBundleManifest(fetchRange, keySet, bytes.length);
     const fileManifest = manifest.files[0];
     const ranges: Array<[number, number]> = [];
     const recordingRange = async (start: number, end: number) => {
@@ -100,7 +115,7 @@ describe("encrypted bundles", () => {
       size: 6,
       chunks: Array.from({ length: 6 }, (_, index) => ({
         index,
-        offset: BUNDLE_HEADER_LENGTH + index,
+        offset: index,
         length: 1,
         plaintextSize: 1,
       })),
@@ -119,8 +134,8 @@ describe("encrypted bundles", () => {
 
     expect(DOWNLOAD_ALL_BUNDLE_COALESCED_PLAINTEXT_BYTES).toBe(64 * 1024 * 1024);
     expect(ranges).toEqual([
-      [BUNDLE_HEADER_LENGTH, BUNDLE_HEADER_LENGTH + 3],
-      [BUNDLE_HEADER_LENGTH + 4, BUNDLE_HEADER_LENGTH + 5],
+      [0, 3],
+      [4, 5],
     ]);
     await expect(decrypted[0].blob.arrayBuffer()).resolves.toHaveProperty("byteLength", 6);
   });
@@ -133,8 +148,36 @@ describe("encrypted bundles", () => {
     const fetchRange = async (start: number, end: number) => bytes.slice(start, end + 1);
 
     await expect(readBundleManifest(fetchRange, keySet, bytes.length - 1)).rejects.toThrow(
-      "invalid bundle header",
+      "invalid bundle footer",
     );
+  });
+
+  it("rejects a tampered v2 manifest hash", async () => {
+    const keySet = await KeySet.generateRandom();
+    const file = new File(["hello bundle"], "notes.txt", { type: "text/plain" });
+    const { blob } = await createEncryptedBundle([file], keySet);
+    const bytes = await blobBytes(blob);
+    const footer = parseBundleV2Footer(bytes.slice(bytes.length - BUNDLE_V2_FOOTER_LENGTH));
+    const manifestOffset = bytes.length - BUNDLE_V2_FOOTER_LENGTH - footer.manifestLength;
+    const tampered = bytes.slice();
+    tampered[manifestOffset] ^= 1;
+    const fetchRange = async (start: number, end: number) => tampered.slice(start, end + 1);
+
+    await expect(readBundleManifest(fetchRange, keySet, bytes.length)).rejects.toThrow(
+      "invalid bundle manifest hash",
+    );
+  });
+
+  it("rejects malformed v2 footers", async () => {
+    const keySet = await KeySet.generateRandom();
+    const file = new File(["hello bundle"], "notes.txt", { type: "text/plain" });
+    const { blob } = await createEncryptedBundle([file], keySet);
+    const bytes = await blobBytes(blob);
+    const footerBytes = bytes.slice(bytes.length - BUNDLE_V2_FOOTER_LENGTH);
+    const malformedVersion = footerBytes.slice();
+    new DataView(malformedVersion.buffer).setUint32(8, 99, false);
+
+    expect(() => parseBundleV2Footer(malformedVersion)).toThrow("invalid bundle footer");
   });
 
   it("round-trips multiple files without storing a zip", async () => {
@@ -147,7 +190,7 @@ describe("encrypted bundles", () => {
     const bytes = await blobBytes(blob);
     const fetchRange = async (start: number, end: number) => bytes.slice(start, end + 1);
 
-    const { manifest } = await readBundleManifest(fetchRange, keySet);
+    const { manifest } = await readBundleManifest(fetchRange, keySet, bytes.length);
     expect(manifest.files.map((file) => file.path)).toEqual(["a.txt", "b.txt"]);
 
     const decrypted = await decryptBundleFiles(manifest.files, keySet, fetchRange);
@@ -161,7 +204,7 @@ describe("encrypted bundles", () => {
     const { blob } = await createEncryptedBundle([file], keySet);
     const bytes = await blobBytes(blob);
     const fetchRange = async (start: number, end: number) => bytes.slice(start, end + 1);
-    const { manifest } = await readBundleManifest(fetchRange, keySet);
+    const { manifest } = await readBundleManifest(fetchRange, keySet, bytes.length);
     const chunk = manifest.files[0].chunks[0];
     const tampered = bytes.slice();
     tampered[chunk.offset] ^= 1;

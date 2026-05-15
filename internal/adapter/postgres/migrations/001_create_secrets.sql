@@ -1,19 +1,34 @@
-CREATE TABLE secrets (
-    public_id          TEXT PRIMARY KEY,
-    retrieval_token    TEXT NOT NULL,
-    deletion_token     TEXT NOT NULL,
-    encrypted_meta     TEXT NOT NULL,
-    blob_size          BIGINT NOT NULL,
-    burn_after_read    BOOLEAN NOT NULL DEFAULT FALSE,
-    expires_at         TIMESTAMPTZ NOT NULL,
-    created_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    retrieved_at       TIMESTAMPTZ
+-- Active, retrievable secrets.
+CREATE TABLE secrets
+(
+    -- Public lookup key.
+    public_id           TEXT        PRIMARY KEY,
+
+    -- Hashed bearer tokens. Raw tokens are never stored.
+    metadata_token_hash TEXT        NOT NULL,
+    blob_token_hash     TEXT        NOT NULL,
+    deletion_token_hash TEXT        NOT NULL,
+
+    -- Client-encrypted metadata envelope and encrypted object size.
+    encrypted_meta      TEXT        NOT NULL,
+    blob_size           BIGINT      NOT NULL,
+
+    -- Retrieval behavior and lifecycle.
+    burn_after_read     BOOLEAN     NOT NULL DEFAULT FALSE,
+
+    expires_at          TIMESTAMPTZ NOT NULL,
+    created_at          TIMESTAMPTZ NOT NULL,
+    retrieved_at        TIMESTAMPTZ
 );
 
-CREATE INDEX idx_secrets_expires_at ON secrets (expires_at) WHERE retrieved_at IS NULL;
+-- Cleanup indexes.
+CREATE INDEX idx_secrets_expires_at
+    ON secrets (expires_at);
 
-CREATE INDEX idx_secrets_burn_retrieved ON secrets (retrieved_at)
-WHERE burn_after_read = true AND retrieved_at IS NOT NULL;
+CREATE INDEX idx_secrets_consumed_burn_after_read
+    ON secrets (expires_at, public_id)
+    WHERE burn_after_read = true
+      AND retrieved_at IS NOT NULL;
 
 ---- create above / drop below ----
 DROP TABLE IF EXISTS secrets;

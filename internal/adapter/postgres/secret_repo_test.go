@@ -28,7 +28,7 @@ func newTestSecret(publicID string, expiresAt time.Time) *domain.Secret {
 
 func markRetrieved(t *testing.T, pool *pgxpool.Pool, publicID string) {
 	t.Helper()
-	if _, err := pool.Exec(context.Background(), "UPDATE secrets SET retrieved_at = NOW() WHERE public_id = $1", publicID); err != nil {
+	if _, err := pool.Exec(context.Background(), "UPDATE secrets SET retrieved_at = $2 WHERE public_id = $1", publicID, time.Now()); err != nil {
 		t.Fatalf("mark retrieved %s: %v", publicID, err)
 	}
 }
@@ -39,11 +39,11 @@ func TestSecretRepo_CreateAndGet(t *testing.T) {
 	ctx := context.Background()
 
 	secret := newTestSecret("pub-001", time.Now().Add(1*time.Hour))
-	if err := repo.Create(ctx, secret); err != nil {
+	if err := repo.Create(ctx, secret, time.Now()); err != nil {
 		t.Fatalf("create secret: %v", err)
 	}
 
-	got, err := repo.GetByPublicID(ctx, "pub-001")
+	got, err := repo.GetByPublicID(ctx, "pub-001", time.Now())
 	if err != nil {
 		t.Fatalf("get secret: %v", err)
 	}
@@ -77,12 +77,12 @@ func TestSecretRepo_CreateDuplicate(t *testing.T) {
 	ctx := context.Background()
 
 	secret := newTestSecret("dup-001", time.Now().Add(1*time.Hour))
-	if err := repo.Create(ctx, secret); err != nil {
+	if err := repo.Create(ctx, secret, time.Now()); err != nil {
 		t.Fatalf("create first: %v", err)
 	}
 
 	secret2 := newTestSecret("dup-001", time.Now().Add(2*time.Hour))
-	err := repo.Create(ctx, secret2)
+	err := repo.Create(ctx, secret2, time.Now())
 	if err != domain.ErrDuplicate {
 		t.Fatalf("expected ErrDuplicate, got %v", err)
 	}
@@ -94,11 +94,11 @@ func TestSecretRepo_GetExpired(t *testing.T) {
 	ctx := context.Background()
 
 	secret := newTestSecret("expired-001", time.Now().Add(-1*time.Hour))
-	if err := repo.Create(ctx, secret); err != nil {
+	if err := repo.Create(ctx, secret, time.Now()); err != nil {
 		t.Fatalf("create expired secret: %v", err)
 	}
 
-	_, err := repo.GetByPublicID(ctx, "expired-001")
+	_, err := repo.GetByPublicID(ctx, "expired-001", time.Now())
 	if err != domain.ErrNotFound {
 		t.Fatalf("expected ErrNotFound for expired secret, got %v", err)
 	}
@@ -111,15 +111,15 @@ func TestSecretRepo_ClaimBurnAfterRead(t *testing.T) {
 
 	secret := newTestSecret("claim-001", time.Now().Add(1*time.Hour))
 	secret.BurnAfterRead = true
-	if err := repo.Create(ctx, secret); err != nil {
+	if err := repo.Create(ctx, secret, time.Now()); err != nil {
 		t.Fatalf("create: %v", err)
 	}
 
-	if err := repo.ClaimBurnAfterRead(ctx, "claim-001", tokencrypto.TokenHash("blob-token-claim-001")); err != nil {
+	if err := repo.ClaimBurnAfterRead(ctx, "claim-001", tokencrypto.TokenHash("blob-token-claim-001"), time.Now()); err != nil {
 		t.Fatalf("claim burn-after-read: %v", err)
 	}
 
-	got, err := repo.GetByPublicID(ctx, "claim-001")
+	got, err := repo.GetByPublicID(ctx, "claim-001", time.Now())
 	if err != nil {
 		t.Fatalf("get after claim: %v", err)
 	}
@@ -130,7 +130,7 @@ func TestSecretRepo_ClaimBurnAfterRead(t *testing.T) {
 		t.Error("expected non-zero retrieved_at")
 	}
 
-	err = repo.ClaimBurnAfterRead(ctx, "claim-001", tokencrypto.TokenHash("blob-token-claim-001"))
+	err = repo.ClaimBurnAfterRead(ctx, "claim-001", tokencrypto.TokenHash("blob-token-claim-001"), time.Now())
 	if err != domain.ErrNotFound {
 		t.Fatalf("expected ErrNotFound on second claim, got %v", err)
 	}
@@ -148,7 +148,7 @@ func TestSecretRepo_ClaimBurnAfterRead_InvalidInputs(t *testing.T) {
 	expired.BurnAfterRead = true
 
 	for _, s := range []*domain.Secret{burn, regular, expired} {
-		if err := repo.Create(ctx, s); err != nil {
+		if err := repo.Create(ctx, s, time.Now()); err != nil {
 			t.Fatalf("create %s: %v", s.PublicID, err)
 		}
 	}
@@ -165,7 +165,7 @@ func TestSecretRepo_ClaimBurnAfterRead_InvalidInputs(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := repo.ClaimBurnAfterRead(ctx, tt.publicID, tokencrypto.TokenHash(tt.blobToken))
+			err := repo.ClaimBurnAfterRead(ctx, tt.publicID, tokencrypto.TokenHash(tt.blobToken), time.Now())
 			if err != domain.ErrNotFound {
 				t.Fatalf("expected ErrNotFound, got %v", err)
 			}
@@ -180,7 +180,7 @@ func TestSecretRepo_ClaimBurnAfterRead_ConcurrentOnlyOneSucceeds(t *testing.T) {
 
 	secret := newTestSecret("claim-concurrent", time.Now().Add(1*time.Hour))
 	secret.BurnAfterRead = true
-	if err := repo.Create(ctx, secret); err != nil {
+	if err := repo.Create(ctx, secret, time.Now()); err != nil {
 		t.Fatalf("create: %v", err)
 	}
 
@@ -192,7 +192,7 @@ func TestSecretRepo_ClaimBurnAfterRead_ConcurrentOnlyOneSucceeds(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			errs <- repo.ClaimBurnAfterRead(ctx, "claim-concurrent", tokencrypto.TokenHash("blob-token-claim-concurrent"))
+			errs <- repo.ClaimBurnAfterRead(ctx, "claim-concurrent", tokencrypto.TokenHash("blob-token-claim-concurrent"), time.Now())
 		}()
 	}
 
@@ -225,7 +225,7 @@ func TestSecretRepo_RetrievalSession(t *testing.T) {
 	ctx := context.Background()
 
 	secret := newTestSecret("session-001", time.Now().Add(1*time.Hour))
-	if err := repo.Create(ctx, secret); err != nil {
+	if err := repo.Create(ctx, secret, time.Now()); err != nil {
 		t.Fatalf("create: %v", err)
 	}
 
@@ -236,6 +236,7 @@ func TestSecretRepo_RetrievalSession(t *testing.T) {
 		tokencrypto.TokenHash("blob-token-session-001"),
 		sessionHash,
 		time.Now().Add(15*time.Minute),
+		time.Now(),
 	)
 	if err != nil {
 		t.Fatalf("start retrieval session: %v", err)
@@ -244,7 +245,7 @@ func TestSecretRepo_RetrievalSession(t *testing.T) {
 		t.Errorf("public_id = %q, want %q", got.PublicID, "session-001")
 	}
 
-	got, err = repo.GetByRetrievalSession(ctx, "session-001", sessionHash)
+	got, err = repo.GetByRetrievalSession(ctx, "session-001", sessionHash, time.Now())
 	if err != nil {
 		t.Fatalf("get by retrieval session: %v", err)
 	}
@@ -252,7 +253,7 @@ func TestSecretRepo_RetrievalSession(t *testing.T) {
 		t.Errorf("session public_id = %q, want %q", got.PublicID, "session-001")
 	}
 
-	_, err = repo.GetByRetrievalSession(ctx, "session-001", tokencrypto.TokenHash("wrong-session"))
+	_, err = repo.GetByRetrievalSession(ctx, "session-001", tokencrypto.TokenHash("wrong-session"), time.Now())
 	if err != domain.ErrForbidden {
 		t.Fatalf("expected ErrForbidden for wrong session, got %v", err)
 	}
@@ -263,6 +264,7 @@ func TestSecretRepo_RetrievalSession(t *testing.T) {
 		tokencrypto.TokenHash("wrong-blob-token"),
 		tokencrypto.TokenHash("session-token-wrong-blob"),
 		time.Now().Add(15*time.Minute),
+		time.Now(),
 	)
 	if err != domain.ErrForbidden {
 		t.Fatalf("expected ErrForbidden for wrong blob token, got %v", err)
@@ -277,7 +279,7 @@ func TestSecretRepo_RetrievalSessionExpiry(t *testing.T) {
 	active := newTestSecret("session-expiry-active", time.Now().Add(1*time.Hour))
 	expired := newTestSecret("session-expiry-expired", time.Now().Add(1*time.Hour))
 	for _, secret := range []*domain.Secret{active, expired} {
-		if err := repo.Create(ctx, secret); err != nil {
+		if err := repo.Create(ctx, secret, time.Now()); err != nil {
 			t.Fatalf("create %s: %v", secret.PublicID, err)
 		}
 	}
@@ -289,6 +291,7 @@ func TestSecretRepo_RetrievalSessionExpiry(t *testing.T) {
 		tokencrypto.TokenHash("blob-token-session-expiry-active"),
 		activeHash,
 		time.Now().Add(15*time.Minute),
+		time.Now(),
 	); err != nil {
 		t.Fatalf("start active session: %v", err)
 	}
@@ -300,18 +303,19 @@ func TestSecretRepo_RetrievalSessionExpiry(t *testing.T) {
 		tokencrypto.TokenHash("blob-token-session-expiry-expired"),
 		expiredHash,
 		time.Now().Add(-time.Minute),
+		time.Now(),
 	); err != nil {
 		t.Fatalf("start expired session: %v", err)
 	}
 
-	if _, err := repo.GetByRetrievalSession(ctx, "session-expiry-active", activeHash); err != nil {
+	if _, err := repo.GetByRetrievalSession(ctx, "session-expiry-active", activeHash, time.Now()); err != nil {
 		t.Fatalf("active session should validate: %v", err)
 	}
-	if _, err := repo.GetByRetrievalSession(ctx, "session-expiry-expired", expiredHash); err != domain.ErrForbidden {
+	if _, err := repo.GetByRetrievalSession(ctx, "session-expiry-expired", expiredHash, time.Now()); err != domain.ErrForbidden {
 		t.Fatalf("expected ErrForbidden for expired session, got %v", err)
 	}
 
-	deleted, err := repo.DeleteExpiredRetrievalSessions(ctx)
+	deleted, err := repo.DeleteExpiredRetrievalSessions(ctx, time.Now())
 	if err != nil {
 		t.Fatalf("delete expired sessions: %v", err)
 	}
@@ -319,7 +323,7 @@ func TestSecretRepo_RetrievalSessionExpiry(t *testing.T) {
 		t.Errorf("deleted sessions = %d, want 1", deleted)
 	}
 
-	if _, err := repo.GetByRetrievalSession(ctx, "session-expiry-active", activeHash); err != nil {
+	if _, err := repo.GetByRetrievalSession(ctx, "session-expiry-active", activeHash, time.Now()); err != nil {
 		t.Fatalf("active session should remain after cleanup: %v", err)
 	}
 }
@@ -331,7 +335,7 @@ func TestSecretRepo_StartRetrievalSession_BurnAfterRead(t *testing.T) {
 
 	secret := newTestSecret("session-burn-001", time.Now().Add(1*time.Hour))
 	secret.BurnAfterRead = true
-	if err := repo.Create(ctx, secret); err != nil {
+	if err := repo.Create(ctx, secret, time.Now()); err != nil {
 		t.Fatalf("create: %v", err)
 	}
 
@@ -341,12 +345,13 @@ func TestSecretRepo_StartRetrievalSession_BurnAfterRead(t *testing.T) {
 		tokencrypto.TokenHash("blob-token-session-burn-001"),
 		tokencrypto.TokenHash("session-token"),
 		time.Now().Add(15*time.Minute),
+		time.Now(),
 	)
 	if err != nil {
 		t.Fatalf("start retrieval session: %v", err)
 	}
 
-	got, err := repo.GetByPublicID(ctx, "session-burn-001")
+	got, err := repo.GetByPublicID(ctx, "session-burn-001", time.Now())
 	if err != nil {
 		t.Fatalf("get after session: %v", err)
 	}
@@ -360,6 +365,7 @@ func TestSecretRepo_StartRetrievalSession_BurnAfterRead(t *testing.T) {
 		tokencrypto.TokenHash("blob-token-session-burn-001"),
 		tokencrypto.TokenHash("session-token-2"),
 		time.Now().Add(15*time.Minute),
+		time.Now(),
 	)
 	if err != domain.ErrNotFound {
 		t.Fatalf("expected ErrNotFound on second burn session, got %v", err)
@@ -372,7 +378,7 @@ func TestSecretRepo_Delete(t *testing.T) {
 	ctx := context.Background()
 
 	secret := newTestSecret("del-001", time.Now().Add(1*time.Hour))
-	if err := repo.Create(ctx, secret); err != nil {
+	if err := repo.Create(ctx, secret, time.Now()); err != nil {
 		t.Fatalf("create: %v", err)
 	}
 
@@ -396,13 +402,13 @@ func TestSecretRepo_DeleteExpired(t *testing.T) {
 	valid := newTestSecret("exp-del-003", time.Now().Add(1*time.Hour))
 
 	for _, s := range []*domain.Secret{expired1, expired2, valid} {
-		if err := repo.Create(ctx, s); err != nil {
+		if err := repo.Create(ctx, s, time.Now()); err != nil {
 			t.Fatalf("create %s: %v", s.PublicID, err)
 		}
 	}
 
 	noop := func(string) error { return nil }
-	count, err := repo.DeleteExpired(ctx, noop)
+	count, err := repo.DeleteExpired(ctx, time.Now(), noop)
 	if err != nil {
 		t.Fatalf("delete expired: %v", err)
 	}
@@ -412,7 +418,7 @@ func TestSecretRepo_DeleteExpired(t *testing.T) {
 	}
 
 	// Valid secret should still exist
-	_, err = repo.GetByPublicID(ctx, "exp-del-003")
+	_, err = repo.GetByPublicID(ctx, "exp-del-003", time.Now())
 	if err != nil {
 		t.Fatalf("valid secret should still exist: %v", err)
 	}
@@ -426,14 +432,14 @@ func TestSecretRepo_DeleteExpired_BurnAfterRead(t *testing.T) {
 	// 1. Retrieved burn-after-read secret — should be deleted
 	burnRetrieved := newTestSecret("burn-retr-001", time.Now().Add(1*time.Hour))
 	burnRetrieved.BurnAfterRead = true
-	if err := repo.Create(ctx, burnRetrieved); err != nil {
+	if err := repo.Create(ctx, burnRetrieved, time.Now()); err != nil {
 		t.Fatalf("create burn-retrieved: %v", err)
 	}
 	markRetrieved(t, pool, "burn-retr-001")
 
 	// 2. Retrieved regular secret — should NOT be deleted
 	regularRetrieved := newTestSecret("reg-retr-001", time.Now().Add(1*time.Hour))
-	if err := repo.Create(ctx, regularRetrieved); err != nil {
+	if err := repo.Create(ctx, regularRetrieved, time.Now()); err != nil {
 		t.Fatalf("create regular-retrieved: %v", err)
 	}
 	markRetrieved(t, pool, "reg-retr-001")
@@ -441,12 +447,12 @@ func TestSecretRepo_DeleteExpired_BurnAfterRead(t *testing.T) {
 	// 3. Unretrieved burn-after-read secret — should NOT be deleted
 	burnUnretrieved := newTestSecret("burn-unretr-001", time.Now().Add(1*time.Hour))
 	burnUnretrieved.BurnAfterRead = true
-	if err := repo.Create(ctx, burnUnretrieved); err != nil {
+	if err := repo.Create(ctx, burnUnretrieved, time.Now()); err != nil {
 		t.Fatalf("create burn-unretrieved: %v", err)
 	}
 
 	noop := func(string) error { return nil }
-	count, err := repo.DeleteExpired(ctx, noop)
+	count, err := repo.DeleteExpired(ctx, time.Now(), noop)
 	if err != nil {
 		t.Fatalf("delete expired: %v", err)
 	}
@@ -456,12 +462,12 @@ func TestSecretRepo_DeleteExpired_BurnAfterRead(t *testing.T) {
 	}
 
 	// Regular retrieved secret should still exist
-	if _, err := repo.GetByPublicID(ctx, "reg-retr-001"); err != nil {
+	if _, err := repo.GetByPublicID(ctx, "reg-retr-001", time.Now()); err != nil {
 		t.Fatalf("regular retrieved secret should still exist: %v", err)
 	}
 
 	// Unretrieved burn secret should still exist
-	if _, err := repo.GetByPublicID(ctx, "burn-unretr-001"); err != nil {
+	if _, err := repo.GetByPublicID(ctx, "burn-unretr-001", time.Now()); err != nil {
 		t.Fatalf("unretrieved burn secret should still exist: %v", err)
 	}
 }
@@ -473,7 +479,7 @@ func TestSecretRepo_DeleteExpired_KeepsBurnedSecretWithActiveSession(t *testing.
 
 	secret := newTestSecret("burn-active-session", time.Now().Add(1*time.Hour))
 	secret.BurnAfterRead = true
-	if err := repo.Create(ctx, secret); err != nil {
+	if err := repo.Create(ctx, secret, time.Now()); err != nil {
 		t.Fatalf("create: %v", err)
 	}
 	if _, err := repo.StartRetrievalSession(
@@ -482,12 +488,13 @@ func TestSecretRepo_DeleteExpired_KeepsBurnedSecretWithActiveSession(t *testing.
 		tokencrypto.TokenHash("blob-token-burn-active-session"),
 		tokencrypto.TokenHash("session-active"),
 		time.Now().Add(15*time.Minute),
+		time.Now(),
 	); err != nil {
 		t.Fatalf("start retrieval session: %v", err)
 	}
 
 	noop := func(string) error { return nil }
-	count, err := repo.DeleteExpired(ctx, noop)
+	count, err := repo.DeleteExpired(ctx, time.Now(), noop)
 	if err != nil {
 		t.Fatalf("delete expired: %v", err)
 	}
@@ -495,10 +502,10 @@ func TestSecretRepo_DeleteExpired_KeepsBurnedSecretWithActiveSession(t *testing.
 		t.Errorf("deleted count = %d, want 0", count)
 	}
 
-	if _, err := pool.Exec(ctx, "UPDATE retrieval_sessions SET expires_at = NOW() - INTERVAL '1 minute' WHERE public_id = $1", "burn-active-session"); err != nil {
+	if _, err := pool.Exec(ctx, "UPDATE retrieval_sessions SET expires_at = $2 WHERE public_id = $1", "burn-active-session", time.Now().Add(-time.Minute)); err != nil {
 		t.Fatalf("expire retrieval session: %v", err)
 	}
-	deletedSessions, err := repo.DeleteExpiredRetrievalSessions(ctx)
+	deletedSessions, err := repo.DeleteExpiredRetrievalSessions(ctx, time.Now())
 	if err != nil {
 		t.Fatalf("delete expired retrieval sessions: %v", err)
 	}
@@ -506,7 +513,7 @@ func TestSecretRepo_DeleteExpired_KeepsBurnedSecretWithActiveSession(t *testing.
 		t.Errorf("deleted sessions = %d, want 1", deletedSessions)
 	}
 
-	count, err = repo.DeleteExpired(ctx, noop)
+	count, err = repo.DeleteExpired(ctx, time.Now(), noop)
 	if err != nil {
 		t.Fatalf("delete expired after session cleanup: %v", err)
 	}
@@ -524,7 +531,7 @@ func TestSecretRepo_DeleteExpired_HookError(t *testing.T) {
 	expired2 := newTestSecret("hook-err-002", time.Now().Add(-2*time.Hour))
 
 	for _, s := range []*domain.Secret{expired1, expired2} {
-		if err := repo.Create(ctx, s); err != nil {
+		if err := repo.Create(ctx, s, time.Now()); err != nil {
 			t.Fatalf("create %s: %v", s.PublicID, err)
 		}
 	}
@@ -537,7 +544,7 @@ func TestSecretRepo_DeleteExpired_HookError(t *testing.T) {
 		return nil
 	}
 
-	count, err := repo.DeleteExpired(ctx, failOne)
+	count, err := repo.DeleteExpired(ctx, time.Now(), failOne)
 	if err != nil {
 		t.Fatalf("delete expired: %v", err)
 	}
@@ -547,10 +554,10 @@ func TestSecretRepo_DeleteExpired_HookError(t *testing.T) {
 	}
 
 	// hook-err-001 should still exist (hook failed, row kept)
-	// We can't use GetByPublicID because it filters by expires_at > NOW().
+	// We can't use GetByPublicID because it filters by expires_at.
 	// Instead, call DeleteExpired again with a noop — if it finds a row, it was kept.
 	noop := func(string) error { return nil }
-	count2, err := repo.DeleteExpired(ctx, noop)
+	count2, err := repo.DeleteExpired(ctx, time.Now(), noop)
 	if err != nil {
 		t.Fatalf("second delete expired: %v", err)
 	}

@@ -25,19 +25,21 @@ type mockSecretRepo struct {
 	deleteExpiredCalled atomic.Int32
 }
 
-func (m *mockSecretRepo) Create(_ context.Context, _ *domain.Secret) error { return nil }
-func (m *mockSecretRepo) GetByPublicID(_ context.Context, _ string) (*domain.Secret, error) {
+func (m *mockSecretRepo) Create(_ context.Context, _ *domain.Secret, _ time.Time) error { return nil }
+func (m *mockSecretRepo) GetByPublicID(_ context.Context, _ string, _ time.Time) (*domain.Secret, error) {
 	return nil, nil
 }
-func (m *mockSecretRepo) ClaimBurnAfterRead(_ context.Context, _, _ string) error { return nil }
-func (m *mockSecretRepo) StartRetrievalSession(_ context.Context, _, _, _ string, _ time.Time) (*domain.Secret, error) {
+func (m *mockSecretRepo) ClaimBurnAfterRead(_ context.Context, _, _ string, _ time.Time) error {
+	return nil
+}
+func (m *mockSecretRepo) StartRetrievalSession(_ context.Context, _, _, _ string, _, _ time.Time) (*domain.Secret, error) {
 	return nil, nil
 }
-func (m *mockSecretRepo) GetByRetrievalSession(_ context.Context, _, _ string) (*domain.Secret, error) {
+func (m *mockSecretRepo) GetByRetrievalSession(_ context.Context, _, _ string, _ time.Time) (*domain.Secret, error) {
 	return nil, nil
 }
 func (m *mockSecretRepo) Delete(_ context.Context, _ string) error { return nil }
-func (m *mockSecretRepo) DeleteExpired(_ context.Context, beforeDelete func(string) error) (int64, error) {
+func (m *mockSecretRepo) DeleteExpired(_ context.Context, _ time.Time, beforeDelete func(string) error) (int64, error) {
 	m.deleteExpiredCalled.Add(1)
 	if m.deleteExpiredErr != nil {
 		return 0, m.deleteExpiredErr
@@ -51,7 +53,7 @@ func (m *mockSecretRepo) DeleteExpired(_ context.Context, beforeDelete func(stri
 	}
 	return deleted, nil
 }
-func (m *mockSecretRepo) DeleteExpiredRetrievalSessions(_ context.Context) (int64, error) {
+func (m *mockSecretRepo) DeleteExpiredRetrievalSessions(_ context.Context, _ time.Time) (int64, error) {
 	return 0, nil
 }
 

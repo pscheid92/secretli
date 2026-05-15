@@ -165,6 +165,29 @@ export class KeySet {
 
   encryptBundlePart(data: Uint8Array, aadSuffix: Uint8Array): Uint8Array {
     const nonce = crypto.getRandomValues(new Uint8Array(V2_NONCE_LENGTH));
+    return this.encryptBundlePartWithNonce(data, aadSuffix, nonce);
+  }
+
+  encryptBundlePartDeterministic(
+    data: Uint8Array,
+    aadSuffix: Uint8Array,
+    nonceLabel: string,
+  ): Uint8Array {
+    const nonce = hkdf(
+      sha512,
+      this.blobKey,
+      undefined,
+      label(`bundle_nonce:${nonceLabel}`),
+      V2_NONCE_LENGTH,
+    );
+    return this.encryptBundlePartWithNonce(data, aadSuffix, nonce);
+  }
+
+  private encryptBundlePartWithNonce(
+    data: Uint8Array,
+    aadSuffix: Uint8Array,
+    nonce: Uint8Array,
+  ): Uint8Array {
     const aad = bundleAad(this.publicID, aadSuffix);
     const cipher = xchacha20poly1305(this.blobKey, nonce, aad);
     const ciphertext = cipher.encrypt(data);

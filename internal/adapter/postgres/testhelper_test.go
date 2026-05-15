@@ -114,7 +114,7 @@ func startTestDB() {
 
 func resetTestDB(t *testing.T, pool *pgxpool.Pool) {
 	t.Helper()
-	if _, err := pool.Exec(context.Background(), "TRUNCATE retrieval_sessions, secrets RESTART IDENTITY CASCADE"); err != nil {
+	if _, err := pool.Exec(context.Background(), "TRUNCATE upload_parts, upload_sessions, retrieval_sessions, secrets RESTART IDENTITY CASCADE"); err != nil {
 		t.Fatalf("reset postgres test database: %v", err)
 	}
 }
