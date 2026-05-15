@@ -59,7 +59,7 @@ func newMockRepo() *mockSecretRepo {
 	}
 }
 
-func (m *mockSecretRepo) Create(_ context.Context, s *domain.Secret) error {
+func (m *mockSecretRepo) Create(_ context.Context, s *domain.Secret, _ time.Time) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -74,7 +74,7 @@ func (m *mockSecretRepo) Create(_ context.Context, s *domain.Secret) error {
 	return nil
 }
 
-func (m *mockSecretRepo) GetByPublicID(_ context.Context, publicID string) (*domain.Secret, error) {
+func (m *mockSecretRepo) GetByPublicID(_ context.Context, publicID string, now time.Time) (*domain.Secret, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -82,14 +82,14 @@ func (m *mockSecretRepo) GetByPublicID(_ context.Context, publicID string) (*dom
 	if !ok {
 		return nil, domain.ErrNotFound
 	}
-	if s.ExpiresAt.Before(time.Now()) {
+	if s.ExpiresAt.Before(now) {
 		return nil, domain.ErrNotFound
 	}
 	secret := *s
 	return &secret, nil
 }
 
-func (m *mockSecretRepo) ClaimBurnAfterRead(_ context.Context, publicID, blobTokenHash string) error {
+func (m *mockSecretRepo) ClaimBurnAfterRead(_ context.Context, publicID, blobTokenHash string, now time.Time) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -97,24 +97,23 @@ func (m *mockSecretRepo) ClaimBurnAfterRead(_ context.Context, publicID, blobTok
 	if !ok {
 		return domain.ErrNotFound
 	}
-	if s.ExpiresAt.Before(time.Now()) ||
+	if s.ExpiresAt.Before(now) ||
 		s.BlobTokenHash != blobTokenHash ||
 		!s.BurnAfterRead ||
 		s.RetrievedAt != nil {
 		return domain.ErrNotFound
 	}
 
-	now := time.Now()
 	s.RetrievedAt = &now
 	return nil
 }
 
-func (m *mockSecretRepo) StartRetrievalSession(_ context.Context, publicID, blobTokenHash, sessionTokenHash string, expiresAt time.Time) (*domain.Secret, error) {
+func (m *mockSecretRepo) StartRetrievalSession(_ context.Context, publicID, blobTokenHash, sessionTokenHash string, expiresAt, now time.Time) (*domain.Secret, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	s, ok := m.secrets[publicID]
-	if !ok || s.ExpiresAt.Before(time.Now()) {
+	if !ok || s.ExpiresAt.Before(now) {
 		return nil, domain.ErrNotFound
 	}
 	if s.BurnAfterRead && s.RetrievedAt != nil {
@@ -124,7 +123,6 @@ func (m *mockSecretRepo) StartRetrievalSession(_ context.Context, publicID, blob
 		return nil, domain.ErrForbidden
 	}
 	if s.BurnAfterRead {
-		now := time.Now()
 		s.RetrievedAt = &now
 	}
 	m.sessions[sessionTokenHash] = mockRetrievalSession{publicID: publicID, expiresAt: expiresAt}
@@ -132,16 +130,16 @@ func (m *mockSecretRepo) StartRetrievalSession(_ context.Context, publicID, blob
 	return &secret, nil
 }
 
-func (m *mockSecretRepo) GetByRetrievalSession(_ context.Context, publicID, sessionTokenHash string) (*domain.Secret, error) {
+func (m *mockSecretRepo) GetByRetrievalSession(_ context.Context, publicID, sessionTokenHash string, now time.Time) (*domain.Secret, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	session, ok := m.sessions[sessionTokenHash]
-	if !ok || session.publicID != publicID || session.expiresAt.Before(time.Now()) {
+	if !ok || session.publicID != publicID || session.expiresAt.Before(now) {
 		return nil, domain.ErrForbidden
 	}
 	s, ok := m.secrets[publicID]
-	if !ok || s.ExpiresAt.Before(time.Now()) {
+	if !ok || s.ExpiresAt.Before(now) {
 		return nil, domain.ErrForbidden
 	}
 	secret := *s
@@ -159,13 +157,13 @@ func (m *mockSecretRepo) Delete(_ context.Context, publicID string) error {
 	return nil
 }
 
-func (m *mockSecretRepo) DeleteExpired(_ context.Context, beforeDelete func(string) error) (int64, error) {
+func (m *mockSecretRepo) DeleteExpired(_ context.Context, now time.Time, beforeDelete func(string) error) (int64, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	var count int64
 	for id, s := range m.secrets {
-		expired := s.ExpiresAt.Before(time.Now())
+		expired := s.ExpiresAt.Before(now)
 		burnedAndRetrieved := s.BurnAfterRead && s.RetrievedAt != nil
 		if expired || burnedAndRetrieved {
 			if err := beforeDelete(s.PublicID); err != nil {
@@ -178,13 +176,13 @@ func (m *mockSecretRepo) DeleteExpired(_ context.Context, beforeDelete func(stri
 	return count, nil
 }
 
-func (m *mockSecretRepo) DeleteExpiredRetrievalSessions(_ context.Context) (int64, error) {
+func (m *mockSecretRepo) DeleteExpiredRetrievalSessions(_ context.Context, now time.Time) (int64, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	var count int64
 	for tokenHash, session := range m.sessions {
-		if session.expiresAt.Before(time.Now()) {
+		if session.expiresAt.Before(now) {
 			delete(m.sessions, tokenHash)
 			count++
 		}
@@ -340,7 +338,7 @@ func seedSecretWithTokens(repo *mockSecretRepo, fs *mockFileStore, publicID, met
 		BurnAfterRead:     burnAfterRead,
 		ExpiresAt:         time.Now().Add(time.Hour),
 	}
-	fs.objects[storageKey(publicID)] = blobData
+	fs.objects[domain.SecretStorageKey(publicID)] = blobData
 	repo.secrets[publicID] = secret
 }
 
@@ -368,7 +366,7 @@ func TestCreateSecret_Success(t *testing.T) {
 	}
 
 	// Verify S3 object was stored
-	if _, ok := fs.objects[storageKey(testPublicID("create"))]; !ok {
+	if _, ok := fs.objects[domain.SecretStorageKey(testPublicID("create"))]; !ok {
 		t.Error("blob not stored in S3")
 	}
 
@@ -543,7 +541,7 @@ func TestCreateSecret_DBErrorCleansUpS3(t *testing.T) {
 	}
 
 	// Verify S3 object was cleaned up
-	if _, ok := fs.objects[storageKey(testPublicID("create"))]; ok {
+	if _, ok := fs.objects[domain.SecretStorageKey(testPublicID("create"))]; ok {
 		t.Error("S3 object should have been cleaned up after DB error")
 	}
 }
@@ -581,7 +579,7 @@ func TestCreateSecret_FilePartExceedsMaxFileSize(t *testing.T) {
 	if rec.Code != http.StatusBadRequest {
 		t.Errorf("status = %d, want %d. body: %s", rec.Code, http.StatusBadRequest, rec.Body.String())
 	}
-	if _, ok := fs.objects[storageKey(testPublicID("create"))]; ok {
+	if _, ok := fs.objects[domain.SecretStorageKey(testPublicID("create"))]; ok {
 		t.Error("oversized blob should not be stored")
 	}
 	if _, ok := repo.secrets[testPublicID("create")]; ok {
@@ -798,7 +796,7 @@ func TestRetrieveSecret_BurnAfterRead(t *testing.T) {
 	if _, ok := repo.secrets[publicID]; !ok {
 		t.Error("secret should still exist after burn-after-read (soft delete)")
 	}
-	if _, ok := fs.objects[storageKey(publicID)]; !ok {
+	if _, ok := fs.objects[domain.SecretStorageKey(publicID)]; !ok {
 		t.Error("S3 object should still exist after burn-after-read (soft delete)")
 	}
 
@@ -1502,7 +1500,7 @@ func TestDeleteSecret_Success(t *testing.T) {
 	}
 
 	// Verify S3 object was deleted
-	if _, ok := fs.objects[storageKey(publicID)]; ok {
+	if _, ok := fs.objects[domain.SecretStorageKey(publicID)]; ok {
 		t.Error("S3 object should have been deleted")
 	}
 }
@@ -1663,7 +1661,7 @@ func TestDeleteSecret_S3DeleteError(t *testing.T) {
 	if _, ok := repo.secrets[publicID]; !ok {
 		t.Error("secret row should remain when S3 delete fails")
 	}
-	if _, ok := fs.objects[storageKey(publicID)]; !ok {
+	if _, ok := fs.objects[domain.SecretStorageKey(publicID)]; !ok {
 		t.Error("S3 object should remain when delete fails")
 	}
 }

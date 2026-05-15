@@ -12,21 +12,23 @@ import (
 )
 
 const claimBurnAfterRead = `-- name: ClaimBurnAfterRead :execrows
-UPDATE secrets SET retrieved_at = NOW()
-WHERE public_id = $1
-  AND blob_token_hash = $2
+UPDATE secrets
+SET retrieved_at = $1
+WHERE public_id = $2
+  AND blob_token_hash = $3
   AND burn_after_read = true
   AND retrieved_at IS NULL
-  AND expires_at > NOW()
+  AND expires_at > $1
 `
 
 type ClaimBurnAfterReadParams struct {
+	NowAt         pgtype.Timestamptz
 	PublicID      string
 	BlobTokenHash string
 }
 
 func (q *Queries) ClaimBurnAfterRead(ctx context.Context, arg ClaimBurnAfterReadParams) (int64, error) {
-	result, err := q.db.Exec(ctx, claimBurnAfterRead, arg.PublicID, arg.BlobTokenHash)
+	result, err := q.db.Exec(ctx, claimBurnAfterRead, arg.NowAt, arg.PublicID, arg.BlobTokenHash)
 	if err != nil {
 		return 0, err
 	}
@@ -35,10 +37,19 @@ func (q *Queries) ClaimBurnAfterRead(ctx context.Context, arg ClaimBurnAfterRead
 
 const createSecret = `-- name: CreateSecret :exec
 INSERT INTO secrets (
-    public_id, metadata_token_hash, blob_token_hash, deletion_token_hash,
-    encrypted_meta, blob_size,
-    burn_after_read, expires_at
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+    public_id,
+    metadata_token_hash,
+    blob_token_hash,
+    deletion_token_hash,
+    encrypted_meta,
+    blob_size,
+    burn_after_read,
+    expires_at,
+    created_at
+)
+VALUES (
+    $1, $2, $3, $4, $5, $6, $7, $8, $9
+)
 `
 
 type CreateSecretParams struct {
@@ -50,6 +61,7 @@ type CreateSecretParams struct {
 	BlobSize          int64
 	BurnAfterRead     bool
 	ExpiresAt         pgtype.Timestamptz
+	CreatedAt         pgtype.Timestamptz
 }
 
 func (q *Queries) CreateSecret(ctx context.Context, arg CreateSecretParams) error {
@@ -62,12 +74,14 @@ func (q *Queries) CreateSecret(ctx context.Context, arg CreateSecretParams) erro
 		arg.BlobSize,
 		arg.BurnAfterRead,
 		arg.ExpiresAt,
+		arg.CreatedAt,
 	)
 	return err
 }
 
 const deleteSecret = `-- name: DeleteSecret :execrows
-DELETE FROM secrets WHERE public_id = $1
+DELETE FROM secrets
+WHERE public_id = $1
 `
 
 func (q *Queries) DeleteSecret(ctx context.Context, publicID string) (int64, error) {
@@ -79,30 +93,30 @@ func (q *Queries) DeleteSecret(ctx context.Context, publicID string) (int64, err
 }
 
 const getSecretByPublicID = `-- name: GetSecretByPublicID :one
-SELECT public_id, metadata_token_hash, blob_token_hash, deletion_token_hash,
-    encrypted_meta, blob_size,
+SELECT
+    public_id,
+    metadata_token_hash,
+    blob_token_hash,
+    deletion_token_hash,
+    encrypted_meta,
+    blob_size,
     burn_after_read,
-    expires_at, created_at, retrieved_at
+    expires_at,
+    created_at,
+    retrieved_at
 FROM secrets
-WHERE public_id = $1 AND expires_at > NOW()
+WHERE public_id = $1
+  AND expires_at > $2
 `
 
-type GetSecretByPublicIDRow struct {
-	PublicID          string
-	MetadataTokenHash string
-	BlobTokenHash     string
-	DeletionTokenHash string
-	EncryptedMeta     string
-	BlobSize          int64
-	BurnAfterRead     bool
-	ExpiresAt         pgtype.Timestamptz
-	CreatedAt         pgtype.Timestamptz
-	RetrievedAt       pgtype.Timestamptz
+type GetSecretByPublicIDParams struct {
+	PublicID string
+	NowAt    pgtype.Timestamptz
 }
 
-func (q *Queries) GetSecretByPublicID(ctx context.Context, publicID string) (GetSecretByPublicIDRow, error) {
-	row := q.db.QueryRow(ctx, getSecretByPublicID, publicID)
-	var i GetSecretByPublicIDRow
+func (q *Queries) GetSecretByPublicID(ctx context.Context, arg GetSecretByPublicIDParams) (Secret, error) {
+	row := q.db.QueryRow(ctx, getSecretByPublicID, arg.PublicID, arg.NowAt)
+	var i Secret
 	err := row.Scan(
 		&i.PublicID,
 		&i.MetadataTokenHash,
@@ -118,23 +132,50 @@ func (q *Queries) GetSecretByPublicID(ctx context.Context, publicID string) (Get
 	return i, err
 }
 
-const selectExpiredForCleanup = `-- name: SelectExpiredForCleanup :many
-SELECT public_id FROM secrets
-WHERE expires_at < NOW()
-   OR (
-       burn_after_read = true
-       AND retrieved_at IS NOT NULL
-       AND NOT EXISTS (
-           SELECT 1 FROM retrieval_sessions
-           WHERE retrieval_sessions.public_id = secrets.public_id
-             AND retrieval_sessions.expires_at > NOW()
-       )
-   )
-FOR UPDATE SKIP LOCKED
+const selectConsumedBurnAfterReadSecretsForCleanup = `-- name: SelectConsumedBurnAfterReadSecretsForCleanup :many
+SELECT s.public_id
+FROM secrets AS s
+WHERE s.burn_after_read = true
+  AND s.retrieved_at IS NOT NULL
+  AND s.expires_at >= $1
+  AND NOT EXISTS (
+      SELECT 1
+      FROM retrieval_sessions AS rs
+      WHERE rs.public_id = s.public_id
+        AND rs.expires_at > $1
+  )
+FOR UPDATE OF s SKIP LOCKED
 `
 
-func (q *Queries) SelectExpiredForCleanup(ctx context.Context) ([]string, error) {
-	rows, err := q.db.Query(ctx, selectExpiredForCleanup)
+func (q *Queries) SelectConsumedBurnAfterReadSecretsForCleanup(ctx context.Context, nowAt pgtype.Timestamptz) ([]string, error) {
+	rows, err := q.db.Query(ctx, selectConsumedBurnAfterReadSecretsForCleanup, nowAt)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []string{}
+	for rows.Next() {
+		var public_id string
+		if err := rows.Scan(&public_id); err != nil {
+			return nil, err
+		}
+		items = append(items, public_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const selectExpiredSecretsForCleanup = `-- name: SelectExpiredSecretsForCleanup :many
+SELECT s.public_id
+FROM secrets AS s
+WHERE s.expires_at < $1
+FOR UPDATE OF s SKIP LOCKED
+`
+
+func (q *Queries) SelectExpiredSecretsForCleanup(ctx context.Context, nowAt pgtype.Timestamptz) ([]string, error) {
+	rows, err := q.db.Query(ctx, selectExpiredSecretsForCleanup, nowAt)
 	if err != nil {
 		return nil, err
 	}

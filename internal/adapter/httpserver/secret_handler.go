@@ -79,6 +79,7 @@ func (h *SecretHandler) CreateSecret(c echo.Context) error {
 		return apperrors.BadRequestError("file exceeds maximum size limit")
 	}
 
+	now := time.Now()
 	secret := &domain.Secret{
 		PublicID:          meta.PublicID,
 		MetadataTokenHash: crypto.TokenHash(meta.MetadataToken),
@@ -87,15 +88,16 @@ func (h *SecretHandler) CreateSecret(c echo.Context) error {
 		EncryptedMeta:     meta.EncryptedMeta,
 		BlobSize:          header.Size,
 		BurnAfterRead:     meta.BurnAfterRead,
-		ExpiresAt:         time.Now().Add(duration),
+		ExpiresAt:         now.Add(duration),
+		CreatedAt:         now,
 	}
 
-	sk := storageKey(meta.PublicID)
+	sk := domain.SecretStorageKey(meta.PublicID)
 	if err := h.fileStore.Put(ctx, sk, file, header.Size); err != nil {
 		return apperrors.InternalError("failed to upload blob to S3", err)
 	}
 
-	if err := h.repo.Create(ctx, secret); err != nil {
+	if err := h.repo.Create(ctx, secret, now); err != nil {
 		_ = h.fileStore.Delete(ctx, sk)
 		if errors.Is(err, domain.ErrDuplicate) {
 			return apperrors.ConflictError("secret with this public_id already exists")
@@ -119,7 +121,7 @@ func (h *SecretHandler) RetrieveSecret(c echo.Context) error {
 
 	ctx := c.Request().Context()
 	publicID := c.Param("publicID")
-	sk := storageKey(publicID)
+	sk := domain.SecretStorageKey(publicID)
 
 	obj, err := h.fileStore.Get(ctx, sk)
 	if err != nil {
@@ -129,7 +131,7 @@ func (h *SecretHandler) RetrieveSecret(c echo.Context) error {
 
 	if secret.BurnAfterRead {
 		token := c.Request().Header.Get(HeaderBlobToken)
-		if err := h.repo.ClaimBurnAfterRead(ctx, publicID, crypto.TokenHash(token)); err != nil {
+		if err := h.repo.ClaimBurnAfterRead(ctx, publicID, crypto.TokenHash(token), time.Now()); err != nil {
 			if errors.Is(err, domain.ErrNotFound) {
 				return apperrors.NotFoundError("secret not found")
 			}
@@ -174,7 +176,8 @@ func (h *SecretHandler) StartRetrievalSession(c echo.Context) error {
 	if err != nil {
 		return apperrors.InternalError("failed to create retrieval session", err)
 	}
-	sessionExpiresAt := time.Now().Add(retrievalSessionTTL)
+	now := time.Now()
+	sessionExpiresAt := now.Add(retrievalSessionTTL)
 
 	secret, err := h.repo.StartRetrievalSession(
 		c.Request().Context(),
@@ -182,6 +185,7 @@ func (h *SecretHandler) StartRetrievalSession(c echo.Context) error {
 		crypto.TokenHash(token),
 		crypto.TokenHash(sessionToken),
 		sessionExpiresAt,
+		now,
 	)
 	if errors.Is(err, domain.ErrNotFound) {
 		return apperrors.NotFoundError("secret not found")
@@ -222,6 +226,7 @@ func (h *SecretHandler) RetrieveSecretRange(c echo.Context) error {
 		c.Request().Context(),
 		publicID,
 		crypto.TokenHash(sessionToken),
+		time.Now(),
 	)
 	if errors.Is(err, domain.ErrForbidden) {
 		return apperrors.ForbiddenError("invalid retrieval session")
@@ -240,7 +245,7 @@ func (h *SecretHandler) RetrieveSecretRange(c echo.Context) error {
 	}
 
 	ctx := c.Request().Context()
-	obj, err := h.fileStore.GetRange(ctx, storageKey(publicID), start, end)
+	obj, err := h.fileStore.GetRange(ctx, domain.SecretStorageKey(publicID), start, end)
 	if err != nil {
 		return apperrors.InternalError("failed to get blob range from S3", err)
 	}
@@ -300,7 +305,7 @@ func (h *SecretHandler) DeleteSecret(c echo.Context) error {
 
 	publicID := c.Param("publicID")
 
-	sk := storageKey(publicID)
+	sk := domain.SecretStorageKey(publicID)
 	if err := h.fileStore.Delete(ctx, sk); err != nil {
 		return apperrors.InternalError("failed to delete blob from S3", err)
 	}
@@ -344,7 +349,7 @@ func (h *SecretHandler) authenticateSecret(c echo.Context, header string, expect
 		return nil, apperrors.BadRequestError("malformed " + header + " header")
 	}
 
-	secret, err := h.repo.GetByPublicID(r.Context(), publicID)
+	secret, err := h.repo.GetByPublicID(r.Context(), publicID, time.Now())
 	if errors.Is(err, domain.ErrNotFound) {
 		return nil, apperrors.NotFoundError("secret not found")
 	}
@@ -381,10 +386,6 @@ func parseExpiration(s string) (time.Duration, error) {
 		return 0, errors.New("invalid expiration: must be one of 5m, 10m, 15m, 1h, 4h, 12h, 1d, 3d, 7d")
 	}
 	return d, nil
-}
-
-func storageKey(publicID string) string {
-	return "secrets/" + publicID
 }
 
 func newRetrievalSessionToken() (string, error) {

@@ -19,6 +19,7 @@ type RetrievalSession struct {
 type Secret struct {
 	PublicID          string
 	MetadataTokenHash string
+	BlobTokenHash     string
 	DeletionTokenHash string
 	EncryptedMeta     string
 	BlobSize          int64
@@ -26,5 +27,33 @@ type Secret struct {
 	ExpiresAt         pgtype.Timestamptz
 	CreatedAt         pgtype.Timestamptz
 	RetrievedAt       pgtype.Timestamptz
+}
+
+type UploadPart struct {
+	SessionID  string
+	PartNumber int32
+	PartOffset int64
+	PartSize   int64
+	PartSha256 string
+	Etag       string
+	CreatedAt  pgtype.Timestamptz
+}
+
+type UploadSession struct {
+	SessionID         string
+	PublicID          string
+	UploadTokenHash   string
+	MetadataTokenHash string
 	BlobTokenHash     string
+	DeletionTokenHash string
+	S3UploadID        string
+	BlobSize          int64
+	EncryptedMeta     string
+	BurnAfterRead     bool
+	SecretExpiresAt   pgtype.Timestamptz
+	UploadExpiresAt   pgtype.Timestamptz
+	State             string
+	CreatedAt         pgtype.Timestamptz
+	CompletedAt       pgtype.Timestamptz
+	AbortedAt         pgtype.Timestamptz
 }

@@ -8,6 +8,7 @@ import (
 	"github.com/labstack/echo/v4/middleware"
 
 	"github.com/pscheid92/secretli/internal/adapter/metrics"
+	"github.com/pscheid92/secretli/internal/domain"
 	"github.com/pscheid92/secretli/web"
 )
 
@@ -65,6 +66,24 @@ func (a *App) registerRoutes() *metrics.SecretMetrics {
 	deleteGroup := secrets.Group("")
 	deleteGroup.Use(rateLimiter(30, time.Minute))
 	deleteGroup.DELETE("/:publicID", sh.DeleteSecret)
+
+	if uploadRepo, ok := a.secretRepo.(domain.UploadSessionRepo); ok {
+		if multipartStore, ok := a.fileStore.(domain.MultipartFileStore); ok {
+			uh := NewUploadHandler(uploadRepo, multipartStore, a.cfg.MaxFileSize, secretMetrics)
+			uploads := e.Group("/api/v1/secrets/uploads")
+
+			uploadCreateGroup := uploads.Group("")
+			uploadCreateGroup.Use(rateLimiter(10, time.Minute))
+			uploadCreateGroup.POST("", uh.CreateUploadSession)
+			uploadCreateGroup.POST("/:sessionID/complete", uh.CompleteUploadSession)
+			uploadCreateGroup.DELETE("/:sessionID", uh.AbortUploadSession)
+			uploadCreateGroup.GET("/:sessionID", uh.UploadSessionStatus)
+
+			uploadPartGroup := uploads.Group("")
+			uploadPartGroup.Use(rateLimiter(600, time.Minute))
+			uploadPartGroup.PUT("/:sessionID/parts/:partNumber", uh.UploadPart)
+		}
+	}
 
 	// SPA catch-all
 	distFS, _ := fs.Sub(web.DistFS, "frontend/dist")

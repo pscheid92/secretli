@@ -13,12 +13,7 @@ import {
   type SecretMetadataResponse,
   startRetrievalSession,
 } from "../lib/api";
-import {
-  type BundleManifest,
-  DOWNLOAD_ALL_BUNDLE_COALESCED_PLAINTEXT_BYTES,
-  decryptBundleFiles,
-  readBundleManifest,
-} from "../lib/bundle";
+import { type BundleManifest, decryptBundleFiles, readBundleManifest } from "../lib/bundle";
 import { KeySet, type SecretMeta } from "../lib/encryption";
 import { formatRelativeTime, formatSize } from "../lib/format";
 
@@ -575,7 +570,7 @@ export default function RetrievePage() {
         const fetchRange = (start: number, end: number) =>
           retrieveSecretRange(publicID, sessionToken, start, end);
         for (const { file, blob } of await decryptBundleFiles(manifest.files, keySet, fetchRange, {
-          maxCoalescedPlaintextBytes: DOWNLOAD_ALL_BUNDLE_COALESCED_PLAINTEXT_BYTES,
+          maxCoalescedPlaintextBytes: totalSize,
         })) {
           saveBlob(blob, file.name);
         }

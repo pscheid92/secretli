@@ -1,12 +1,18 @@
 import {
   ApiError,
+  abortUploadSession,
   type CreateSecretParams,
+  completeUploadSession,
   createSecret,
   deleteSecret,
   getSecretMetadata,
+  getUploadSession,
   retrieveSecret,
   retrieveSecretRange,
+  type StartUploadSessionParams,
   startRetrievalSession,
+  startUploadSession,
+  uploadSessionPart,
 } from "../api";
 
 describe("ApiError", () => {
@@ -257,6 +263,133 @@ describe("getSecretMetadata", () => {
 
     const result = await getSecretMetadata("pub-id", "meta-token");
     expect(result).toEqual(mockResponse);
+  });
+});
+
+describe("upload sessions", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("starts an upload session through the v1 API", async () => {
+    const params: StartUploadSessionParams = {
+      public_id: "pub-id",
+      metadata_token: "meta-token",
+      blob_token: "blob-token",
+      deletion_token: "delete-token",
+      encrypted_meta: "v2$nonce$cipher",
+      expiration: "1d",
+      burn_after_read: false,
+      blob_size: 70 * 1024 * 1024,
+    };
+    const response = {
+      session_id: "session-id",
+      upload_token: "upload-token",
+      public_id: params.public_id,
+      part_size: 32 * 1024 * 1024,
+      blob_size: params.blob_size,
+      expires_at: "2026-05-15T12:00:00Z",
+      upload_expires_at: "2026-05-16T12:00:00Z",
+      state: "pending",
+      uploaded_parts: [],
+    };
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(new Response(JSON.stringify(response), { status: 201 }));
+
+    await expect(startUploadSession(params)).resolves.toEqual(response);
+
+    const call = fetchSpy.mock.calls[0];
+    expect(call[0]).toBe("/api/v1/secrets/uploads");
+    expect(call[1]).toEqual(
+      expect.objectContaining({
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    expect(JSON.parse(call[1]?.body as string)).toEqual(params);
+  });
+
+  it("retrieves upload session status with bearer auth", async () => {
+    const response = {
+      session_id: "session-id",
+      public_id: "pub-id",
+      part_size: 32 * 1024 * 1024,
+      blob_size: 70 * 1024 * 1024,
+      expires_at: "2026-05-15T12:00:00Z",
+      upload_expires_at: "2026-05-16T12:00:00Z",
+      state: "pending",
+      uploaded_parts: [{ part_number: 1, offset: 0, size: 5, sha256: "abc", etag: "etag-1" }],
+    };
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(new Response(JSON.stringify(response), { status: 200 }));
+
+    await expect(getUploadSession("session-id", "upload-token")).resolves.toEqual(response);
+    expect(fetchSpy).toHaveBeenCalledWith(
+      "/api/v1/secrets/uploads/session-id",
+      expect.objectContaining({
+        method: "GET",
+        headers: { Authorization: "Bearer upload-token" },
+      }),
+    );
+  });
+
+  it("uploads a multipart part with offset, size, and hash headers", async () => {
+    const response = { part_number: 2, offset: 5, size: 3, sha256: "hash", etag: "etag-2" };
+    const blob = new Blob(["abc"]);
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(new Response(JSON.stringify(response), { status: 200 }));
+
+    await expect(
+      uploadSessionPart("session-id", "upload-token", 2, 5, blob, "hash"),
+    ).resolves.toEqual(response);
+
+    const call = fetchSpy.mock.calls[0];
+    expect(call[0]).toBe("/api/v1/secrets/uploads/session-id/parts/2");
+    expect(call[1]).toEqual(
+      expect.objectContaining({
+        method: "PUT",
+        headers: {
+          Authorization: "Bearer upload-token",
+          "Content-Type": "application/octet-stream",
+          "X-Part-Offset": "5",
+          "X-Part-Size": "3",
+          "X-Part-SHA256": "hash",
+        },
+        body: blob,
+      }),
+    );
+  });
+
+  it("completes and aborts upload sessions through the v1 API", async () => {
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ expires_at: "2026-05-15T12:00:00Z" }), { status: 201 }),
+      )
+      .mockResolvedValueOnce(new Response(null, { status: 204 }));
+
+    await expect(completeUploadSession("session-id", "upload-token")).resolves.toEqual({
+      expires_at: "2026-05-15T12:00:00Z",
+    });
+    await expect(abortUploadSession("session-id", "upload-token")).resolves.toBeUndefined();
+
+    expect(fetchSpy.mock.calls[0][0]).toBe("/api/v1/secrets/uploads/session-id/complete");
+    expect(fetchSpy.mock.calls[0][1]).toEqual(
+      expect.objectContaining({
+        method: "POST",
+        headers: { Authorization: "Bearer upload-token" },
+      }),
+    );
+    expect(fetchSpy.mock.calls[1][0]).toBe("/api/v1/secrets/uploads/session-id");
+    expect(fetchSpy.mock.calls[1][1]).toEqual(
+      expect.objectContaining({
+        method: "DELETE",
+        headers: { Authorization: "Bearer upload-token" },
+      }),
+    );
   });
 });
 

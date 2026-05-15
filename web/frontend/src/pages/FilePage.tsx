@@ -9,10 +9,14 @@ import Spinner from "../components/Spinner";
 import Toggle from "../components/Toggle";
 import TransferStatus, { type TransferStep } from "../components/TransferStatus";
 import { ApiError, createSecret } from "../lib/api";
-import { createEncryptedBundle } from "../lib/bundle";
+import { createEncryptedBundle, estimateBundleEncryptedSize } from "../lib/bundle";
 import { KeySet } from "../lib/encryption";
 import { formatExpiration } from "../lib/expiration";
 import { formatSize } from "../lib/format";
+import {
+  LARGE_BUNDLE_MULTIPART_THRESHOLD_BYTES,
+  uploadMultipartBundle,
+} from "../lib/multipartBundleUpload";
 import {
   fitsBundleUploadLimit,
   MAX_ENCRYPTED_UPLOAD_BYTES,
@@ -125,6 +129,29 @@ export default function FilePage() {
       if (hasPassword) {
         const encoded = keySet.getEncoded();
         encryptKeySet = await KeySet.fromShareSecret(encoded.shareSecret, data.password);
+      }
+
+      const estimatedBundleSize = estimateBundleEncryptedSize(data.files.map((file) => file.size));
+      if (estimatedBundleSize >= LARGE_BUNDLE_MULTIPART_THRESHOLD_BYTES) {
+        setStage("uploading");
+        const response = await uploadMultipartBundle({
+          files: data.files,
+          baseKeySet: keySet,
+          bundleKeySet: encryptKeySet,
+          password: hasPassword ? data.password : undefined,
+          passwordProtected: hasPassword,
+          expiration: data.expiration,
+          burnAfterRead: data.burnAfterRead,
+        });
+
+        setResult({
+          url: `${window.location.origin}/s#${response.encoded.shareSecret}`,
+          expiresAt: response.expires_at,
+          burnAfterRead: data.burnAfterRead,
+          deletionToken: response.deletionToken,
+        });
+        toast.success("Share created");
+        return;
       }
 
       const { blob, manifest } = await createEncryptedBundle(data.files, encryptKeySet);

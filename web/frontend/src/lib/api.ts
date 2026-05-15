@@ -183,3 +183,102 @@ export function deleteSecret(
     },
   });
 }
+
+// --- Upload sessions ---
+
+export interface UploadSessionPart {
+  readonly part_number: number;
+  readonly offset: number;
+  readonly size: number;
+  readonly sha256: string;
+  readonly etag?: string;
+}
+
+export interface StartUploadSessionParams {
+  readonly public_id: string;
+  readonly metadata_token: string;
+  readonly blob_token: string;
+  readonly deletion_token: string;
+  readonly encrypted_meta: string;
+  readonly expiration: string;
+  readonly burn_after_read: boolean;
+  readonly blob_size: number;
+}
+
+export interface UploadSessionStatus {
+  readonly session_id: string;
+  readonly upload_token?: string;
+  readonly public_id: string;
+  readonly part_size: number;
+  readonly blob_size: number;
+  readonly expires_at: string;
+  readonly upload_expires_at: string;
+  readonly state: "pending" | "completed" | "aborted";
+  readonly uploaded_parts: UploadSessionPart[];
+}
+
+export interface StartUploadSessionResponse extends UploadSessionStatus {
+  readonly upload_token: string;
+}
+
+export interface CompleteUploadSessionResponse {
+  readonly expires_at: string;
+}
+
+export function startUploadSession(
+  params: StartUploadSessionParams,
+): Promise<StartUploadSessionResponse> {
+  return request("/api/v1/secrets/uploads", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(params),
+  });
+}
+
+export function getUploadSession(
+  sessionID: string,
+  uploadToken: string,
+): Promise<UploadSessionStatus> {
+  return request(`/api/v1/secrets/uploads/${sessionID}`, {
+    method: "GET",
+    headers: { Authorization: `Bearer ${uploadToken}` },
+  });
+}
+
+export function completeUploadSession(
+  sessionID: string,
+  uploadToken: string,
+): Promise<CompleteUploadSessionResponse> {
+  return request(`/api/v1/secrets/uploads/${sessionID}/complete`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${uploadToken}` },
+  });
+}
+
+export function abortUploadSession(sessionID: string, uploadToken: string): Promise<void> {
+  return request(`/api/v1/secrets/uploads/${sessionID}`, {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${uploadToken}` },
+  });
+}
+
+export function uploadSessionPart(
+  sessionID: string,
+  uploadToken: string,
+  partNumber: number,
+  offset: number,
+  bytes: Blob,
+  sha256: string,
+): Promise<UploadSessionPart> {
+  return request(`/api/v1/secrets/uploads/${sessionID}/parts/${partNumber}`, {
+    method: "PUT",
+    headers: {
+      Authorization: `Bearer ${uploadToken}`,
+      "Content-Type": "application/octet-stream",
+      "X-Part-Offset": String(offset),
+      "X-Part-Size": String(bytes.size),
+      "X-Part-SHA256": sha256,
+    },
+    body: bytes,
+  });
+}
