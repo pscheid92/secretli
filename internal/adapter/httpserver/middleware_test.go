@@ -154,16 +154,32 @@ func TestCORSMiddlewareAllowsRangeAPIHeaders(t *testing.T) {
 	preflight := httptest.NewRequest(http.MethodOptions, "/api/v1/secrets/id/blob", nil)
 	preflight.Header.Set(echo.HeaderOrigin, "https://app.example")
 	preflight.Header.Set(echo.HeaderAccessControlRequestMethod, http.MethodGet)
-	preflight.Header.Set(echo.HeaderAccessControlRequestHeaders, "Authorization, Range, X-Blob-Token")
+	preflight.Header.Set(echo.HeaderAccessControlRequestHeaders, "Authorization, Range, X-Blob-Token, X-Request-ID")
 	preflightRec := httptest.NewRecorder()
 	if err := handler(e.NewContext(preflight, preflightRec)); err != nil {
 		t.Fatalf("preflight: %v", err)
 	}
 
 	allowHeaders := preflightRec.Header().Get(echo.HeaderAccessControlAllowHeaders)
-	for _, header := range []string{"Authorization", "Range", HeaderBlobToken} {
+	for _, header := range []string{"Authorization", "Range", HeaderBlobToken, echo.HeaderXRequestID} {
 		if !headerListContains(allowHeaders, header) {
 			t.Fatalf("Allow-Headers %q missing %q", allowHeaders, header)
+		}
+	}
+
+	uploadPreflight := httptest.NewRequest(http.MethodOptions, "/api/v1/secrets/uploads/id/parts/1", nil)
+	uploadPreflight.Header.Set(echo.HeaderOrigin, "https://app.example")
+	uploadPreflight.Header.Set(echo.HeaderAccessControlRequestMethod, http.MethodPut)
+	uploadPreflight.Header.Set(echo.HeaderAccessControlRequestHeaders, "Authorization, Content-Type, X-Request-ID, X-Part-Offset, X-Part-Size, X-Part-SHA256")
+	uploadPreflightRec := httptest.NewRecorder()
+	if err := handler(e.NewContext(uploadPreflight, uploadPreflightRec)); err != nil {
+		t.Fatalf("upload preflight: %v", err)
+	}
+
+	uploadAllowHeaders := uploadPreflightRec.Header().Get(echo.HeaderAccessControlAllowHeaders)
+	for _, header := range []string{"Authorization", "Content-Type", echo.HeaderXRequestID, HeaderPartOffset, HeaderPartSize, HeaderPartSHA256} {
+		if !headerListContains(uploadAllowHeaders, header) {
+			t.Fatalf("Upload Allow-Headers %q missing %q", uploadAllowHeaders, header)
 		}
 	}
 
@@ -175,7 +191,7 @@ func TestCORSMiddlewareAllowsRangeAPIHeaders(t *testing.T) {
 	}
 
 	exposeHeaders := rec.Header().Get(echo.HeaderAccessControlExposeHeaders)
-	for _, header := range []string{"Content-Range", "Accept-Ranges", HeaderBurnAfterRead} {
+	for _, header := range []string{echo.HeaderXRequestID, "Content-Range", "Accept-Ranges", HeaderBurnAfterRead} {
 		if !headerListContains(exposeHeaders, header) {
 			t.Fatalf("Expose-Headers %q missing %q", exposeHeaders, header)
 		}

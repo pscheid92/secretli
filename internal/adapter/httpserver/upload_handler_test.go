@@ -195,6 +195,9 @@ func TestUploadPart_IdempotentAndConflict(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("first upload status = %d, want %d. body: %s", rec.Code, http.StatusOK, rec.Body.String())
 	}
+	if got := string(store.uploadedParts[1]); got != string(payload) {
+		t.Fatalf("uploaded part = %q, want %q", got, string(payload))
+	}
 
 	req = uploadPartRequest(session.SessionID, uploadToken, 1, 0, payload, hash)
 	rec = httptest.NewRecorder()
@@ -214,6 +217,28 @@ func TestUploadPart_IdempotentAndConflict(t *testing.T) {
 	callHandler(c, h.UploadPart)
 	if rec.Code != http.StatusConflict {
 		t.Fatalf("conflict status = %d, want %d. body: %s", rec.Code, http.StatusConflict, rec.Body.String())
+	}
+}
+
+func TestUploadPart_RejectsHashMismatchBeforeS3Upload(t *testing.T) {
+	repo := newUploadMockRepo()
+	store := newUploadMockStore()
+	uploadToken := testToken("upload hash mismatch token")
+	session := seedUploadSession(repo, uploadToken, 6)
+	h := NewUploadHandler(repo, store, 100*1024*1024, testMetrics())
+
+	req := uploadPartRequest(session.SessionID, uploadToken, 1, 0, []byte("abcdef"), sha256HexTest([]byte("zzzzzz")))
+	rec := httptest.NewRecorder()
+	c := newEchoContext(req, rec)
+	c.SetParamNames("sessionID", "partNumber")
+	c.SetParamValues(session.SessionID, "1")
+	callHandler(c, h.UploadPart)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d. body: %s", rec.Code, http.StatusBadRequest, rec.Body.String())
+	}
+	if got := len(store.uploadedParts); got != 0 {
+		t.Fatalf("uploaded parts = %d, want 0", got)
 	}
 }
 

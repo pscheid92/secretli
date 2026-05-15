@@ -46,7 +46,8 @@ describe("request helper (via deleteSecret)", () => {
     } catch (e) {
       expect(e).toBeInstanceOf(ApiError);
       expect((e as ApiError).status).toBe(401);
-      expect((e as ApiError).message).toBe("unauthorized");
+      expect((e as ApiError).message).toMatch(/^unauthorized \(request id: .+\)$/);
+      expect((e as ApiError).requestId).toBeTruthy();
     }
   });
 
@@ -61,7 +62,8 @@ describe("request helper (via deleteSecret)", () => {
     } catch (e) {
       expect(e).toBeInstanceOf(ApiError);
       expect((e as ApiError).status).toBe(500);
-      expect((e as ApiError).message).toBe("Request failed (500)");
+      expect((e as ApiError).message).toMatch(/^Request failed \(500\) \(request id: .+\)$/);
+      expect((e as ApiError).requestId).toBeTruthy();
     }
   });
 
@@ -75,6 +77,7 @@ describe("request helper (via deleteSecret)", () => {
       expect(e).toBeInstanceOf(ApiError);
       expect((e as ApiError).status).toBe(0);
       expect((e as ApiError).message).toContain("Network error");
+      expect((e as ApiError).requestId).toBeTruthy();
     }
   });
 
@@ -114,6 +117,7 @@ describe("createSecret", () => {
 
     const call = fetchSpy.mock.calls[0];
     expect(call[0]).toBe("/api/v1/secrets");
+    expectHeader(call[1], "X-Request-ID");
     const body = call[1]?.body as FormData;
     expect(body).toBeInstanceOf(FormData);
     expect(body.get("public_id")).toBe(params.public_id);
@@ -137,7 +141,7 @@ describe("retrieveSecret", () => {
       "X-Burn-After-Read": "true",
     });
     const fileBlob = new Blob(["encrypted-blob-data"]);
-    vi.spyOn(globalThis, "fetch").mockResolvedValue({
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue({
       ok: true,
       status: 200,
       headers,
@@ -146,6 +150,8 @@ describe("retrieveSecret", () => {
 
     const result = await retrieveSecret("pub-id", "blob-token");
     expect(result.burnAfterRead).toBe(true);
+    expectHeader(fetchSpy.mock.calls[0][1], "X-Request-ID");
+    expectHeader(fetchSpy.mock.calls[0][1], "X-Blob-Token", "blob-token");
 
     const text = await result.blob.text();
     expect(text).toBe("encrypted-blob-data");
@@ -181,6 +187,7 @@ describe("retrieveSecret", () => {
     } catch (e) {
       expect(e).toBeInstanceOf(ApiError);
       expect((e as ApiError).status).toBe(0);
+      expect((e as ApiError).requestId).toBeTruthy();
     }
   });
 });
@@ -202,13 +209,11 @@ describe("retrieval sessions", () => {
       .mockResolvedValue(new Response(JSON.stringify(response), { status: 201 }));
 
     await expect(startRetrievalSession("pub-id", "blob-token")).resolves.toEqual(response);
-    expect(fetchSpy).toHaveBeenCalledWith(
-      "/api/v1/secrets/pub-id/retrieval-session",
-      expect.objectContaining({
-        method: "POST",
-        headers: { "X-Blob-Token": "blob-token" },
-      }),
-    );
+    const call = fetchSpy.mock.calls[0];
+    expect(call[0]).toBe("/api/v1/secrets/pub-id/retrieval-session");
+    expect(call[1]).toEqual(expect.objectContaining({ method: "POST" }));
+    expectHeader(call[1], "X-Blob-Token", "blob-token");
+    expectHeader(call[1], "X-Request-ID");
   });
 
   it("retrieves a byte range with bearer session and range headers", async () => {
@@ -222,16 +227,12 @@ describe("retrieval sessions", () => {
 
     const result = await retrieveSecretRange("pub-id", "session-token", 5, 7);
     expect(result).toEqual(bytes);
-    expect(fetchSpy).toHaveBeenCalledWith(
-      "/api/v1/secrets/pub-id/blob",
-      expect.objectContaining({
-        method: "GET",
-        headers: {
-          Authorization: "Bearer session-token",
-          Range: "bytes=5-7",
-        },
-      }),
-    );
+    const call = fetchSpy.mock.calls[0];
+    expect(call[0]).toBe("/api/v1/secrets/pub-id/blob");
+    expect(call[1]).toEqual(expect.objectContaining({ method: "GET" }));
+    expectHeader(call[1], "Authorization", "Bearer session-token");
+    expectHeader(call[1], "Range", "bytes=5-7");
+    expectHeader(call[1], "X-Request-ID");
   });
 
   it("rejects non-partial range responses", async () => {
@@ -239,7 +240,7 @@ describe("retrieval sessions", () => {
 
     await expect(retrieveSecretRange("pub-id", "session-token", 5, 7)).rejects.toMatchObject({
       status: 200,
-      message: "Expected partial content response (200)",
+      requestId: expect.any(String),
     });
   });
 });
@@ -304,9 +305,10 @@ describe("upload sessions", () => {
     expect(call[1]).toEqual(
       expect.objectContaining({
         method: "POST",
-        headers: { "Content-Type": "application/json" },
       }),
     );
+    expectHeader(call[1], "Content-Type", "application/json");
+    expectHeader(call[1], "X-Request-ID");
     expect(JSON.parse(call[1]?.body as string)).toEqual(params);
   });
 
@@ -326,13 +328,11 @@ describe("upload sessions", () => {
       .mockResolvedValue(new Response(JSON.stringify(response), { status: 200 }));
 
     await expect(getUploadSession("session-id", "upload-token")).resolves.toEqual(response);
-    expect(fetchSpy).toHaveBeenCalledWith(
-      "/api/v1/secrets/uploads/session-id",
-      expect.objectContaining({
-        method: "GET",
-        headers: { Authorization: "Bearer upload-token" },
-      }),
-    );
+    const call = fetchSpy.mock.calls[0];
+    expect(call[0]).toBe("/api/v1/secrets/uploads/session-id");
+    expect(call[1]).toEqual(expect.objectContaining({ method: "GET" }));
+    expectHeader(call[1], "Authorization", "Bearer upload-token");
+    expectHeader(call[1], "X-Request-ID");
   });
 
   it("uploads a multipart part with offset, size, and hash headers", async () => {
@@ -351,16 +351,15 @@ describe("upload sessions", () => {
     expect(call[1]).toEqual(
       expect.objectContaining({
         method: "PUT",
-        headers: {
-          Authorization: "Bearer upload-token",
-          "Content-Type": "application/octet-stream",
-          "X-Part-Offset": "5",
-          "X-Part-Size": "3",
-          "X-Part-SHA256": "hash",
-        },
         body: blob,
       }),
     );
+    expectHeader(call[1], "Authorization", "Bearer upload-token");
+    expectHeader(call[1], "Content-Type", "application/octet-stream");
+    expectHeader(call[1], "X-Part-Offset", "5");
+    expectHeader(call[1], "X-Part-Size", "3");
+    expectHeader(call[1], "X-Part-SHA256", "hash");
+    expectHeader(call[1], "X-Request-ID");
   });
 
   it("completes and aborts upload sessions through the v1 API", async () => {
@@ -380,16 +379,18 @@ describe("upload sessions", () => {
     expect(fetchSpy.mock.calls[0][1]).toEqual(
       expect.objectContaining({
         method: "POST",
-        headers: { Authorization: "Bearer upload-token" },
       }),
     );
+    expectHeader(fetchSpy.mock.calls[0][1], "Authorization", "Bearer upload-token");
+    expectHeader(fetchSpy.mock.calls[0][1], "X-Request-ID");
     expect(fetchSpy.mock.calls[1][0]).toBe("/api/v1/secrets/uploads/session-id");
     expect(fetchSpy.mock.calls[1][1]).toEqual(
       expect.objectContaining({
         method: "DELETE",
-        headers: { Authorization: "Bearer upload-token" },
       }),
     );
+    expectHeader(fetchSpy.mock.calls[1][1], "Authorization", "Bearer upload-token");
+    expectHeader(fetchSpy.mock.calls[1][1], "X-Request-ID");
   });
 });
 
@@ -406,15 +407,21 @@ describe("deleteSecret", () => {
     const result = await deleteSecret("pub-id", "meta-tok", "del-tok");
     expect(result).toBeUndefined();
 
-    expect(fetchSpy).toHaveBeenCalledWith(
-      "/api/v1/secrets/pub-id",
-      expect.objectContaining({
-        method: "DELETE",
-        headers: {
-          "X-Metadata-Token": "meta-tok",
-          "X-Deletion-Token": "del-tok",
-        },
-      }),
-    );
+    const call = fetchSpy.mock.calls[0];
+    expect(call[0]).toBe("/api/v1/secrets/pub-id");
+    expect(call[1]).toEqual(expect.objectContaining({ method: "DELETE" }));
+    expectHeader(call[1], "X-Metadata-Token", "meta-tok");
+    expectHeader(call[1], "X-Deletion-Token", "del-tok");
+    expectHeader(call[1], "X-Request-ID");
   });
 });
+
+function expectHeader(init: RequestInit | undefined, name: string, value?: string) {
+  expect(init?.headers).toBeInstanceOf(Headers);
+  const headers = init?.headers as Headers;
+  if (value === undefined) {
+    expect(headers.get(name)).toBeTruthy();
+    return;
+  }
+  expect(headers.get(name)).toBe(value);
+}

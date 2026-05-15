@@ -1,13 +1,13 @@
 package httpserver
 
 import (
-	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"sort"
 	"strconv"
 	"time"
@@ -177,21 +177,18 @@ func (h *UploadHandler) UploadPart(c echo.Context) error {
 		return apperrors.ConflictError("part already uploaded with different content")
 	}
 
-	body, err := readBoundedBody(c, size)
+	partFile, cleanup, err := spoolValidatedPart(c, size, partSHA256)
 	if err != nil {
 		return err
 	}
-	sum := sha256.Sum256(body)
-	if got := hex.EncodeToString(sum[:]); got != partSHA256 {
-		return apperrors.BadRequestError("part SHA-256 mismatch")
-	}
+	defer cleanup()
 
 	etag, err := h.fileStore.UploadPart(
 		c.Request().Context(),
 		domain.SecretStorageKey(session.PublicID),
 		session.S3UploadID,
 		partNumber,
-		bytes.NewReader(body),
+		partFile,
 		size,
 	)
 	if err != nil {
@@ -425,19 +422,44 @@ func parseInt64Header(r *http.Request, header string) (int64, error) {
 	return parsed, nil
 }
 
-func readBoundedBody(c echo.Context, expectedSize int64) ([]byte, error) {
-	c.Request().Body = http.MaxBytesReader(c.Response(), c.Request().Body, expectedSize+1)
-	body, err := io.ReadAll(c.Request().Body)
+func spoolValidatedPart(c echo.Context, expectedSize int64, expectedSHA256 string) (*os.File, func(), error) {
+	partFile, err := os.CreateTemp("", "secretli-upload-part-*")
+	if err != nil {
+		return nil, nil, apperrors.InternalError("failed to create temporary upload part", err)
+	}
+	cleanup := func() {
+		_ = partFile.Close()
+		_ = os.Remove(partFile.Name())
+	}
+
+	body := http.MaxBytesReader(c.Response(), c.Request().Body, expectedSize+1)
+	hasher := sha256.New()
+	written, err := io.Copy(partFile, io.TeeReader(body, hasher))
 	if _, ok := errors.AsType[*http.MaxBytesError](err); ok {
-		return nil, apperrors.BadRequestError("part exceeds declared size")
+		cleanup()
+		return nil, nil, apperrors.BadRequestError("part exceeds declared size")
 	}
 	if err != nil {
-		return nil, apperrors.BadRequestError("failed to read part body")
+		cleanup()
+		return nil, nil, apperrors.BadRequestError("failed to read part body")
 	}
-	if int64(len(body)) != expectedSize {
-		return nil, apperrors.BadRequestError("request body size does not match " + HeaderPartSize)
+	if written > expectedSize {
+		cleanup()
+		return nil, nil, apperrors.BadRequestError("part exceeds declared size")
 	}
-	return body, nil
+	if written != expectedSize {
+		cleanup()
+		return nil, nil, apperrors.BadRequestError("request body size does not match " + HeaderPartSize)
+	}
+	if got := hex.EncodeToString(hasher.Sum(nil)); got != expectedSHA256 {
+		cleanup()
+		return nil, nil, apperrors.BadRequestError("part SHA-256 mismatch")
+	}
+	if _, err := partFile.Seek(0, io.SeekStart); err != nil {
+		cleanup()
+		return nil, nil, apperrors.InternalError("failed to prepare upload part", err)
+	}
+	return partFile, cleanup, nil
 }
 
 func isSHA256Hex(value string) bool {
