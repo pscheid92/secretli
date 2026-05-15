@@ -102,9 +102,9 @@ func securityHeaders() echo.MiddlewareFunc {
 func corsMiddleware(origins []string) echo.MiddlewareFunc {
 	return middleware.CORSWithConfig(middleware.CORSConfig{
 		AllowOrigins:     origins,
-		AllowMethods:     []string{http.MethodGet, http.MethodPost, http.MethodDelete, http.MethodOptions},
-		AllowHeaders:     []string{"Content-Type", echo.HeaderAuthorization, "Range", HeaderMetadataToken, HeaderBlobToken, HeaderDeletionToken},
-		ExposeHeaders:    []string{"Accept-Ranges", "Content-Range", "Content-Length", HeaderBurnAfterRead},
+		AllowMethods:     []string{http.MethodGet, http.MethodPost, http.MethodPut, http.MethodDelete, http.MethodOptions},
+		AllowHeaders:     []string{"Content-Type", echo.HeaderAuthorization, echo.HeaderXRequestID, "Range", HeaderMetadataToken, HeaderBlobToken, HeaderDeletionToken, HeaderPartOffset, HeaderPartSize, HeaderPartSHA256},
+		ExposeHeaders:    []string{echo.HeaderXRequestID, "Accept-Ranges", "Content-Range", "Content-Length", HeaderBurnAfterRead},
 		AllowCredentials: true,
 		MaxAge:           86400,
 	})

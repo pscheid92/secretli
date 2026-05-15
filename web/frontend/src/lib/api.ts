@@ -1,25 +1,26 @@
 export class ApiError extends Error {
   readonly status: number;
+  readonly requestId?: string;
 
-  constructor(status: number, message: string) {
-    super(message);
+  constructor(status: number, message: string, requestId?: string) {
+    super(requestId ? `${message} (request id: ${requestId})` : message);
     this.name = "ApiError";
     this.status = status;
+    this.requestId = requestId;
   }
 }
 
 async function request<T>(url: string, init: RequestInit): Promise<T> {
+  const { requestID, init: requestInit } = withRequestID(init);
   let res: Response;
   try {
-    res = await fetch(url, { credentials: "same-origin", ...init });
+    res = await fetch(url, requestInit);
   } catch {
-    throw new ApiError(0, "Network error — please check your connection");
+    throw new ApiError(0, "Network error — please check your connection", requestID);
   }
 
   if (!res.ok) {
-    const body = await res.json().catch(() => null);
-    const message = body?.error ?? `Request failed (${res.status})`;
-    throw new ApiError(res.status, message);
+    throw await apiErrorFromResponse(res, requestID);
   }
 
   if (res.status === 204) return undefined as T;
@@ -73,21 +74,19 @@ export async function retrieveSecret(
   publicID: string,
   blobToken: string,
 ): Promise<RetrieveSecretResponse> {
+  const { requestID, init } = withRequestID({
+    method: "POST",
+    headers: { "X-Blob-Token": blobToken },
+  });
   let res: Response;
   try {
-    res = await fetch(`/api/v1/secrets/${publicID}`, {
-      method: "POST",
-      credentials: "same-origin",
-      headers: { "X-Blob-Token": blobToken },
-    });
+    res = await fetch(`/api/v1/secrets/${publicID}`, init);
   } catch {
-    throw new ApiError(0, "Network error — please check your connection");
+    throw new ApiError(0, "Network error — please check your connection", requestID);
   }
 
   if (!res.ok) {
-    const body = await res.json().catch(() => null);
-    const message = body?.error ?? `Request failed (${res.status})`;
-    throw new ApiError(res.status, message);
+    throw await apiErrorFromResponse(res, requestID);
   }
 
   const blob = await res.blob();
@@ -122,30 +121,59 @@ export async function retrieveSecretRange(
   start: number,
   end: number,
 ): Promise<Uint8Array> {
+  const { requestID, init } = withRequestID({
+    method: "GET",
+    headers: {
+      Authorization: `Bearer ${sessionToken}`,
+      Range: `bytes=${start}-${end}`,
+    },
+  });
   let res: Response;
   try {
-    res = await fetch(`/api/v1/secrets/${publicID}/blob`, {
-      method: "GET",
-      credentials: "same-origin",
-      headers: {
-        Authorization: `Bearer ${sessionToken}`,
-        Range: `bytes=${start}-${end}`,
-      },
-    });
+    res = await fetch(`/api/v1/secrets/${publicID}/blob`, init);
   } catch {
-    throw new ApiError(0, "Network error — please check your connection");
+    throw new ApiError(0, "Network error — please check your connection", requestID);
   }
 
   if (!res.ok) {
-    const body = await res.json().catch(() => null);
-    const message = body?.error ?? `Request failed (${res.status})`;
-    throw new ApiError(res.status, message);
+    throw await apiErrorFromResponse(res, requestID);
   }
   if (res.status !== 206) {
-    throw new ApiError(res.status, `Expected partial content response (${res.status})`);
+    throw new ApiError(
+      res.status,
+      `Expected partial content response (${res.status})`,
+      requestIDFromResponse(res, requestID),
+    );
   }
 
   return new Uint8Array(await res.arrayBuffer());
+}
+
+async function apiErrorFromResponse(res: Response, fallbackRequestID: string): Promise<ApiError> {
+  const body = await res.json().catch(() => null);
+  const message = body?.error ?? `Request failed (${res.status})`;
+  return new ApiError(res.status, message, requestIDFromResponse(res, fallbackRequestID));
+}
+
+function withRequestID(init: RequestInit): { requestID: string; init: RequestInit } {
+  const requestID = newRequestID();
+  const headers = new Headers(init.headers);
+  headers.set("X-Request-ID", requestID);
+  return {
+    requestID,
+    init: { credentials: "same-origin", ...init, headers },
+  };
+}
+
+function requestIDFromResponse(res: Response, fallbackRequestID: string): string {
+  return res.headers.get("X-Request-ID") || fallbackRequestID;
+}
+
+function newRequestID(): string {
+  if (globalThis.crypto?.randomUUID) {
+    return globalThis.crypto.randomUUID();
+  }
+  return `req-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
 }
 
 // --- Metadata ---
