@@ -11,9 +11,7 @@ import {
   uploadSessionPart,
 } from "./api";
 import {
-  BUNDLE_RECORD_OVERHEAD_BYTES,
   BUNDLE_V2_FOOTER_LENGTH,
-  type BundleFile,
   type BundleManifest,
   type BundleV2Plan,
   buildBundleV2Footer,
@@ -107,7 +105,6 @@ async function encryptAndUploadParts(
   plan: BundleV2Plan,
   session: StartUploadSessionResponse,
 ): Promise<BundleManifest> {
-  const manifestFiles = mutableManifestFiles(plan.manifest.files);
   const uploader = new UploadQueue(MULTIPART_UPLOAD_CONCURRENCY);
   let uploadedBytes = 0;
   let uploadedPartCount = 0;
@@ -182,23 +179,20 @@ async function encryptAndUploadParts(
     if (encrypted.length !== record.length) {
       throw new Error("bundle record size mismatch");
     }
-    manifestFiles[record.fileIndex].chunks[record.chunkIndex] = {
-      ...manifestFiles[record.fileIndex].chunks[record.chunkIndex],
-      sha256: await sha256Hex(encrypted),
-    };
     currentParts.push(toArrayBuffer(encrypted));
     currentSize += encrypted.length;
   }
 
-  const manifest: BundleManifest = { ...plan.manifest, files: manifestFiles };
-  const manifestPlaintext = new TextEncoder().encode(JSON.stringify(manifest));
-  if (manifestPlaintext.length + BUNDLE_RECORD_OVERHEAD_BYTES !== plan.encryptedManifestLength) {
-    throw new Error("bundle manifest size mismatch");
-  }
+  // The manifest is fully known at plan time, so the declared blob size the
+  // server validated against still holds.
+  const manifest = plan.manifest;
   const encryptedManifest = params.bundleKeySet.encryptBundlePart(
-    manifestPlaintext,
+    new TextEncoder().encode(JSON.stringify(manifest)),
     bundleManifestAadV2(),
   );
+  if (encryptedManifest.length !== plan.encryptedManifestLength) {
+    throw new Error("bundle manifest size mismatch");
+  }
   const footer = buildBundleV2Footer({
     version: 2,
     footerLength: BUNDLE_V2_FOOTER_LENGTH,
@@ -314,13 +308,6 @@ async function sha256Blob(blob: Blob): Promise<string> {
 
 function toArrayBuffer(bytes: Uint8Array): ArrayBuffer {
   return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
-}
-
-function mutableManifestFiles(files: readonly BundleFile[]): BundleFile[] {
-  return files.map((file) => ({
-    ...file,
-    chunks: file.chunks.map((chunk) => ({ ...chunk })),
-  }));
 }
 
 function delay(ms: number): Promise<void> {

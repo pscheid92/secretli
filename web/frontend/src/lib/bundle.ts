@@ -16,7 +16,6 @@ export { BUNDLE_RECORD_OVERHEAD_BYTES };
 
 const BUNDLE_V2_MAGIC = new Uint8Array([0x53, 0x4c, 0x42, 0x4e, 0x44, 0x4c, 0x32, 0x00]);
 const BUNDLE_V2_VERSION = 2;
-const SHA256_HEX_LENGTH = 64;
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();
 
@@ -25,7 +24,6 @@ export interface BundleChunk {
   readonly offset: number;
   readonly length: number;
   readonly plaintextSize: number;
-  readonly sha256?: string;
 }
 
 export interface BundleFile {
@@ -146,13 +144,7 @@ export function planEncryptedBundleV2(
       const plaintextSize = end - start;
       const length = plaintextSize + BUNDLE_RECORD_OVERHEAD_BYTES;
       records.push({ fileIndex, chunkIndex, start, end, offset, length, plaintextSize });
-      chunks.push({
-        index: chunkIndex,
-        offset,
-        length,
-        plaintextSize,
-        sha256: placeholderRecordSHA256(),
-      });
+      chunks.push({ index: chunkIndex, offset, length, plaintextSize });
       offset += length;
     }
 
@@ -199,7 +191,6 @@ export async function encryptBundleV2Plan(
   footer: BundleV2Footer;
 }> {
   const parts: ArrayBuffer[] = [];
-  const files = mutableManifestFiles(plan.manifest.files);
 
   for (const record of plan.records) {
     const file = plan.files[record.fileIndex];
@@ -215,20 +206,14 @@ export async function encryptBundleV2Plan(
     if (encrypted.length !== record.length) {
       throw new Error("bundle record size mismatch");
     }
-    files[record.fileIndex].chunks[record.chunkIndex] = {
-      ...files[record.fileIndex].chunks[record.chunkIndex],
-      sha256: await sha256Hex(encrypted),
-    };
     parts.push(toArrayBuffer(encrypted));
   }
 
-  const manifest: BundleManifest = { ...plan.manifest, files };
-  const manifestPlaintext = textEncoder.encode(JSON.stringify(manifest));
-  if (manifestPlaintext.length > MAX_BUNDLE_MANIFEST_BYTES) {
-    throw new Error("bundle manifest is too large");
-  }
-
-  const encryptedManifest = keySet.encryptBundlePart(manifestPlaintext, manifestAadV2());
+  const manifest = plan.manifest;
+  const encryptedManifest = keySet.encryptBundlePart(
+    textEncoder.encode(JSON.stringify(manifest)),
+    manifestAadV2(),
+  );
   if (encryptedManifest.length !== plan.encryptedManifestLength) {
     throw new Error("bundle manifest size mismatch");
   }
@@ -342,9 +327,8 @@ export async function decryptBundleFiles(
     let cursor = 0;
     for (const { file, chunk } of group.chunks) {
       const encrypted = encryptedGroup.subarray(cursor, cursor + chunk.length);
-      if (chunk.sha256 !== undefined && (await sha256Hex(encrypted)) !== chunk.sha256) {
-        throw new Error("bundle chunk hash mismatch");
-      }
+      // No separate checksum: decryption fails on any modified byte, because
+      // every record carries a Poly1305 tag bound to its position.
       const plaintext = keySet.decryptBundlePart(
         encrypted,
         chunkAad(file.index, chunk.index, chunk.plaintextSize),
@@ -469,8 +453,7 @@ function validateManifestV2(manifest: BundleManifest, manifestOffset: number, bu
       if (
         chunk.index !== chunkIndex ||
         chunk.offset < 0 ||
-        !validBundleChunkShape(chunk, manifest.chunkSize) ||
-        !isHexSHA256(chunk.sha256)
+        !validBundleChunkShape(chunk, manifest.chunkSize)
       ) {
         throw new Error("invalid bundle manifest");
       }
@@ -610,17 +593,6 @@ function defaultBundleName(files: File[]): string {
     return files[0]?.name || "Secretli file";
   }
   return `Secretli bundle (${files.length} files)`;
-}
-
-function mutableManifestFiles(files: readonly BundleFile[]): BundleFile[] {
-  return files.map((file) => ({
-    ...file,
-    chunks: file.chunks.map((chunk) => ({ ...chunk })),
-  }));
-}
-
-function placeholderRecordSHA256(): string {
-  return "0".repeat(SHA256_HEX_LENGTH);
 }
 
 function hasBundleV2FooterMagic(bytes: Uint8Array): boolean {
