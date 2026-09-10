@@ -22,9 +22,10 @@ import (
 )
 
 const (
-	HeaderMetadataToken = "X-Metadata-Token"
-	HeaderBlobToken     = "X-Blob-Token"
-	HeaderDeletionToken = "X-Deletion-Token"
+	// Header names, not credentials.
+	HeaderMetadataToken = "X-Metadata-Token" //nolint:gosec
+	HeaderBlobToken     = "X-Blob-Token"     //nolint:gosec
+	HeaderDeletionToken = "X-Deletion-Token" //nolint:gosec
 	HeaderBurnAfterRead = "X-Burn-After-Read"
 
 	retrievalSessionTTL = 15 * time.Minute

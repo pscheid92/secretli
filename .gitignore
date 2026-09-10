@@ -7,6 +7,8 @@ coverage.out
 node_modules/
 web/frontend/dist/
 web/frontend/coverage/
+web/frontend/test-results/
+web/frontend/playwright-report/
 
 # Environment
 .env

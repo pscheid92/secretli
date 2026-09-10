@@ -9,12 +9,16 @@ RUN pnpm build
 
 # Stage 2: Build Go binary
 FROM golang:1.27-alpine AS backend
+ARG VERSION=dev
+ARG TARGETOS
+ARG TARGETARCH
 WORKDIR /app
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
 COPY --from=frontend /app/web/frontend/dist ./web/frontend/dist
-RUN CGO_ENABLED=0 go build -o /secretli .
+RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH \
+    go build -trimpath -ldflags="-s -w -X github.com/pscheid92/secretli/cmd.Version=${VERSION}" -o /secretli .
 
 # Stage 3: Final minimal image
 FROM gcr.io/distroless/static-debian12

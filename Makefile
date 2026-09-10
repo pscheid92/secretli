@@ -1,4 +1,7 @@
-.PHONY: dev dev-api dev-frontend build build-frontend build-go test test-short test-coverage e2e e2e-large clean lint lint-go lint-frontend
+.PHONY: dev dev-api dev-frontend build build-frontend build-go test test-short test-coverage e2e e2e-large clean lint lint-go lint-frontend vuln
+
+VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+LDFLAGS := -s -w -X github.com/pscheid92/secretli/cmd.Version=$(VERSION)
 
 # Run both backend and frontend in development mode
 dev:
@@ -21,7 +24,7 @@ build-frontend:
 
 # Build Go binary (requires frontend to be built first)
 build-go:
-	CGO_ENABLED=0 go build -o bin/secretli .
+	CGO_ENABLED=0 go build -trimpath -ldflags="$(LDFLAGS)" -o bin/secretli .
 
 # Fast unit tests only (no containers)
 test-short:
@@ -30,7 +33,7 @@ test-short:
 
 # Full test suite including integration tests
 test:
-	go test -cover ./...
+	go test -race -cover ./...
 	cd web/frontend && pnpm test --run
 
 # Browser E2E tests. Requires the app to be running at PLAYWRIGHT_BASE_URL or localhost:8080.
@@ -49,13 +52,17 @@ test-coverage:
 # Lint all
 lint: lint-go lint-frontend
 
+# Known-vulnerability scan of Go dependencies
+vuln:
+	go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+
 # Lint Go
 lint-go:
 	golangci-lint run ./...
 
 # Lint frontend
 lint-frontend:
-	cd web/frontend && npx biome check .
+	cd web/frontend && pnpm biome check .
 
 # Clean build artifacts
 clean:

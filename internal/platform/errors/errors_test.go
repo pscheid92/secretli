@@ -46,7 +46,7 @@ func TestError_Error(t *testing.T) {
 func TestError_Unwrap(t *testing.T) {
 	cause := fmt.Errorf("root cause")
 	e := InternalError("wrapper", cause)
-	if got := e.Unwrap(); got != cause {
+	if got := e.Unwrap(); got != cause { //nolint:errorlint // Unwrap must return the exact cause
 		t.Errorf("Unwrap() = %v, want %v", got, cause)
 	}
 

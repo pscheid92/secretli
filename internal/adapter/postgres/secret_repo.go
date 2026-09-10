@@ -265,7 +265,7 @@ func (r *SecretRepo) RecordUploadPart(ctx context.Context, part *domain.UploadPa
 
 	existing, err := qtx.GetUploadPartForUpdate(ctx, dbsqlc.GetUploadPartForUpdateParams{
 		SessionID:  part.SessionID,
-		PartNumber: int32(part.PartNumber),
+		PartNumber: int32(part.PartNumber), //nolint:gosec // bounded by the handler
 	})
 	if err == nil {
 		existingPart := uploadPartFromRow(existing)
@@ -283,7 +283,7 @@ func (r *SecretRepo) RecordUploadPart(ctx context.Context, part *domain.UploadPa
 
 	inserted, err := qtx.CreateUploadPart(ctx, dbsqlc.CreateUploadPartParams{
 		SessionID:  part.SessionID,
-		PartNumber: int32(part.PartNumber),
+		PartNumber: int32(part.PartNumber), //nolint:gosec // bounded by the handler
 		PartOffset: part.Offset,
 		PartSize:   part.Size,
 		PartSha256: part.SHA256,

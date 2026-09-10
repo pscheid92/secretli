@@ -41,7 +41,7 @@ This starts the app, PostgreSQL, and SeaweedFS. The app is available at `http://
 
 ### Development Setup
 
-Prerequisites: Go 1.26+, Node.js 24+, Docker (for Postgres and SeaweedFS)
+Prerequisites: Go 1.27+, Node.js 24+, pnpm 10, Docker (for Postgres and SeaweedFS)
 
 ```bash
 # Start infrastructure
@@ -50,10 +50,8 @@ cd docker && docker compose -f docker-compose.dev.yml up -d && cd ..
 # Configure environment
 cp .env.example .env
 
-# Run database migrations
-go run . migrate
-
-# Start dev servers (backend with hot-reload + frontend with Vite)
+# Start dev servers (backend with hot-reload + frontend with Vite).
+# Database migrations run automatically when the backend starts.
 make dev
 ```
 
@@ -94,11 +92,12 @@ Configuration is done via environment variables. See [`.env.example`](.env.examp
 |---|---|---|
 | `SERVER_PORT` | HTTP server port | `8080` |
 | `DATABASE_URL` | PostgreSQL connection string | — |
-| `S3_ENDPOINT` | S3-compatible object storage endpoint | — |
-| `S3_BUCKET` | S3 bucket name | — |
+| `S3_ENDPOINT` | S3-compatible object storage endpoint (host:port or URL) | — |
+| `S3_BUCKET` | S3 bucket name (must already exist) | `secretli` |
 | `S3_ACCESS_KEY` / `S3_SECRET_KEY` | S3 credentials | — |
-| `S3_USE_SSL` | Enable TLS for S3 | `false` |
-| `MAX_FILE_SIZE` | Encrypted upload size limit in bytes | `1073741824` (1 GiB) |
+| `S3_USE_SSL` | Use HTTPS for a bare host:port endpoint | `true` |
+| `S3_REGION` | Region used for request signing | `us-east-1` |
+| `MAX_FILE_SIZE` | Encrypted upload size limit in bytes; bundles above 64 MiB are uploaded as S3 multipart parts of up to 32 MiB | `1073741824` (1 GiB) |
 | `CLEANUP_INTERVAL` | Expired secret cleanup frequency | `1m` |
 | `ALLOWED_ORIGINS` | CORS allowed origins | — |
 | `METRICS_TOKEN` | Optional bearer token required for `/metrics` | — |
@@ -112,7 +111,17 @@ ghcr.io/pscheid92/secretli:main
 ghcr.io/pscheid92/secretli:sha-<commit>
 ```
 
-The application requires PostgreSQL and an S3-compatible object store. Health endpoints are available at `/api/v1/health/live` and `/api/v1/health/ready`.
+Images are built for `linux/amd64` and `linux/arm64`, carry an SBOM and SLSA provenance attestation, and are signed with [cosign](https://github.com/sigstore/cosign) (keyless, via GitHub OIDC). Verify a tag with:
+
+```bash
+cosign verify ghcr.io/pscheid92/secretli:main \
+  --certificate-identity-regexp 'https://github.com/pscheid92/secretli/' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+```
+
+The application requires PostgreSQL and an S3-compatible object store. Migrations run automatically at startup. Health endpoints are available at `/api/v1/health/live` and `/api/v1/health/ready`.
+
+When the app sits behind a reverse proxy, set `TRUSTED_PROXIES` to the proxy's IP or CIDR so rate limits key on the real client address; without it, forwarded headers are ignored.
 
 ## License
 

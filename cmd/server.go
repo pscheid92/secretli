@@ -33,6 +33,8 @@ func Run() error {
 	baseHandler := slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo})
 	slog.SetDefault(slog.New(correlation.NewHandler(baseHandler)))
 
+	slog.Info("secretli starting", "version", Version)
+
 	cfg, err := config.Load()
 	if err != nil {
 		return fmt.Errorf("loading config: %w", err)

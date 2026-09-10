@@ -1,6 +1,6 @@
 # Local development infrastructure only.
 # Run: docker compose up -d
-# Then: go run . migrate && go run .
+# Then: go run .   (migrations run automatically at startup)
 services:
   postgres:
     image: postgres:18-alpine
@@ -12,9 +12,14 @@ services:
       POSTGRES_DB: secretli
     volumes:
       - postgres_data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U secretli -d secretli"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
 
   seaweedfs:
-    image: chrislusf/seaweedfs:latest
+    image: chrislusf/seaweedfs:4.21
     ports:
       - "8333:8333"
     environment:
@@ -25,7 +30,7 @@ services:
       - seaweedfs_data:/data
 
   createbucket:
-    image: curlimages/curl:latest
+    image: curlimages/curl:8.22.0
     depends_on:
       - seaweedfs
     entrypoint: >

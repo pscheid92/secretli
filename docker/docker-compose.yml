@@ -7,7 +7,7 @@ services:
       - "8080:8080"
     depends_on:
       postgres:
-        condition: service_started
+        condition: service_healthy
       createbucket:
         condition: service_completed_successfully
     environment:
@@ -19,8 +19,6 @@ services:
       S3_USE_SSL: "false"
       S3_REGION: us-east-1
       SERVER_PORT: "8080"
-      COOKIE_SECURE: "false"
-      COOKIE_DOMAIN: ""
 
   postgres:
     image: postgres:18-alpine
@@ -32,9 +30,14 @@ services:
       POSTGRES_DB: secretli
     volumes:
       - postgres_data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U secretli -d secretli"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
 
   seaweedfs:
-    image: chrislusf/seaweedfs:latest
+    image: chrislusf/seaweedfs:4.21
     ports:
       - "8333:8333"
     environment:
@@ -45,7 +48,7 @@ services:
       - seaweedfs_data:/data
 
   createbucket:
-    image: curlimages/curl:latest
+    image: curlimages/curl:8.22.0
     depends_on:
       - seaweedfs
     entrypoint: >
