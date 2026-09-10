@@ -74,7 +74,91 @@ func (m *mockFileStore) Delete(_ context.Context, key string) error {
 	return m.deleteErr
 }
 
+// mockUploadRepo adds the multipart cleanup capability to mockSecretRepo.
+type mockUploadRepo struct {
+	mockSecretRepo
+	expired []expiredUploadSession
+	err     error
+}
+
+type expiredUploadSession struct {
+	session      domain.UploadSession
+	secretExists bool
+}
+
+func (m *mockUploadRepo) AbortExpiredUploadSessions(_ context.Context, _ time.Time, beforeAbort func(*domain.UploadSession, bool) error) (int64, error) {
+	if m.err != nil {
+		return 0, m.err
+	}
+	var aborted int64
+	for _, e := range m.expired {
+		session := e.session
+		if err := beforeAbort(&session, e.secretExists); err != nil {
+			continue
+		}
+		aborted++
+	}
+	return aborted, nil
+}
+
+// mockMultipartStore adds multipart aborts to mockFileStore.
+type mockMultipartStore struct {
+	mockFileStore
+	abortedUploads []string
+	abortErr       error
+}
+
+func (m *mockMultipartStore) CreateMultipartUpload(_ context.Context, _ string) (string, error) {
+	return "", nil
+}
+func (m *mockMultipartStore) UploadPart(_ context.Context, _, _ string, _ int, _ io.Reader, _ int64) (string, error) {
+	return "", nil
+}
+func (m *mockMultipartStore) CompleteMultipartUpload(_ context.Context, _, _ string, _ []domain.CompletedPart) error {
+	return nil
+}
+func (m *mockMultipartStore) AbortMultipartUpload(_ context.Context, key, uploadID string) error {
+	m.abortedUploads = append(m.abortedUploads, key+"#"+uploadID)
+	return m.abortErr
+}
+
 // --- Tests ---
+
+func TestRunCycle_ExpiredUploadSessions(t *testing.T) {
+	repo := &mockUploadRepo{expired: []expiredUploadSession{
+		{session: domain.UploadSession{SessionID: "s1", PublicID: "orphan", S3UploadID: "u1"}, secretExists: false},
+		{session: domain.UploadSession{SessionID: "s2", PublicID: "owned", S3UploadID: "u2"}, secretExists: true},
+	}}
+	store := &mockMultipartStore{}
+
+	w := NewWorker(time.Minute, repo, store, testMetrics())
+	w.runCycle(context.Background())
+
+	if len(store.abortedUploads) != 2 || store.abortedUploads[0] != "secrets/orphan#u1" || store.abortedUploads[1] != "secrets/owned#u2" {
+		t.Errorf("aborted uploads = %v, want both sessions aborted", store.abortedUploads)
+	}
+	// Only the session with no secret row has its (orphaned) object removed.
+	if len(store.deletedKeys) != 1 || store.deletedKeys[0] != "secrets/orphan" {
+		t.Errorf("deleted keys = %v, want only the orphaned object", store.deletedKeys)
+	}
+}
+
+func TestRunCycle_ExpiredUploadSessionAbortFailureIsIsolated(t *testing.T) {
+	repo := &mockUploadRepo{expired: []expiredUploadSession{
+		{session: domain.UploadSession{SessionID: "s1", PublicID: "p1", S3UploadID: "u1"}},
+	}}
+	store := &mockMultipartStore{abortErr: errors.New("storage down")}
+
+	w := NewWorker(time.Minute, repo, store, testMetrics())
+	w.runCycle(context.Background())
+
+	if len(store.deletedKeys) != 0 {
+		t.Errorf("object must not be deleted when the abort failed, got %v", store.deletedKeys)
+	}
+	if repo.deleteExpiredCalled.Load() != 1 {
+		t.Error("secret cleanup should still run after upload cleanup errors")
+	}
+}
 
 func TestRunCycle_Success(t *testing.T) {
 	secretRepo := &mockSecretRepo{

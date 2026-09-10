@@ -91,3 +91,7 @@ VALUES (
     $1, $2, $3, $4, $5, $6, $7
 )
 RETURNING *;
+
+-- name: DeleteUploadPartsBySession :exec
+DELETE FROM upload_parts
+WHERE session_id = $1;

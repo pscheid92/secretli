@@ -43,6 +43,9 @@ func TestLoadDefaults(t *testing.T) {
 	if cfg.MetricsToken != "" {
 		t.Errorf("MetricsToken = %q, want empty", cfg.MetricsToken)
 	}
+	if cfg.TrustedProxies != "" {
+		t.Errorf("TrustedProxies = %q, want empty", cfg.TrustedProxies)
+	}
 }
 
 func TestLoadFromEnv(t *testing.T) {
@@ -53,6 +56,7 @@ func TestLoadFromEnv(t *testing.T) {
 	t.Setenv("MAX_FILE_SIZE", "5242880")
 	t.Setenv("CLEANUP_INTERVAL", "5m")
 	t.Setenv("METRICS_TOKEN", "metrics-secret")
+	t.Setenv("TRUSTED_PROXIES", "10.0.0.0/8,172.16.0.1")
 
 	cfg, err := Load()
 	if err != nil {
@@ -76,6 +80,9 @@ func TestLoadFromEnv(t *testing.T) {
 	}
 	if cfg.MetricsToken != "metrics-secret" {
 		t.Errorf("MetricsToken = %q, want %q", cfg.MetricsToken, "metrics-secret")
+	}
+	if cfg.TrustedProxies != "10.0.0.0/8,172.16.0.1" {
+		t.Errorf("TrustedProxies = %q, want %q", cfg.TrustedProxies, "10.0.0.0/8,172.16.0.1")
 	}
 }
 

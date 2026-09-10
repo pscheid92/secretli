@@ -45,6 +45,7 @@ type mockSecretRepo struct {
 	secrets   map[string]*domain.Secret
 	sessions  map[string]mockRetrievalSession
 	createErr error
+	deleteErr error
 }
 
 type mockRetrievalSession struct {
@@ -150,6 +151,9 @@ func (m *mockSecretRepo) Delete(_ context.Context, publicID string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	if m.deleteErr != nil {
+		return m.deleteErr
+	}
 	if _, ok := m.secrets[publicID]; !ok {
 		return domain.ErrNotFound
 	}
@@ -507,7 +511,39 @@ func TestCreateSecret_DuplicatePublicID(t *testing.T) {
 	}
 }
 
-func TestCreateSecret_S3PutError(t *testing.T) {
+func TestCreateSecret_DuplicatePublicIDDoesNotTouchExistingObject(t *testing.T) {
+	repo := newMockRepo()
+	fs := newMockFileStore()
+	h := NewSecretHandler(repo, fs, 100*1024*1024, testMetrics())
+
+	// A victim's secret already exists under this public_id.
+	victimID := testPublicID("create")
+	seedSecret(repo, fs, victimID, testToken("victim metadata"), testToken("victim deletion"), false)
+	victimBlob := append([]byte(nil), fs.objects[domain.SecretStorageKey(victimID)]...)
+	victimHash := repo.secrets[victimID].BlobTokenHash
+
+	// An attacker who only knows the public_id tries to create over it.
+	req := createMultipartRequest(t, validCreateMetadata(), []byte("attacker blob"))
+	rec := httptest.NewRecorder()
+	c := newEchoContext(req, rec)
+	callHandler(c, h.CreateSecret)
+
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusConflict)
+	}
+	got, ok := fs.objects[domain.SecretStorageKey(victimID)]
+	if !ok {
+		t.Fatal("victim's S3 object was deleted by a duplicate create")
+	}
+	if !bytes.Equal(got, victimBlob) {
+		t.Error("victim's S3 object was overwritten by a duplicate create")
+	}
+	if repo.secrets[victimID].BlobTokenHash != victimHash {
+		t.Error("victim's secret row was modified by a duplicate create")
+	}
+}
+
+func TestCreateSecret_S3PutErrorRollsBackRow(t *testing.T) {
 	repo := newMockRepo()
 	fs := newMockFileStore()
 	fs.putErr = fmt.Errorf("S3 connection refused")
@@ -522,9 +558,12 @@ func TestCreateSecret_S3PutError(t *testing.T) {
 	if rec.Code != http.StatusInternalServerError {
 		t.Errorf("status = %d, want %d", rec.Code, http.StatusInternalServerError)
 	}
+	if _, ok := repo.secrets[testPublicID("create")]; ok {
+		t.Error("secret row should have been rolled back after S3 put failure")
+	}
 }
 
-func TestCreateSecret_DBErrorCleansUpS3(t *testing.T) {
+func TestCreateSecret_DBErrorDoesNotWriteS3(t *testing.T) {
 	repo := newMockRepo()
 	repo.createErr = fmt.Errorf("database timeout")
 	fs := newMockFileStore()
@@ -539,10 +578,8 @@ func TestCreateSecret_DBErrorCleansUpS3(t *testing.T) {
 	if rec.Code != http.StatusInternalServerError {
 		t.Errorf("status = %d, want %d", rec.Code, http.StatusInternalServerError)
 	}
-
-	// Verify S3 object was cleaned up
-	if _, ok := fs.objects[domain.SecretStorageKey(testPublicID("create"))]; ok {
-		t.Error("S3 object should have been cleaned up after DB error")
+	if len(fs.objects) != 0 {
+		t.Error("no S3 object should be written when the DB insert fails")
 	}
 }
 
@@ -1642,6 +1679,35 @@ func TestDeleteSecret_InvalidMetadataToken(t *testing.T) {
 
 	if rec.Code != http.StatusForbidden {
 		t.Errorf("status = %d, want %d", rec.Code, http.StatusForbidden)
+	}
+}
+
+func TestDeleteSecret_RowAlreadyGoneReturnsNoContent(t *testing.T) {
+	repo := newMockRepo()
+	fs := newMockFileStore()
+	h := NewSecretHandler(repo, fs, 100*1024*1024, testMetrics())
+	publicID := testPublicID("delete raced")
+	metadataToken := testToken("delete raced metadata")
+	deletionToken := testToken("delete raced deletion")
+	seedSecret(repo, fs, publicID, metadataToken, deletionToken, false)
+	// Simulate the cleanup worker removing the row between auth and delete.
+	repo.deleteErr = domain.ErrNotFound
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/v1/secrets/"+publicID, nil)
+	req.Header.Set(HeaderMetadataToken, metadataToken)
+	req.Header.Set(HeaderDeletionToken, deletionToken)
+	rec := httptest.NewRecorder()
+	c := newEchoContext(req, rec)
+	c.SetParamNames("publicID")
+	c.SetParamValues(publicID)
+
+	callHandler(c, h.DeleteSecret)
+
+	if rec.Code != http.StatusNoContent {
+		t.Errorf("status = %d, want %d. body: %s", rec.Code, http.StatusNoContent, rec.Body.String())
+	}
+	if _, ok := fs.objects[domain.SecretStorageKey(publicID)]; ok {
+		t.Error("S3 object should have been deleted")
 	}
 }
 

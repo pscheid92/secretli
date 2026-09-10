@@ -96,17 +96,22 @@ func (h *SecretHandler) CreateSecret(c echo.Context) error {
 		CreatedAt:         now,
 	}
 
-	sk := domain.SecretStorageKey(meta.PublicID)
-	if err := h.fileStore.Put(ctx, sk, file, header.Size); err != nil {
-		return apperrors.InternalError("failed to upload blob to S3", err)
-	}
-
+	// Reserve the public_id in the database before touching object storage.
+	// Writing the blob first would let anyone who knows a public_id overwrite
+	// and then delete an existing secret's object without holding any token.
 	if err := h.repo.Create(ctx, secret, now); err != nil {
-		_ = h.fileStore.Delete(ctx, sk)
 		if errors.Is(err, domain.ErrDuplicate) {
 			return apperrors.ConflictError("secret with this public_id already exists")
 		}
 		return apperrors.InternalError("failed to create secret", err)
+	}
+
+	sk := domain.SecretStorageKey(meta.PublicID)
+	if err := h.fileStore.Put(ctx, sk, file, header.Size); err != nil {
+		if delErr := h.repo.Delete(ctx, meta.PublicID); delErr != nil && !errors.Is(delErr, domain.ErrNotFound) {
+			slog.ErrorContext(ctx, "failed to roll back secret row after S3 upload failure", "error", delErr)
+		}
+		return apperrors.InternalError("failed to upload blob to S3", err)
 	}
 
 	h.metrics.SecretsCreated.Inc()
@@ -314,7 +319,9 @@ func (h *SecretHandler) DeleteSecret(c echo.Context) error {
 		return apperrors.InternalError("failed to delete blob from S3", err)
 	}
 
-	if err := h.repo.Delete(ctx, publicID); err != nil {
+	// The row may already be gone if cleanup raced with this request; the
+	// object is deleted either way, so report success.
+	if err := h.repo.Delete(ctx, publicID); err != nil && !errors.Is(err, domain.ErrNotFound) {
 		return apperrors.InternalError("failed to delete secret", err)
 	}
 
