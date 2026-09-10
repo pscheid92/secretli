@@ -27,3 +27,10 @@ updates:
       - /docker
     schedule:
       interval: weekly
+    ignore:
+      # Node major versions are bumped deliberately together with .nvmrc and CI.
+      - dependency-name: node
+        update-types: ["version-update:semver-major"]
+      # Go minor versions are bumped together with go.mod.
+      - dependency-name: golang
+        update-types: ["version-update:semver-minor", "version-update:semver-major"]

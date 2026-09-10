@@ -1,5 +1,9 @@
+# Build stages run on the native builder platform and cross-compile for the
+# target; running Node and the Go compiler under QEMU emulation for arm64
+# makes the publish job many times slower for no benefit.
+
 # Stage 1: Build frontend
-FROM node:24-alpine AS frontend
+FROM --platform=$BUILDPLATFORM node:24-alpine AS frontend
 RUN corepack enable pnpm
 WORKDIR /app/web/frontend
 COPY web/frontend/package.json web/frontend/pnpm-lock.yaml ./
@@ -7,8 +11,8 @@ RUN pnpm install --frozen-lockfile
 COPY web/frontend/ ./
 RUN pnpm build
 
-# Stage 2: Build Go binary
-FROM golang:1.27-alpine AS backend
+# Stage 2: Build Go binary (cross-compiled via TARGETOS/TARGETARCH)
+FROM --platform=$BUILDPLATFORM golang:1.27-alpine AS backend
 ARG VERSION=dev
 ARG TARGETOS
 ARG TARGETARCH
