@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Controller, useForm } from "react-hook-form";
 import { toast } from "sonner";
 import ExpirationPicker from "../components/ExpirationPicker";
@@ -7,7 +7,10 @@ import SecretResult from "../components/SecretResult";
 import ShareModeTabs from "../components/ShareModeTabs";
 import Spinner from "../components/Spinner";
 import Toggle from "../components/Toggle";
-import TransferStatus, { type TransferStep } from "../components/TransferStatus";
+import TransferStatus, {
+  type TransferProgress,
+  type TransferStep,
+} from "../components/TransferStatus";
 import { ApiError, createSecret } from "../lib/api";
 import { createEncryptedBundle, estimateBundleEncryptedSize } from "../lib/bundle";
 import { KeySet } from "../lib/encryption";
@@ -15,11 +18,12 @@ import { formatExpiration } from "../lib/expiration";
 import { formatSize } from "../lib/format";
 import {
   LARGE_BUNDLE_MULTIPART_THRESHOLD_BYTES,
+  UploadCancelledError,
   uploadMultipartBundle,
 } from "../lib/multipartBundleUpload";
 import {
+  fitsBundleManifestLimit,
   fitsBundleUploadLimit,
-  MAX_ENCRYPTED_UPLOAD_BYTES,
   MAX_UPLOAD_LABEL,
 } from "../lib/uploadLimits";
 
@@ -74,7 +78,19 @@ export default function FilePage() {
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [stage, setStage] = useState<"idle" | "encrypting" | "uploading">("idle");
+  const [progress, setProgress] = useState<TransferProgress | null>(null);
   const [result, setResult] = useState<FileResult | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
+
+  // A navigation away from an in-flight upload silently discards it.
+  useEffect(() => {
+    if (!loading) return;
+    const warn = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+    };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [loading]);
 
   const {
     register,
@@ -107,9 +123,16 @@ export default function FilePage() {
     { label: "Finalize", state: "pending" },
   ];
 
+  function cancelUpload() {
+    abortRef.current?.abort();
+  }
+
   async function onSubmit(data: FileFormData) {
     setLoading(true);
     setStage("encrypting");
+    setProgress(null);
+    const controller = new AbortController();
+    abortRef.current = controller;
 
     try {
       if (data.files.length === 0) {
@@ -119,6 +142,10 @@ export default function FilePage() {
 
       if (!fitsBundleUploadLimit(data.files.map((file) => file.size))) {
         toast.error(`Selected files exceed the ${MAX_UPLOAD_LABEL} upload limit.`);
+        return;
+      }
+      if (!fitsBundleManifestLimit(data.files)) {
+        toast.error("Too many files for one share. Zip them first or split the share.");
         return;
       }
 
@@ -142,6 +169,13 @@ export default function FilePage() {
           passwordProtected: hasPassword,
           expiration: data.expiration,
           burnAfterRead: data.burnAfterRead,
+          signal: controller.signal,
+          onProgress: ({ uploadedBytes, totalBytes }) => {
+            setProgress({
+              fraction: totalBytes > 0 ? uploadedBytes / totalBytes : 0,
+              label: `${formatSize(uploadedBytes)} / ${formatSize(totalBytes)}`,
+            });
+          },
         });
 
         setResult({
@@ -155,10 +189,6 @@ export default function FilePage() {
       }
 
       const { blob, manifest } = await createEncryptedBundle(data.files, encryptKeySet);
-      if (blob.size > MAX_ENCRYPTED_UPLOAD_BYTES) {
-        toast.error(`Encrypted file exceeds the ${MAX_UPLOAD_LABEL} upload limit.`);
-        return;
-      }
 
       const encryptedMeta = await keySet.encryptMeta({
         type: "bundle",
@@ -190,14 +220,20 @@ export default function FilePage() {
       });
       toast.success("Share created");
     } catch (err) {
-      if (err instanceof ApiError) {
+      if (err instanceof UploadCancelledError) {
+        toast.info("Upload cancelled.");
+      } else if (err instanceof ApiError) {
         toast.error(err.message);
+      } else if (err instanceof Error && err.message === "bundle manifest is too large") {
+        toast.error("Too many files for one share. Zip them first or split the share.");
       } else {
         toast.error("An unexpected error occurred. Please try again.");
       }
     } finally {
+      abortRef.current = null;
       setLoading(false);
       setStage("idle");
+      setProgress(null);
     }
   }
 
@@ -348,7 +384,13 @@ export default function FilePage() {
           </section>
 
           {loading ? (
-            <TransferStatus title="Creating secure link" steps={steps} />
+            <TransferStatus
+              title="Creating secure link"
+              steps={steps}
+              progress={progress ?? undefined}
+              onCancel={stage === "uploading" && progress ? cancelUpload : undefined}
+              cancelLabel="Cancel upload"
+            />
           ) : (
             <TransferPreview />
           )}

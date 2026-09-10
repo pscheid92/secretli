@@ -71,6 +71,7 @@ export interface DecryptedBundleFile {
 
 export interface DecryptBundleFilesOptions {
   readonly maxCoalescedPlaintextBytes?: number;
+  readonly onProgress?: (progress: { readonly decryptedBytes: number }) => void;
 }
 
 export type BundleRangeFetcher = (start: number, end: number) => Promise<Uint8Array>;
@@ -296,7 +297,13 @@ export async function decryptBundleFiles(
   fetchRange: BundleRangeFetcher,
   options: DecryptBundleFilesOptions = {},
 ): Promise<DecryptedBundleFile[]> {
-  const partsByFile = files.map(() => [] as BlobPart[]);
+  // Each file accumulates into a single Blob that is extended after every
+  // fetched group. Browsers can page Blob storage to disk, whereas holding
+  // every decrypted ArrayBuffer until the end keeps the whole bundle in the
+  // JS heap and kills the tab for gigabyte downloads.
+  const blobsByFile = files.map(
+    (file) => new Blob([], { type: file.type || "application/octet-stream" }),
+  );
   const fileIndexes = new Map(files.map((file, index) => [file.index, index]));
   const refs = files
     .flatMap((file) => file.chunks.map((chunk) => ({ file, chunk })))
@@ -310,6 +317,7 @@ export async function decryptBundleFiles(
       throw new Error("bundle range size mismatch");
     }
 
+    const groupParts = files.map(() => [] as BlobPart[]);
     let cursor = 0;
     for (const { file, chunk } of group.chunks) {
       const encrypted = encryptedGroup.subarray(cursor, cursor + chunk.length);
@@ -327,15 +335,23 @@ export async function decryptBundleFiles(
       if (fileIndex === undefined) {
         throw new Error("invalid bundle file");
       }
-      partsByFile[fileIndex].push(toArrayBuffer(plaintext));
+      groupParts[fileIndex].push(toArrayBuffer(plaintext));
       cursor += chunk.length;
     }
+
+    for (const [index, parts] of groupParts.entries()) {
+      if (parts.length > 0) {
+        blobsByFile[index] = new Blob([blobsByFile[index], ...parts], {
+          type: blobsByFile[index].type,
+        });
+      }
+    }
+    options.onProgress?.({
+      decryptedBytes: group.offset + group.length,
+    });
   }
 
-  return files.map((file, index) => ({
-    file,
-    blob: new Blob(partsByFile[index], { type: file.type || "application/octet-stream" }),
-  }));
+  return files.map((file, index) => ({ file, blob: blobsByFile[index] }));
 }
 
 export function estimateBundleEncryptedSize(fileSizes: number[]): number {

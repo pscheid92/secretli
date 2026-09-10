@@ -1052,6 +1052,16 @@ func TestRetrieveSecretRange_AuthorizationValidation(t *testing.T) {
 	}
 }
 
+func TestParseBoundedRange_CapsRangeLength(t *testing.T) {
+	size := int64(maxRangeBytes) * 3
+	if _, _, err := parseBoundedRange(fmt.Sprintf("bytes=0-%d", maxRangeBytes-1), size); err != nil {
+		t.Fatalf("range of exactly the cap should be accepted: %v", err)
+	}
+	if _, _, err := parseBoundedRange(fmt.Sprintf("bytes=0-%d", maxRangeBytes), size); !errors.Is(err, errRangeOutOfBounds) {
+		t.Fatalf("range above the cap: err = %v, want errRangeOutOfBounds", err)
+	}
+}
+
 func TestRetrieveSecretRange_RangeValidation(t *testing.T) {
 	repo := newMockRepo()
 	fs := newMockFileStore()

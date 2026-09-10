@@ -1,6 +1,7 @@
 import { useCallback, useRef, useState } from "react";
 import { formatSize } from "../lib/format";
 import {
+  fitsBundleManifestLimit,
   fitsBundleUploadLimit,
   MAX_FILE_UPLOAD_BYTES,
   MAX_UPLOAD_LABEL,
@@ -60,6 +61,10 @@ export default function FileUpload({ onSelect }: FileUploadProps) {
       const total = files.reduce((sum, f) => sum + f.size, 0);
       if (total > MAX_FILE_UPLOAD_BYTES || !fitsBundleUploadLimit(files.map((file) => file.size))) {
         setError(`Total file size exceeds the ${MAX_UPLOAD_LABEL} upload limit.`);
+        return;
+      }
+      if (!fitsBundleManifestLimit(files)) {
+        setError("Too many files for one share. Zip them first or split the share.");
         return;
       }
       setSelectedFiles(files);
