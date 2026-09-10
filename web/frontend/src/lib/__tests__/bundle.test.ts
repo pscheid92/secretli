@@ -7,6 +7,7 @@ import {
   DOWNLOAD_ALL_BUNDLE_COALESCED_PLAINTEXT_BYTES,
   decryptBundleFiles,
   parseBundleV2Footer,
+  planEncryptedBundleV2,
   readBundleManifest,
 } from "../bundle";
 import { KeySet } from "../encryption";
@@ -216,6 +217,42 @@ describe("encrypted bundles", () => {
     const tamperedRange = async (start: number, end: number) => tampered.slice(start, end + 1);
 
     await expect(decryptBundleFiles([manifest.files[0]], keySet, tamperedRange)).rejects.toThrow();
+  });
+
+  it("rejects a tampered record on decryption", async () => {
+    const keySet = await KeySet.generateRandom();
+    const file = new File(["hello bundle"], "notes.txt", { type: "text/plain" });
+    const { blob } = await createEncryptedBundle([file], keySet);
+    const bytes = await blobBytes(blob);
+    const { manifest } = await readBundleManifest(
+      async (start, end) => bytes.slice(start, end + 1),
+      keySet,
+      bytes.length,
+    );
+
+    // Flip a byte inside the first record's ciphertext. There is no separate
+    // checksum any more; the Poly1305 tag has to catch this.
+    const chunk = manifest.files[0].chunks[0];
+    const tampered = bytes.slice();
+    tampered[chunk.offset + chunk.length - 1] ^= 1;
+
+    await expect(
+      decryptBundleFiles(manifest.files, keySet, async (start, end) =>
+        tampered.slice(start, end + 1),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("keeps the manifest free of per-record checksums", async () => {
+    const keySet = await KeySet.generateRandom();
+    const file = new File(["hello bundle"], "notes.txt", { type: "text/plain" });
+    const { blob, manifest } = await createEncryptedBundle([file], keySet);
+    const bytes = await blobBytes(blob);
+
+    expect(JSON.stringify(manifest)).not.toContain("sha256");
+    // The planned size is exact, so the server can validate the declared size.
+    const plan = planEncryptedBundleV2([file]);
+    expect(plan.totalSize).toBe(bytes.length);
   });
 
   it("serves a small bundle from one fetched copy", async () => {
