@@ -167,18 +167,9 @@ export class KeySet {
     return cipher.decrypt(ciphertext);
   }
 
-  encryptBundlePartDeterministic(
-    data: Uint8Array,
-    aadSuffix: Uint8Array,
-    nonceLabel: string,
-  ): Uint8Array {
-    const nonce = hkdf(
-      sha512,
-      this.blobKey,
-      undefined,
-      label(`bundle_nonce:${nonceLabel}`),
-      V2_NONCE_LENGTH,
-    );
+  /** Encrypts one bundle record with a fresh random nonce; the nonce is stored in the record. */
+  encryptBundlePart(data: Uint8Array, aadSuffix: Uint8Array): Uint8Array {
+    const nonce = crypto.getRandomValues(new Uint8Array(V2_NONCE_LENGTH));
     return this.encryptBundlePartWithNonce(data, aadSuffix, nonce);
   }
 

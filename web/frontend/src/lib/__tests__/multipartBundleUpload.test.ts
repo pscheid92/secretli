@@ -2,7 +2,6 @@ import { ApiError, type UploadSessionPart, type UploadSessionStatus } from "../a
 import { readBundleManifest } from "../bundle";
 import { KeySet } from "../encryption";
 import {
-  resetMultipartUploadStateForTests,
   S3_MIN_MULTIPART_PART_SIZE,
   UploadCancelledError,
   uploadMultipartBundle,
@@ -10,7 +9,6 @@ import {
 
 const api = vi.hoisted(() => ({
   startUploadSession: vi.fn(),
-  getUploadSession: vi.fn(),
   uploadSessionPart: vi.fn(),
   completeUploadSession: vi.fn(),
   abortUploadSession: vi.fn(),
@@ -60,10 +58,6 @@ function installFakeServer(): FakeServer {
     };
     return { ...server.status, upload_token: `token-${server.sessionCounter}` };
   });
-  api.getUploadSession.mockImplementation(async () => ({
-    ...server.status,
-    uploaded_parts: Array.from(server.parts.values(), (entry) => entry.part),
-  }));
   api.uploadSessionPart.mockImplementation(
     async (_session, _token, partNumber, offset, bytes: Blob, sha256) => {
       const part: UploadSessionPart = {
@@ -90,7 +84,7 @@ function installFakeServer(): FakeServer {
 function patternedFile(size: number, name = "payload.bin"): File {
   const bytes = new Uint8Array(size);
   for (let i = 0; i < size; i++) bytes[i] = (i * 7 + 3) & 0xff;
-  return new File([bytes], name, { type: "application/octet-stream", lastModified: 1_700_000_000 });
+  return new File([bytes], name, { type: "application/octet-stream" });
 }
 
 function sameBytes(a: Uint8Array, b: Uint8Array): boolean {
@@ -125,7 +119,6 @@ async function baseParams(files: File[], password?: string) {
     files,
     baseKeySet,
     bundleKeySet,
-    password,
     passwordProtected: password !== undefined,
     expiration: "1d",
     burnAfterRead: false,
@@ -134,7 +127,6 @@ async function baseParams(files: File[], password?: string) {
 
 describe("uploadMultipartBundle", () => {
   beforeEach(() => {
-    resetMultipartUploadStateForTests();
     for (const fn of Object.values(api)) fn.mockReset();
   });
 
@@ -151,6 +143,7 @@ describe("uploadMultipartBundle", () => {
 
     expect(api.startUploadSession).toHaveBeenCalledTimes(1);
     expect(api.completeUploadSession).toHaveBeenCalledTimes(1);
+    expect(api.abortUploadSession).not.toHaveBeenCalled();
     const parts = Array.from(server.parts.values()).map((entry) => entry.part);
     expect(parts.length).toBeGreaterThan(1);
     for (const part of parts.slice(0, -1)) {
@@ -160,7 +153,7 @@ describe("uploadMultipartBundle", () => {
     expect(blob.length).toBe(server.status.blob_size);
     expect(progress.at(-1)).toBe(blob.length);
 
-    // The assembled object is a valid bundle that decrypts to the original file.
+    // The assembled object is a valid bundle that decrypts with the bundle key.
     const fetchRange = async (start: number, end: number) => blob.slice(start, end + 1);
     const { manifest } = await readBundleManifest(fetchRange, params.bundleKeySet, blob.length);
     expect(manifest.files[0].name).toBe("payload.bin");
@@ -169,10 +162,25 @@ describe("uploadMultipartBundle", () => {
     expect(result.deletionToken).toBe(params.baseKeySet.getEncoded().deletionToken);
   }, 30_000);
 
+  it("uploads a small bundle as a single part", async () => {
+    const server = installFakeServer();
+    const params = await baseParams([patternedFile(64, "tiny.bin")], "hunter2");
+
+    await uploadMultipartBundle(params);
+
+    expect(server.parts.size).toBe(1);
+    const blob = assembledBlob(server);
+    expect(blob.length).toBe(server.status.blob_size);
+    const fetchRange = async (start: number, end: number) => blob.slice(start, end + 1);
+    const { manifest } = await readBundleManifest(fetchRange, params.bundleKeySet, blob.length);
+    expect(manifest.files[0].name).toBe("tiny.bin");
+    // The password-derived key is what protects the blob, not the base key.
+    await expect(readBundleManifest(fetchRange, params.baseKeySet, blob.length)).rejects.toThrow();
+  });
+
   it("retries transient part failures but not client errors", async () => {
     installFakeServer();
     const file = patternedFile(64);
-    const params = await baseParams([file]);
 
     const original = api.uploadSessionPart.getMockImplementation();
     let calls = 0;
@@ -181,27 +189,36 @@ describe("uploadMultipartBundle", () => {
       if (calls === 1) throw new ApiError(503, "storage unavailable");
       return original?.(...args);
     });
-    await expect(uploadMultipartBundle(params)).resolves.toBeTruthy();
+    await expect(uploadMultipartBundle(await baseParams([file]))).resolves.toBeTruthy();
     expect(calls).toBe(2);
 
-    resetMultipartUploadStateForTests();
     installFakeServer();
     api.uploadSessionPart.mockClear();
     api.uploadSessionPart.mockImplementation(async () => {
       throw new ApiError(400, "part rejected");
     });
-    await expect(
-      uploadMultipartBundle(await baseParams([patternedFile(64)])),
-    ).rejects.toMatchObject({
+    await expect(uploadMultipartBundle(await baseParams([file]))).rejects.toMatchObject({
       status: 400,
     });
     expect(api.uploadSessionPart).toHaveBeenCalledTimes(1);
   });
 
-  it("aborts the server session and forgets state when cancelled", async () => {
+  it("aborts the server session on any failure", async () => {
     installFakeServer();
-    const file = patternedFile(64);
-    const params = await baseParams([file]);
+    api.completeUploadSession.mockRejectedValueOnce(new ApiError(503, "try later"));
+
+    await expect(
+      uploadMultipartBundle(await baseParams([patternedFile(64)])),
+    ).rejects.toMatchObject({ status: 503 });
+    expect(api.abortUploadSession).toHaveBeenCalledWith("session-1", "token-1");
+
+    // A second attempt is a completely new session.
+    await uploadMultipartBundle(await baseParams([patternedFile(64)]));
+    expect(api.startUploadSession).toHaveBeenCalledTimes(2);
+  });
+
+  it("aborts the server session and reports cancellation when cancelled", async () => {
+    installFakeServer();
     const controller = new AbortController();
     const original = api.uploadSessionPart.getMockImplementation();
     api.uploadSessionPart.mockImplementation(async (...args) => {
@@ -210,109 +227,31 @@ describe("uploadMultipartBundle", () => {
     });
 
     await expect(
-      uploadMultipartBundle({ ...params, signal: controller.signal }),
+      uploadMultipartBundle({
+        ...(await baseParams([patternedFile(64)])),
+        signal: controller.signal,
+      }),
     ).rejects.toBeInstanceOf(UploadCancelledError);
     expect(api.abortUploadSession).toHaveBeenCalledWith("session-1", "token-1");
     expect(api.completeUploadSession).not.toHaveBeenCalled();
-
-    // A fresh attempt starts a brand new session.
-    api.uploadSessionPart.mockImplementation(original ?? (async () => ({}) as UploadSessionPart));
-    await uploadMultipartBundle(await baseParams([file]));
-    expect(api.startUploadSession).toHaveBeenCalledTimes(2);
   });
 
-  it("resumes the same session in this tab and skips already uploaded parts", async () => {
-    const server = installFakeServer();
-    const file = patternedFile(13 * MIB);
-    const params = await baseParams([file]);
-
-    api.completeUploadSession.mockRejectedValueOnce(new ApiError(503, "try later"));
-    await expect(uploadMultipartBundle(params)).rejects.toMatchObject({ status: 503 });
-    const uploadedBefore = api.uploadSessionPart.mock.calls.length;
-    expect(uploadedBefore).toBeGreaterThan(0);
-    const firstBlob = assembledBlob(server);
-
-    // Second attempt: same files, the keys are re-derived from the in-memory
-    // share secret, so a different (fresh) base keyset must not matter.
-    const retry = await baseParams([file]);
-    const result = await uploadMultipartBundle(retry);
-
-    expect(api.startUploadSession).toHaveBeenCalledTimes(1);
-    expect(api.getUploadSession).toHaveBeenCalledTimes(1);
-    expect(api.uploadSessionPart).toHaveBeenCalledTimes(uploadedBefore);
-    expect(api.completeUploadSession).toHaveBeenCalledTimes(2);
-    expect(result.encoded.shareSecret).toBe(params.baseKeySet.getEncoded().shareSecret);
-    expect(sameBytes(assembledBlob(server), firstBlob)).toBe(true);
-  }, 30_000);
-
-  it("starts over when the recorded parts no longer match", async () => {
-    const server = installFakeServer();
-    const file = patternedFile(64);
-    const params = await baseParams([file]);
-
-    api.completeUploadSession.mockRejectedValueOnce(new ApiError(503, "try later"));
-    await expect(uploadMultipartBundle(params)).rejects.toMatchObject({ status: 503 });
-
-    // Poison the server-side record for part 1.
-    const entry = server.parts.get(1);
-    if (!entry) throw new Error("expected part 1");
-    server.parts.set(1, { ...entry, part: { ...entry.part, sha256: "0".repeat(64) } });
-
-    await expect(uploadMultipartBundle(await baseParams([file]))).rejects.toThrow(
-      "does not match resumable state",
-    );
-    expect(api.abortUploadSession).not.toHaveBeenCalled();
-
-    // The poisoned session is forgotten; the next attempt creates a new one.
-    await uploadMultipartBundle(await baseParams([file]));
-    expect(api.startUploadSession).toHaveBeenCalledTimes(2);
-  });
-
-  it("does not resume when the session was rejected with 409", async () => {
-    installFakeServer();
-    const file = patternedFile(64);
-    api.completeUploadSession.mockRejectedValueOnce(new ApiError(409, "parts rejected"));
-    await expect(uploadMultipartBundle(await baseParams([file]))).rejects.toMatchObject({
-      status: 409,
-    });
-
-    await uploadMultipartBundle(await baseParams([file]));
-    expect(api.startUploadSession).toHaveBeenCalledTimes(2);
-  });
-
-  it("uses a fresh nonce salt per upload so identical content never repeats a nonce", async () => {
+  it("never repeats a nonce for the same content under the same key", async () => {
     const server = installFakeServer();
     const file = patternedFile(64);
     const keys = await baseParams([file]);
 
     await uploadMultipartBundle(keys);
     const first = assembledBlob(server);
-
-    // Same keys, same file, new session after the first completed.
     await uploadMultipartBundle(keys);
     const second = assembledBlob(server);
 
-    expect(api.startUploadSession).toHaveBeenCalledTimes(2);
     expect(first.length).toBe(second.length);
     expect(sameBytes(first, second)).toBe(false);
-    // Both still decrypt with the same key.
     for (const blob of [first, second]) {
       const fetchRange = async (start: number, end: number) => blob.slice(start, end + 1);
       const { manifest } = await readBundleManifest(fetchRange, keys.bundleKeySet, blob.length);
       expect(manifest.files[0].size).toBe(64);
     }
-  });
-
-  it("derives the blob token from the password when resuming", async () => {
-    installFakeServer();
-    const file = patternedFile(64);
-    const params = await baseParams([file], "hunter2");
-    api.completeUploadSession.mockRejectedValueOnce(new ApiError(503, "try later"));
-    await expect(uploadMultipartBundle(params)).rejects.toMatchObject({ status: 503 });
-
-    // A different password cannot resume the session: it is aborted instead.
-    await uploadMultipartBundle(await baseParams([file], "other"));
-    expect(api.abortUploadSession).toHaveBeenCalledWith("session-1", "token-1");
-    expect(api.startUploadSession).toHaveBeenCalledTimes(2);
   });
 });

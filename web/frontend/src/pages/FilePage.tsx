@@ -11,16 +11,11 @@ import TransferStatus, {
   type TransferProgress,
   type TransferStep,
 } from "../components/TransferStatus";
-import { ApiError, createSecret } from "../lib/api";
-import { createEncryptedBundle, estimateBundleEncryptedSize } from "../lib/bundle";
+import { ApiError } from "../lib/api";
 import { KeySet } from "../lib/encryption";
 import { formatExpiration } from "../lib/expiration";
 import { formatSize } from "../lib/format";
-import {
-  LARGE_BUNDLE_MULTIPART_THRESHOLD_BYTES,
-  UploadCancelledError,
-  uploadMultipartBundle,
-} from "../lib/multipartBundleUpload";
+import { UploadCancelledError, uploadMultipartBundle } from "../lib/multipartBundleUpload";
 import {
   fitsBundleManifestLimit,
   fitsBundleUploadLimit,
@@ -158,65 +153,30 @@ export default function FilePage() {
         encryptKeySet = await KeySet.fromShareSecret(encoded.shareSecret, data.password);
       }
 
-      const estimatedBundleSize = estimateBundleEncryptedSize(data.files.map((file) => file.size));
-      if (estimatedBundleSize >= LARGE_BUNDLE_MULTIPART_THRESHOLD_BYTES) {
-        setStage("uploading");
-        const response = await uploadMultipartBundle({
-          files: data.files,
-          baseKeySet: keySet,
-          bundleKeySet: encryptKeySet,
-          password: hasPassword ? data.password : undefined,
-          passwordProtected: hasPassword,
-          expiration: data.expiration,
-          burnAfterRead: data.burnAfterRead,
-          signal: controller.signal,
-          onProgress: ({ uploadedBytes, totalBytes }) => {
-            setProgress({
-              fraction: totalBytes > 0 ? uploadedBytes / totalBytes : 0,
-              label: `${formatSize(uploadedBytes)} / ${formatSize(totalBytes)}`,
-            });
-          },
-        });
-
-        setResult({
-          url: `${window.location.origin}/s#${response.encoded.shareSecret}`,
-          expiresAt: response.expires_at,
-          burnAfterRead: data.burnAfterRead,
-          deletionToken: response.deletionToken,
-        });
-        toast.success("Share created");
-        return;
-      }
-
-      const { blob, manifest } = await createEncryptedBundle(data.files, encryptKeySet);
-
-      const encryptedMeta = await keySet.encryptMeta({
-        type: "bundle",
-        password_protected: hasPassword,
-        bundle_name: manifest.bundleName,
+      // Files are always encrypted record by record and streamed as multipart
+      // parts, whatever their size, so there is a single upload path.
+      setStage("uploading");
+      const response = await uploadMultipartBundle({
+        files: data.files,
+        baseKeySet: keySet,
+        bundleKeySet: encryptKeySet,
+        passwordProtected: hasPassword,
+        expiration: data.expiration,
+        burnAfterRead: data.burnAfterRead,
+        signal: controller.signal,
+        onProgress: ({ uploadedBytes, totalBytes }) => {
+          setProgress({
+            fraction: totalBytes > 0 ? uploadedBytes / totalBytes : 0,
+            label: `${formatSize(uploadedBytes)} / ${formatSize(totalBytes)}`,
+          });
+        },
       });
 
-      const encoded = keySet.getEncoded();
-      setStage("uploading");
-
-      const response = await createSecret(
-        {
-          public_id: encoded.publicID,
-          metadata_token: encoded.metadataToken,
-          blob_token: encryptKeySet.getEncoded().blobToken,
-          deletion_token: encoded.deletionToken,
-          encrypted_meta: encryptedMeta,
-          expiration: data.expiration,
-          burn_after_read: data.burnAfterRead,
-        },
-        blob,
-      );
-
       setResult({
-        url: `${window.location.origin}/s#${encoded.shareSecret}`,
+        url: `${window.location.origin}/s#${response.encoded.shareSecret}`,
         expiresAt: response.expires_at,
         burnAfterRead: data.burnAfterRead,
-        deletionToken: encoded.deletionToken,
+        deletionToken: response.deletionToken,
       });
       toast.success("Share created");
     } catch (err) {
