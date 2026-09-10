@@ -1,11 +1,18 @@
-import type { KeySet } from "./encryption";
+import { BUNDLE_RECORD_OVERHEAD_BYTES, type KeySet } from "./encryption";
 
 export const BUNDLE_V2_FOOTER_LENGTH = 64;
 export const DEFAULT_BUNDLE_CHUNK_SIZE = 4 * 1024 * 1024;
-export const BUNDLE_RECORD_OVERHEAD_BYTES = 24 + 16;
 export const MAX_BUNDLE_COALESCED_PLAINTEXT_BYTES = 16 * 1024 * 1024;
 export const DOWNLOAD_ALL_BUNDLE_COALESCED_PLAINTEXT_BYTES = 64 * 1024 * 1024;
 export const MAX_BUNDLE_MANIFEST_BYTES = 256 * 1024;
+/**
+ * Bundles at or below this size are fetched in one request and served from
+ * memory. Without it, reading a short text secret costs three round trips
+ * (footer, manifest, content) for a few hundred bytes.
+ */
+export const SMALL_BUNDLE_CACHE_BYTES = 1024 * 1024;
+
+export { BUNDLE_RECORD_OVERHEAD_BYTES };
 
 const BUNDLE_V2_MAGIC = new Uint8Array([0x53, 0x4c, 0x42, 0x4e, 0x44, 0x4c, 0x32, 0x00]);
 const BUNDLE_V2_VERSION = 2;
@@ -234,6 +241,25 @@ export async function encryptBundleV2Plan(
   };
 
   return { parts, manifest, encryptedManifest, footer };
+}
+
+/**
+ * Wraps a range fetcher so a small bundle is fetched once and every later range
+ * is served from memory. Large bundles are passed through untouched.
+ */
+export async function cachingRangeFetcher(
+  fetchRange: BundleRangeFetcher,
+  bundleSize: number,
+  maxCachedBytes = SMALL_BUNDLE_CACHE_BYTES,
+): Promise<BundleRangeFetcher> {
+  if (bundleSize > maxCachedBytes) {
+    return fetchRange;
+  }
+  const whole = await fetchRange(0, bundleSize - 1);
+  if (whole.length !== bundleSize) {
+    throw new Error("bundle range size mismatch");
+  }
+  return async (start: number, end: number) => whole.slice(start, end + 1);
 }
 
 export async function readBundleManifest(

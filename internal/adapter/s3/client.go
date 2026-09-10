@@ -45,29 +45,6 @@ func NewClient(cfg platformconfig.S3Config) (*Client, error) {
 	return &Client{client: client, bucket: cfg.Bucket}, nil
 }
 
-func (s *Client) Put(ctx context.Context, key string, reader io.Reader, size int64) error {
-	if _, err := s.client.PutObject(ctx, &s3.PutObjectInput{
-		Bucket:        aws.String(s.bucket),
-		Key:           aws.String(key),
-		Body:          reader,
-		ContentLength: aws.Int64(size),
-	}); err != nil {
-		return fmt.Errorf("put object %q: %w", key, err)
-	}
-	return nil
-}
-
-func (s *Client) Get(ctx context.Context, key string) (io.ReadCloser, error) {
-	obj, err := s.client.GetObject(ctx, &s3.GetObjectInput{
-		Bucket: aws.String(s.bucket),
-		Key:    aws.String(key),
-	})
-	if err != nil {
-		return nil, fmt.Errorf("get object %q: %w", key, err)
-	}
-	return obj.Body, nil
-}
-
 func (s *Client) GetRange(ctx context.Context, key string, start, end int64) (io.ReadCloser, error) {
 	if start < 0 || end < start {
 		return nil, fmt.Errorf("invalid object range %d-%d", start, end)

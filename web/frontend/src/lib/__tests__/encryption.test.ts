@@ -1,5 +1,9 @@
 import { base64UrlDecode, base64UrlEncode } from "../base64";
-import { ENCRYPTED_BLOB_OVERHEAD_BYTES, KeySet } from "../encryption";
+import { BUNDLE_RECORD_OVERHEAD_BYTES, KeySet } from "../encryption";
+
+// Bundle records are bound to their position in the bundle; any suffix works
+// as long as encryption and decryption agree.
+const recordAad = new TextEncoder().encode("record:0:0:8");
 
 describe("KeySet", () => {
   describe("generateRandom", () => {
@@ -32,38 +36,55 @@ describe("KeySet", () => {
     });
   });
 
-  describe("encryptBlob/decryptBlob", () => {
+  describe("encryptBundlePart/decryptBundlePart", () => {
     it("round-trips text as bytes", async () => {
       const ks = await KeySet.generateRandom();
       const plaintext = "Hello, secret world!";
-      const data = new TextEncoder().encode(plaintext);
-      const blob = await ks.encryptBlob(data);
-      const decrypted = await ks.decryptBlob(blob);
-      expect(new TextDecoder().decode(decrypted)).toBe(plaintext);
+      const record = ks.encryptBundlePart(new TextEncoder().encode(plaintext), recordAad);
+      expect(new TextDecoder().decode(ks.decryptBundlePart(record, recordAad))).toBe(plaintext);
     });
 
     it("round-trips empty data", async () => {
       const ks = await KeySet.generateRandom();
-      const blob = await ks.encryptBlob(new Uint8Array(0));
-      const decrypted = await ks.decryptBlob(blob);
-      expect(decrypted.length).toBe(0);
+      const record = ks.encryptBundlePart(new Uint8Array(0), recordAad);
+      expect(ks.decryptBundlePart(record, recordAad).length).toBe(0);
     });
 
     it("round-trips binary data", async () => {
       const ks = await KeySet.generateRandom();
       const data = crypto.getRandomValues(new Uint8Array(1024));
-      const blob = await ks.encryptBlob(data);
-      const decrypted = await ks.decryptBlob(blob);
-      expect(decrypted).toEqual(data);
+      const record = ks.encryptBundlePart(data, recordAad);
+      expect(ks.decryptBundlePart(record, recordAad)).toEqual(data);
     });
 
-    it("produces blob larger than input (version + nonce + auth tag)", async () => {
+    it("adds exactly a nonce and an auth tag", async () => {
       const ks = await KeySet.generateRandom();
-      const data = new Uint8Array(100);
-      const blob = await ks.encryptBlob(data);
-      // 1 byte version + 24 byte nonce + 100 byte data + 16 byte Poly1305 tag = 141
-      expect(ENCRYPTED_BLOB_OVERHEAD_BYTES).toBe(41);
-      expect(blob.size).toBe(data.length + ENCRYPTED_BLOB_OVERHEAD_BYTES);
+      const record = ks.encryptBundlePart(new Uint8Array(100), recordAad);
+      // 24 byte nonce + 100 byte data + 16 byte Poly1305 tag
+      expect(BUNDLE_RECORD_OVERHEAD_BYTES).toBe(40);
+      expect(record.length).toBe(100 + BUNDLE_RECORD_OVERHEAD_BYTES);
+    });
+
+    it("never repeats a record for the same plaintext", async () => {
+      const ks = await KeySet.generateRandom();
+      const data = new TextEncoder().encode("same plaintext");
+      expect(ks.encryptBundlePart(data, recordAad)).not.toEqual(
+        ks.encryptBundlePart(data, recordAad),
+      );
+    });
+
+    it("rejects a record bound to a different position", async () => {
+      const ks = await KeySet.generateRandom();
+      const record = ks.encryptBundlePart(new TextEncoder().encode("data"), recordAad);
+      const otherAad = new TextEncoder().encode("record:1:0:8");
+      expect(() => ks.decryptBundlePart(record, otherAad)).toThrow();
+    });
+
+    it("rejects a truncated record", async () => {
+      const ks = await KeySet.generateRandom();
+      expect(() => ks.decryptBundlePart(new Uint8Array(8), recordAad)).toThrow(
+        "invalid bundle record",
+      );
     });
   });
 
@@ -113,15 +134,15 @@ describe("KeySet", () => {
       expect(restoredEncoded.blobToken).toBe(encoded.blobToken);
     });
 
-    it("can decrypt blob encrypted by the original keyset", async () => {
+    it("can decrypt a record encrypted by the original keyset", async () => {
       const original = await KeySet.generateRandom();
       const plaintext = "secret message";
-      const data = new TextEncoder().encode(plaintext);
-      const blob = await original.encryptBlob(data);
+      const record = original.encryptBundlePart(new TextEncoder().encode(plaintext), recordAad);
 
       const restored = await KeySet.fromShareSecret(original.getEncoded().shareSecret);
-      const decrypted = await restored.decryptBlob(blob);
-      expect(new TextDecoder().decode(decrypted)).toBe(plaintext);
+      expect(new TextDecoder().decode(restored.decryptBundlePart(record, recordAad))).toBe(
+        plaintext,
+      );
     });
 
     it("can decrypt metadata encrypted by the original keyset", async () => {
@@ -142,11 +163,12 @@ describe("KeySet", () => {
 
       const withPw = await KeySet.fromShareSecret(shareSecret, "my-password");
       const data = new TextEncoder().encode("password-protected secret");
-      const blob = await withPw.encryptBlob(data);
+      const record = withPw.encryptBundlePart(data, recordAad);
 
       const restored = await KeySet.fromShareSecret(shareSecret, "my-password");
-      const decrypted = await restored.decryptBlob(blob);
-      expect(new TextDecoder().decode(decrypted)).toBe("password-protected secret");
+      expect(new TextDecoder().decode(restored.decryptBundlePart(record, recordAad))).toBe(
+        "password-protected secret",
+      );
     });
 
     it("keeps public metadata identifiers stable across different passwords", async () => {
@@ -178,10 +200,10 @@ describe("KeySet", () => {
       const shareSecret = original.getEncoded().shareSecret;
 
       const withPw = await KeySet.fromShareSecret(shareSecret, "correct-password");
-      const blob = await withPw.encryptBlob(new TextEncoder().encode("secret"));
+      const record = withPw.encryptBundlePart(new TextEncoder().encode("secret"), recordAad);
 
       const wrongPw = await KeySet.fromShareSecret(shareSecret, "wrong-password");
-      await expect(wrongPw.decryptBlob(blob)).rejects.toThrow();
+      expect(() => wrongPw.decryptBundlePart(record, recordAad)).toThrow();
     });
   });
 
@@ -194,23 +216,27 @@ describe("KeySet", () => {
       const meta = { type: "text" as const, password_protected: true };
       const encryptedMeta = await keySet.encryptMeta(meta);
       const passwordKeySet = await KeySet.fromShareSecret(shareSecret, "the-password");
-      const blob = await passwordKeySet.encryptBlob(new TextEncoder().encode("secret data"));
+      const record = passwordKeySet.encryptBundlePart(
+        new TextEncoder().encode("secret data"),
+        recordAad,
+      );
 
       // Retrieve: decrypt metadata with base key (no password needed)
       const restored = await KeySet.fromShareSecret(shareSecret);
       const decryptedMeta = await restored.decryptMeta(encryptedMeta);
       expect(decryptedMeta.password_protected).toBe(true);
       expect(restored.getEncoded().blobToken).not.toBe(passwordKeySet.getEncoded().blobToken);
-      await expect(restored.decryptBlob(blob)).rejects.toThrow();
+      expect(() => restored.decryptBundlePart(record, recordAad)).toThrow();
 
       // Decrypt data with password key
       const restoredPw = await KeySet.fromShareSecret(shareSecret, "the-password");
-      const decryptedData = await restoredPw.decryptBlob(blob);
-      expect(new TextDecoder().decode(decryptedData)).toBe("secret data");
+      expect(new TextDecoder().decode(restoredPw.decryptBundlePart(record, recordAad))).toBe(
+        "secret data",
+      );
 
       // Wrong password fails
       const wrongPw = await KeySet.fromShareSecret(shareSecret, "wrong");
-      await expect(wrongPw.decryptBlob(blob)).rejects.toThrow();
+      expect(() => wrongPw.decryptBundlePart(record, recordAad)).toThrow();
     });
   });
 
@@ -224,33 +250,28 @@ describe("KeySet", () => {
       await expect(ksB.decryptMeta(envelope)).rejects.toThrow();
     });
 
-    it("rejects blob decryption with a different KeySet", async () => {
+    it("rejects record decryption with a different KeySet", async () => {
       const ksA = await KeySet.generateRandom();
       const ksB = await KeySet.generateRandom();
 
-      const blob = await ksA.encryptBlob(new TextEncoder().encode("data"));
-      await expect(ksB.decryptBlob(blob)).rejects.toThrow();
+      const record = ksA.encryptBundlePart(new TextEncoder().encode("data"), recordAad);
+      expect(() => ksB.decryptBundlePart(record, recordAad)).toThrow();
     });
 
-    it("rejects meta ciphertext used as blob (wrong AAD purpose)", async () => {
+    it("rejects meta ciphertext used as a bundle record (wrong AAD purpose)", async () => {
       const ks = await KeySet.generateRandom();
-      const meta = { type: "text" as const, password_protected: false };
-      const envelope = await ks.encryptMeta(meta);
+      const envelope = await ks.encryptMeta({ type: "text" as const, password_protected: false });
 
-      // Extract nonce and ciphertext from the v2 envelope
+      // Re-frame the metadata nonce and ciphertext as a bundle record.
       const parts = envelope.split("$");
       const nonce = base64UrlDecode(parts[1]);
       const ciphertext = base64UrlDecode(parts[2]);
+      const record = new Uint8Array(nonce.length + ciphertext.length);
+      record.set(nonce, 0);
+      record.set(ciphertext, nonce.length);
 
-      // Construct a v2 blob with the meta's nonce and ciphertext
-      const fakeBlob = new Blob([
-        new Uint8Array([0x02]),
-        new Uint8Array(nonce),
-        new Uint8Array(ciphertext),
-      ]);
-
-      // Decryption should fail because AAD is "blob" not "meta"
-      await expect(ks.decryptBlob(fakeBlob)).rejects.toThrow();
+      // Decryption fails: the AAD purpose is "bundle", not "meta".
+      expect(() => ks.decryptBundlePart(record, recordAad)).toThrow();
     });
   });
 
@@ -262,14 +283,6 @@ describe("KeySet", () => {
 
       await expect(ks.decryptMeta(`v1$${nonce}$${ciphertext}`)).rejects.toThrow(
         "invalid metadata envelope format",
-      );
-    });
-
-    it("rejects untagged blobs", async () => {
-      const ks = await KeySet.generateRandom();
-
-      await expect(ks.decryptBlob(new Blob([new Uint8Array(32)]))).rejects.toThrow(
-        "invalid blob format",
       );
     });
   });

@@ -1,5 +1,5 @@
 import { fireEvent, render, screen } from "@testing-library/react";
-import { MAX_FILE_UPLOAD_BYTES, MAX_UPLOAD_LABEL } from "../../lib/uploadLimits";
+import { MAX_ENCRYPTED_UPLOAD_BYTES, MAX_UPLOAD_LABEL } from "../../lib/uploadLimits";
 import FileUpload from "../FileUpload";
 
 function fileWithSize(size: number): File {
@@ -47,7 +47,7 @@ describe("FileUpload", () => {
     const { container } = render(<FileUpload onSelect={onSelect} />);
 
     fireEvent.change(fileInput(container), {
-      target: { files: [fileWithSize(MAX_FILE_UPLOAD_BYTES + 1)] },
+      target: { files: [fileWithSize(MAX_ENCRYPTED_UPLOAD_BYTES)] },
     });
 
     expect(onSelect).not.toHaveBeenCalled();

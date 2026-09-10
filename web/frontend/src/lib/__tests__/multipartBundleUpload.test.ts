@@ -117,6 +117,7 @@ async function baseParams(files: File[], password?: string) {
     : baseKeySet;
   return {
     files,
+    secretType: "bundle" as const,
     baseKeySet,
     bundleKeySet,
     passwordProtected: password !== undefined,

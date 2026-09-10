@@ -19,10 +19,11 @@ Secrets are encrypted entirely in the browser — the server never sees plaintex
 ## How It Works
 
 1. The browser generates a random share secret and derives separate metadata keys, blob keys, public IDs, and access tokens using HKDF-SHA512
-2. The secret (text or file) is encrypted with XChaCha20-Poly1305 (with AAD binding) and uploaded as an opaque blob; access and deletion tokens are stored only as SHA-256 hashes
-3. A shareable link is created containing the keyset in the URL fragment (e.g., `/s#<shareSecret>`)
-4. The recipient's browser derives the metadata token from the fragment, and derives the blob token from the password when password protection is enabled
-5. The browser fetches the encrypted blob only after deriving the blob token, then decrypts it locally
+2. Text and files alike are packed into one bundle: each 4 MiB record is encrypted with XChaCha20-Poly1305 (with AAD binding to its position), followed by an encrypted manifest and a small footer
+3. The bundle is streamed to the server as multipart parts and reassembled in object storage, so neither side ever holds the whole thing in memory; access and deletion tokens are stored only as SHA-256 hashes
+4. A shareable link is created containing the keyset in the URL fragment (e.g., `/s#<shareSecret>`)
+5. The recipient's browser derives the metadata token from the fragment, and derives the blob token from the password when password protection is enabled
+6. After starting a retrieval session, the browser reads the manifest and fetches only the byte ranges it needs, decrypting each record locally
 
 The server only ever sees the public ID, metadata/blob access tokens, deletion token, and encrypted ciphertext in request handling, and persists token hashes rather than raw tokens. It never sees plaintext, passwords, or encryption keys.
 
@@ -97,7 +98,7 @@ Configuration is done via environment variables. See [`.env.example`](.env.examp
 | `S3_ACCESS_KEY` / `S3_SECRET_KEY` | S3 credentials | — |
 | `S3_USE_SSL` | Use HTTPS for a bare host:port endpoint | `true` |
 | `S3_REGION` | Region used for request signing | `us-east-1` |
-| `MAX_FILE_SIZE` | Encrypted upload size limit in bytes; file bundles are always streamed as S3 multipart parts of up to 32 MiB, text secrets are a single request | `1073741824` (1 GiB) |
+| `MAX_FILE_SIZE` | Encrypted upload size limit in bytes; every secret is streamed as S3 multipart parts of up to 32 MiB | `1073741824` (1 GiB) |
 | `CLEANUP_INTERVAL` | Expired secret cleanup frequency | `1m` |
 | `ALLOWED_ORIGINS` | CORS allowed origins | — |
 | `METRICS_TOKEN` | Optional bearer token required for `/metrics` | — |

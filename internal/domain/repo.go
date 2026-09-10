@@ -8,7 +8,6 @@ import (
 type SecretRepo interface {
 	Create(ctx context.Context, secret *Secret, now time.Time) error
 	GetByPublicID(ctx context.Context, publicID string, now time.Time) (*Secret, error)
-	ClaimBurnAfterRead(ctx context.Context, publicID, blobTokenHash string, now time.Time) error
 	StartRetrievalSession(ctx context.Context, publicID, blobTokenHash, sessionTokenHash string, expiresAt, now time.Time) (*Secret, error)
 	GetByRetrievalSession(ctx context.Context, publicID, sessionTokenHash string, now time.Time) (*Secret, error)
 	Delete(ctx context.Context, publicID string) error

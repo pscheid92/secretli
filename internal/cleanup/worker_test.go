@@ -63,8 +63,6 @@ type mockFileStore struct {
 	deleteCalled atomic.Int32
 }
 
-func (m *mockFileStore) Put(_ context.Context, _ string, _ io.Reader, _ int64) error { return nil }
-func (m *mockFileStore) Get(_ context.Context, _ string) (io.ReadCloser, error)      { return nil, nil }
 func (m *mockFileStore) GetRange(_ context.Context, _ string, _, _ int64) (io.ReadCloser, error) {
 	return nil, nil
 }

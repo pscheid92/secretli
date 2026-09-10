@@ -3,7 +3,6 @@ package postgres_test
 import (
 	"context"
 	"errors"
-	"sync"
 	"testing"
 	"time"
 
@@ -28,12 +27,7 @@ func newTestSecret(publicID string, expiresAt time.Time) *domain.Secret {
 
 func markRetrieved(t *testing.T, pool *pgxpool.Pool, publicID string) {
 	t.Helper()
-	markRetrievedAt(t, pool, publicID, time.Now().Add(-pgadapter.ConsumedBurnAfterReadGrace-time.Minute))
-}
-
-func markRetrievedAt(t *testing.T, pool *pgxpool.Pool, publicID string, retrievedAt time.Time) {
-	t.Helper()
-	if _, err := pool.Exec(context.Background(), "UPDATE secrets SET retrieved_at = $2 WHERE public_id = $1", publicID, retrievedAt); err != nil {
+	if _, err := pool.Exec(context.Background(), "UPDATE secrets SET retrieved_at = $2 WHERE public_id = $1", publicID, time.Now()); err != nil {
 		t.Fatalf("mark retrieved %s: %v", publicID, err)
 	}
 }
@@ -106,121 +100,6 @@ func TestSecretRepo_GetExpired(t *testing.T) {
 	_, err := repo.GetByPublicID(ctx, "expired-001", time.Now())
 	if !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("expected ErrNotFound for expired secret, got %v", err)
-	}
-}
-
-func TestSecretRepo_ClaimBurnAfterRead(t *testing.T) {
-	pool := setupTestDB(t)
-	repo := pgadapter.NewSecretRepo(pool)
-	ctx := context.Background()
-
-	secret := newTestSecret("claim-001", time.Now().Add(1*time.Hour))
-	secret.BurnAfterRead = true
-	if err := repo.Create(ctx, secret, time.Now()); err != nil {
-		t.Fatalf("create: %v", err)
-	}
-
-	if err := repo.ClaimBurnAfterRead(ctx, "claim-001", tokencrypto.TokenHash("blob-token-claim-001"), time.Now()); err != nil {
-		t.Fatalf("claim burn-after-read: %v", err)
-	}
-
-	got, err := repo.GetByPublicID(ctx, "claim-001", time.Now())
-	if err != nil {
-		t.Fatalf("get after claim: %v", err)
-	}
-	if got.RetrievedAt == nil {
-		t.Fatal("expected retrieved_at to be set")
-	}
-	if got.RetrievedAt.IsZero() {
-		t.Error("expected non-zero retrieved_at")
-	}
-
-	err = repo.ClaimBurnAfterRead(ctx, "claim-001", tokencrypto.TokenHash("blob-token-claim-001"), time.Now())
-	if !errors.Is(err, domain.ErrNotFound) {
-		t.Fatalf("expected ErrNotFound on second claim, got %v", err)
-	}
-}
-
-func TestSecretRepo_ClaimBurnAfterRead_InvalidInputs(t *testing.T) {
-	pool := setupTestDB(t)
-	repo := pgadapter.NewSecretRepo(pool)
-	ctx := context.Background()
-
-	burn := newTestSecret("claim-invalid-burn", time.Now().Add(1*time.Hour))
-	burn.BurnAfterRead = true
-	regular := newTestSecret("claim-invalid-regular", time.Now().Add(1*time.Hour))
-	expired := newTestSecret("claim-invalid-expired", time.Now().Add(-1*time.Hour))
-	expired.BurnAfterRead = true
-
-	for _, s := range []*domain.Secret{burn, regular, expired} {
-		if err := repo.Create(ctx, s, time.Now()); err != nil {
-			t.Fatalf("create %s: %v", s.PublicID, err)
-		}
-	}
-
-	tests := []struct {
-		name      string
-		publicID  string
-		blobToken string
-	}{
-		{name: "wrong token", publicID: "claim-invalid-burn", blobToken: "wrong-token"},
-		{name: "regular secret", publicID: "claim-invalid-regular", blobToken: "blob-token-claim-invalid-regular"},
-		{name: "expired secret", publicID: "claim-invalid-expired", blobToken: "blob-token-claim-invalid-expired"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			err := repo.ClaimBurnAfterRead(ctx, tt.publicID, tokencrypto.TokenHash(tt.blobToken), time.Now())
-			if !errors.Is(err, domain.ErrNotFound) {
-				t.Fatalf("expected ErrNotFound, got %v", err)
-			}
-		})
-	}
-}
-
-func TestSecretRepo_ClaimBurnAfterRead_ConcurrentOnlyOneSucceeds(t *testing.T) {
-	pool := setupTestDB(t)
-	repo := pgadapter.NewSecretRepo(pool)
-	ctx := context.Background()
-
-	secret := newTestSecret("claim-concurrent", time.Now().Add(1*time.Hour))
-	secret.BurnAfterRead = true
-	if err := repo.Create(ctx, secret, time.Now()); err != nil {
-		t.Fatalf("create: %v", err)
-	}
-
-	const claims = 12
-	var wg sync.WaitGroup
-	errs := make(chan error, claims)
-
-	for range claims {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			errs <- repo.ClaimBurnAfterRead(ctx, "claim-concurrent", tokencrypto.TokenHash("blob-token-claim-concurrent"), time.Now())
-		}()
-	}
-
-	wg.Wait()
-	close(errs)
-
-	var success, notFound int
-	for err := range errs {
-		switch {
-		case err == nil:
-			success++
-		case errors.Is(err, domain.ErrNotFound):
-			notFound++
-		default:
-			t.Fatalf("unexpected error: %v", err)
-		}
-	}
-
-	if success != 1 {
-		t.Errorf("successful claims = %d, want 1", success)
-	}
-	if notFound != claims-1 {
-		t.Errorf("not found claims = %d, want %d", notFound, claims-1)
 	}
 }
 
@@ -456,15 +335,6 @@ func TestSecretRepo_DeleteExpired_BurnAfterRead(t *testing.T) {
 		t.Fatalf("create burn-unretrieved: %v", err)
 	}
 
-	// 4. Just-retrieved burn-after-read secret — still inside the grace
-	// period a legacy full download may need, so NOT deleted yet.
-	burnRecent := newTestSecret("burn-recent-001", time.Now().Add(1*time.Hour))
-	burnRecent.BurnAfterRead = true
-	if err := repo.Create(ctx, burnRecent, time.Now()); err != nil {
-		t.Fatalf("create burn-recent: %v", err)
-	}
-	markRetrievedAt(t, pool, "burn-recent-001", time.Now())
-
 	noop := func(string) error { return nil }
 	count, err := repo.DeleteExpired(ctx, time.Now(), noop)
 	if err != nil {
@@ -473,15 +343,6 @@ func TestSecretRepo_DeleteExpired_BurnAfterRead(t *testing.T) {
 
 	if count != 1 {
 		t.Errorf("deleted count = %d, want 1", count)
-	}
-
-	// Once the grace period has passed the recent one is collected too.
-	count, err = repo.DeleteExpired(ctx, time.Now().Add(pgadapter.ConsumedBurnAfterReadGrace+time.Minute), noop)
-	if err != nil {
-		t.Fatalf("delete expired after grace: %v", err)
-	}
-	if count != 1 {
-		t.Errorf("deleted count after grace = %d, want 1", count)
 	}
 
 	// Regular retrieved secret should still exist
@@ -536,10 +397,7 @@ func TestSecretRepo_DeleteExpired_KeepsBurnedSecretWithActiveSession(t *testing.
 		t.Errorf("deleted sessions = %d, want 1", deletedSessions)
 	}
 
-	// The session claimed the secret just now, so the grace period still
-	// protects it; evaluate cleanup as of a time past the grace window.
-	afterGrace := time.Now().Add(pgadapter.ConsumedBurnAfterReadGrace + time.Minute)
-	count, err = repo.DeleteExpired(ctx, afterGrace, noop)
+	count, err = repo.DeleteExpired(ctx, time.Now(), noop)
 	if err != nil {
 		t.Fatalf("delete expired after session cleanup: %v", err)
 	}

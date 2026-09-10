@@ -137,24 +137,18 @@ SELECT s.public_id
 FROM secrets AS s
 WHERE s.burn_after_read = true
   AND s.retrieved_at IS NOT NULL
-  AND s.retrieved_at < $1
-  AND s.expires_at >= $2
+  AND s.expires_at >= $1
   AND NOT EXISTS (
       SELECT 1
       FROM retrieval_sessions AS rs
       WHERE rs.public_id = s.public_id
-        AND rs.expires_at > $2
+        AND rs.expires_at > $1
   )
 FOR UPDATE OF s SKIP LOCKED
 `
 
-type SelectConsumedBurnAfterReadSecretsForCleanupParams struct {
-	RetrievedBefore pgtype.Timestamptz
-	NowAt           pgtype.Timestamptz
-}
-
-func (q *Queries) SelectConsumedBurnAfterReadSecretsForCleanup(ctx context.Context, arg SelectConsumedBurnAfterReadSecretsForCleanupParams) ([]string, error) {
-	rows, err := q.db.Query(ctx, selectConsumedBurnAfterReadSecretsForCleanup, arg.RetrievedBefore, arg.NowAt)
+func (q *Queries) SelectConsumedBurnAfterReadSecretsForCleanup(ctx context.Context, nowAt pgtype.Timestamptz) ([]string, error) {
+	rows, err := q.db.Query(ctx, selectConsumedBurnAfterReadSecretsForCleanup, nowAt)
 	if err != nil {
 		return nil, err
 	}

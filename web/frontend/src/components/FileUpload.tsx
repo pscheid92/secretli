@@ -3,7 +3,7 @@ import { formatSize } from "../lib/format";
 import {
   fitsBundleManifestLimit,
   fitsBundleUploadLimit,
-  MAX_FILE_UPLOAD_BYTES,
+  MAX_ENCRYPTED_UPLOAD_BYTES,
   MAX_UPLOAD_LABEL,
 } from "../lib/uploadLimits";
 
@@ -58,8 +58,7 @@ export default function FileUpload({ onSelect }: FileUploadProps) {
   const updateFiles = useCallback(
     (files: File[]) => {
       setError("");
-      const total = files.reduce((sum, f) => sum + f.size, 0);
-      if (total > MAX_FILE_UPLOAD_BYTES || !fitsBundleUploadLimit(files.map((file) => file.size))) {
+      if (!fitsBundleUploadLimit(files.map((file) => file.size))) {
         setError(`Total file size exceeds the ${MAX_UPLOAD_LABEL} upload limit.`);
         return;
       }
@@ -114,7 +113,7 @@ export default function FileUpload({ onSelect }: FileUploadProps) {
   }
 
   const totalSize = selectedFiles.reduce((s, f) => s + f.size, 0);
-  const usagePercent = Math.min((totalSize / MAX_FILE_UPLOAD_BYTES) * 100, 100);
+  const usagePercent = Math.min((totalSize / MAX_ENCRYPTED_UPLOAD_BYTES) * 100, 100);
 
   return (
     <div>

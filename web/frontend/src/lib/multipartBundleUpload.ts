@@ -38,6 +38,8 @@ export class UploadCancelledError extends Error {
 
 export interface MultipartBundleUploadParams {
   readonly files: File[];
+  /** Recorded in the encrypted metadata so the reader knows how to present it. */
+  readonly secretType: "text" | "bundle";
   readonly baseKeySet: KeySet;
   readonly bundleKeySet: KeySet;
   readonly passwordProtected: boolean;
@@ -218,7 +220,7 @@ async function createUploadSession(
 ): Promise<StartUploadSessionResponse> {
   const encoded = params.baseKeySet.getEncoded();
   const encryptedMeta = await params.baseKeySet.encryptMeta({
-    type: "bundle",
+    type: params.secretType,
     password_protected: params.passwordProtected,
     bundle_name: bundleName,
   });

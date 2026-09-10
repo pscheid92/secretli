@@ -12,7 +12,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/go-playground/validator/v10"
 	"github.com/labstack/echo/v4"
 
 	"github.com/pscheid92/secretli/internal/adapter/metrics"
@@ -26,7 +25,6 @@ const (
 	HeaderMetadataToken = "X-Metadata-Token" //nolint:gosec
 	HeaderBlobToken     = "X-Blob-Token"     //nolint:gosec
 	HeaderDeletionToken = "X-Deletion-Token" //nolint:gosec
-	HeaderBurnAfterRead = "X-Burn-After-Read"
 
 	retrievalSessionTTL = 15 * time.Minute
 	// maxRangeBytes caps a single range request. The client coalesces at most
@@ -35,134 +33,17 @@ const (
 	maxRangeBytes = 128 * 1024 * 1024
 )
 
+// SecretHandler serves everything a client does with an existing secret:
+// metadata, retrieval sessions, range reads and deletion. Secrets are created
+// through UploadHandler's multipart upload sessions.
 type SecretHandler struct {
-	repo        domain.SecretRepo
-	fileStore   domain.FileStore
-	maxFileSize int64
-	metrics     *metrics.SecretMetrics
-	validate    *validator.Validate
+	repo      domain.SecretRepo
+	fileStore domain.FileStore
+	metrics   *metrics.SecretMetrics
 }
 
-func NewSecretHandler(repo domain.SecretRepo, fileStore domain.FileStore, maxFileSize int64, m *metrics.SecretMetrics) *SecretHandler {
-	return &SecretHandler{repo: repo, fileStore: fileStore, maxFileSize: maxFileSize, metrics: m, validate: newValidator()}
-}
-
-func (h *SecretHandler) CreateSecret(c echo.Context) error {
-	r := c.Request()
-	ctx := r.Context()
-	r.Body = http.MaxBytesReader(c.Response(), r.Body, h.maxFileSize+1<<20)
-
-	err := r.ParseMultipartForm(1 << 20)
-	if _, ok := errors.AsType[*http.MaxBytesError](err); ok {
-		return apperrors.BadRequestError("request exceeds maximum size limit")
-	}
-	if err != nil {
-		return apperrors.BadRequestError("invalid multipart form")
-	}
-
-	var meta domain.CreateSecretRequest
-	if err := c.Bind(&meta); err != nil {
-		return apperrors.BadRequestError("invalid form data")
-	}
-
-	if details := h.validateRequest(&meta); details != nil {
-		return validationError(details)
-	}
-
-	duration, err := parseExpiration(meta.Expiration)
-	if err != nil {
-		return apperrors.BadRequestError(err.Error())
-	}
-
-	file, header, err := r.FormFile("file")
-	if err != nil {
-		return apperrors.BadRequestError("missing file part")
-	}
-	defer func() { _ = file.Close() }()
-
-	if header.Size > h.maxFileSize {
-		return apperrors.BadRequestError("file exceeds maximum size limit")
-	}
-
-	now := time.Now()
-	secret := &domain.Secret{
-		PublicID:          meta.PublicID,
-		MetadataTokenHash: crypto.TokenHash(meta.MetadataToken),
-		BlobTokenHash:     crypto.TokenHash(meta.BlobToken),
-		DeletionTokenHash: crypto.TokenHash(meta.DeletionToken),
-		EncryptedMeta:     meta.EncryptedMeta,
-		BlobSize:          header.Size,
-		BurnAfterRead:     meta.BurnAfterRead,
-		ExpiresAt:         now.Add(duration),
-		CreatedAt:         now,
-	}
-
-	// Reserve the public_id in the database before touching object storage.
-	// Writing the blob first would let anyone who knows a public_id overwrite
-	// and then delete an existing secret's object without holding any token.
-	if err := h.repo.Create(ctx, secret, now); err != nil {
-		if errors.Is(err, domain.ErrDuplicate) {
-			return apperrors.ConflictError("secret with this public_id already exists")
-		}
-		return apperrors.InternalError("failed to create secret", err)
-	}
-
-	sk := domain.SecretStorageKey(meta.PublicID)
-	if err := h.fileStore.Put(ctx, sk, file, header.Size); err != nil {
-		if delErr := h.repo.Delete(ctx, meta.PublicID); delErr != nil && !errors.Is(delErr, domain.ErrNotFound) {
-			slog.ErrorContext(ctx, "failed to roll back secret row after S3 upload failure", "error", delErr)
-		}
-		return apperrors.InternalError("failed to upload blob to S3", err)
-	}
-
-	h.metrics.SecretsCreated.Inc()
-
-	response := map[string]string{
-		"expires_at": secret.ExpiresAt.UTC().Format(time.RFC3339),
-	}
-	return c.JSON(http.StatusCreated, response)
-}
-
-func (h *SecretHandler) RetrieveSecret(c echo.Context) error {
-	secret, err := h.authenticateBlob(c)
-	if err != nil {
-		return err
-	}
-
-	ctx := c.Request().Context()
-	publicID := c.Param("publicID")
-	sk := domain.SecretStorageKey(publicID)
-
-	obj, err := h.fileStore.Get(ctx, sk)
-	if err != nil {
-		return apperrors.InternalError("failed to get blob from S3", err)
-	}
-	defer func() { _ = obj.Close() }()
-
-	if secret.BurnAfterRead {
-		token := c.Request().Header.Get(HeaderBlobToken)
-		if err := h.repo.ClaimBurnAfterRead(ctx, publicID, crypto.TokenHash(token), time.Now()); err != nil {
-			if errors.Is(err, domain.ErrNotFound) {
-				return apperrors.NotFoundError("secret not found")
-			}
-			return apperrors.InternalError("failed to claim burn-after-read secret", err)
-		}
-	}
-
-	resp := c.Response()
-	resp.Header().Set("Content-Type", "application/octet-stream")
-	resp.Header().Set("Content-Length", strconv.FormatInt(secret.BlobSize, 10))
-	resp.Header().Set(HeaderBurnAfterRead, fmt.Sprintf("%t", secret.BurnAfterRead))
-	resp.WriteHeader(http.StatusOK)
-
-	if _, err := io.Copy(resp, obj); err != nil {
-		slog.ErrorContext(ctx, "failed to stream blob to client", "error", err)
-		return nil
-	}
-
-	h.metrics.SecretsRetrieved.Inc()
-
-	return nil
+func NewSecretHandler(repo domain.SecretRepo, fileStore domain.FileStore, m *metrics.SecretMetrics) *SecretHandler {
+	return &SecretHandler{repo: repo, fileStore: fileStore, metrics: m}
 }
 
 func (h *SecretHandler) StartRetrievalSession(c echo.Context) error {
@@ -334,12 +215,6 @@ func (h *SecretHandler) DeleteSecret(c echo.Context) error {
 func (h *SecretHandler) authenticateMetadata(c echo.Context) (*domain.Secret, error) {
 	return h.authenticateSecret(c, HeaderMetadataToken, func(secret *domain.Secret) string {
 		return secret.MetadataTokenHash
-	})
-}
-
-func (h *SecretHandler) authenticateBlob(c echo.Context) (*domain.Secret, error) {
-	return h.authenticateSecret(c, HeaderBlobToken, func(secret *domain.Secret) string {
-		return secret.BlobTokenHash
 	})
 }
 
