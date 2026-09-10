@@ -2,6 +2,7 @@ package httpserver
 
 import (
 	"encoding/json"
+	"errors"
 	"io/fs"
 	"net/http"
 	"net/http/httptest"
@@ -44,10 +45,52 @@ func TestHTTPErrorHandler(t *testing.T) {
 		rec := httptest.NewRecorder()
 		c := e.NewContext(req, rec)
 
-		httpErrorHandler(echo.NewHTTPError(http.StatusBadGateway, "bad gateway"), c)
+		httpErrorHandler(errors.New("boom"), c)
 
 		if rec.Code != http.StatusInternalServerError {
 			t.Errorf("status = %d, want %d", rec.Code, http.StatusInternalServerError)
+		}
+	})
+
+	t.Run("keeps status of echo client errors", func(t *testing.T) {
+		e := echo.New()
+		e.HTTPErrorHandler = httpErrorHandler
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		rec := httptest.NewRecorder()
+		c := e.NewContext(req, rec)
+
+		httpErrorHandler(echo.ErrStatusRequestEntityTooLarge, c)
+
+		if rec.Code != http.StatusRequestEntityTooLarge {
+			t.Errorf("status = %d, want %d", rec.Code, http.StatusRequestEntityTooLarge)
+		}
+		var resp apperrors.ErrorResponse
+		if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+			t.Fatalf("failed to decode response: %v", err)
+		}
+		if resp.Error != "Request Entity Too Large" {
+			t.Errorf("error = %q, want %q", resp.Error, "Request Entity Too Large")
+		}
+	})
+
+	t.Run("hides message of echo server errors", func(t *testing.T) {
+		e := echo.New()
+		e.HTTPErrorHandler = httpErrorHandler
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		rec := httptest.NewRecorder()
+		c := e.NewContext(req, rec)
+
+		httpErrorHandler(echo.NewHTTPError(http.StatusBadGateway, "upstream detail"), c)
+
+		if rec.Code != http.StatusBadGateway {
+			t.Errorf("status = %d, want %d", rec.Code, http.StatusBadGateway)
+		}
+		var resp apperrors.ErrorResponse
+		if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+			t.Fatalf("failed to decode response: %v", err)
+		}
+		if resp.Error != "internal server error" {
+			t.Errorf("error = %q, want %q", resp.Error, "internal server error")
 		}
 	})
 
@@ -102,6 +145,106 @@ func TestParseOrigins(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestParseTrustedProxies(t *testing.T) {
+	tests := []struct {
+		name    string
+		value   string
+		want    []string
+		wantErr bool
+	}{
+		{name: "empty", value: "", want: nil},
+		{name: "whitespace and commas", value: " , ,", want: nil},
+		{name: "single cidr", value: "10.0.0.0/8", want: []string{"10.0.0.0/8"}},
+		{name: "bare ipv4 becomes /32", value: "192.168.1.10", want: []string{"192.168.1.10/32"}},
+		{name: "bare ipv6 becomes /128", value: "fd00::1", want: []string{"fd00::1/128"}},
+		{name: "mixed list", value: "10.0.0.0/8, 172.16.0.1", want: []string{"10.0.0.0/8", "172.16.0.1/32"}},
+		{name: "invalid entry", value: "not-an-ip", wantErr: true},
+		{name: "invalid cidr", value: "10.0.0.0/33", wantErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := parseTrustedProxies(tt.value)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("expected error")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if len(got) != len(tt.want) {
+				t.Fatalf("got %d ranges, want %d", len(got), len(tt.want))
+			}
+			for i, r := range got {
+				if r.String() != tt.want[i] {
+					t.Errorf("range[%d] = %s, want %s", i, r, tt.want[i])
+				}
+			}
+		})
+	}
+}
+
+func TestNewIPExtractor(t *testing.T) {
+	tests := []struct {
+		name           string
+		trustedProxies string
+		remoteAddr     string
+		xff            string
+		want           string
+	}{
+		{
+			name:       "no proxies ignores forwarded header",
+			remoteAddr: "203.0.113.7:4321",
+			xff:        "198.51.100.99",
+			want:       "203.0.113.7",
+		},
+		{
+			name:           "trusted proxy resolves client from forwarded header",
+			trustedProxies: "10.0.0.0/8",
+			remoteAddr:     "10.1.2.3:4321",
+			xff:            "198.51.100.99",
+			want:           "198.51.100.99",
+		},
+		{
+			name:           "untrusted peer cannot spoof through forwarded header",
+			trustedProxies: "10.0.0.0/8",
+			remoteAddr:     "203.0.113.7:4321",
+			xff:            "198.51.100.99",
+			want:           "203.0.113.7",
+		},
+		{
+			name:           "forwarded chain stops at first untrusted hop",
+			trustedProxies: "10.0.0.0/8",
+			remoteAddr:     "10.1.2.3:4321",
+			xff:            "1.2.3.4, 198.51.100.99, 10.9.9.9",
+			want:           "198.51.100.99",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			extractor, err := newIPExtractor(tt.trustedProxies)
+			if err != nil {
+				t.Fatalf("newIPExtractor: %v", err)
+			}
+			req := httptest.NewRequest(http.MethodGet, "/", nil)
+			req.RemoteAddr = tt.remoteAddr
+			if tt.xff != "" {
+				req.Header.Set(echo.HeaderXForwardedFor, tt.xff)
+			}
+			if got := extractor(req); got != tt.want {
+				t.Errorf("extracted IP = %q, want %q", got, tt.want)
+			}
+		})
+	}
+
+	if _, err := newIPExtractor("garbage"); err == nil {
+		t.Error("expected error for invalid trusted proxy list")
 	}
 }
 
