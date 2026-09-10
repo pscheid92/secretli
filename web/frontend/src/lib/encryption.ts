@@ -22,13 +22,13 @@ const ENVELOPE_VERSION = "v2";
 const DERIVATION_VERSION = "v1";
 const DERIVATION_PREFIX = `secretli:derivation:${DERIVATION_VERSION}`;
 const V2_NONCE_LENGTH = 24;
-const BLOB_V2_TAG = 0x02;
 const POLY1305_TAG_LENGTH = 16;
 
-export const ENCRYPTED_BLOB_OVERHEAD_BYTES = 1 + V2_NONCE_LENGTH + POLY1305_TAG_LENGTH;
+/** Nonce plus Poly1305 tag stored alongside every encrypted bundle record. */
+export const BUNDLE_RECORD_OVERHEAD_BYTES = V2_NONCE_LENGTH + POLY1305_TAG_LENGTH;
 export const SHARE_SECRET_LENGTH = 32;
 
-function buildAad(publicID: Uint8Array, purpose: "meta" | "blob" | "bundle"): Uint8Array {
+function buildAad(publicID: Uint8Array, purpose: "meta" | "bundle"): Uint8Array {
   const suffix = new TextEncoder().encode(purpose);
   const aad = new Uint8Array(publicID.length + suffix.length);
   aad.set(publicID, 0);
@@ -136,35 +136,6 @@ export class KeySet {
     const plaintext = cipher.decrypt(ciphertext);
 
     return JSON.parse(new TextDecoder().decode(plaintext));
-  }
-
-  /**
-   * Encrypt binary data into a Blob: [0x02 version byte][24-byte nonce][ciphertext with poly1305 tag]
-   */
-  async encryptBlob(data: Uint8Array): Promise<Blob> {
-    const nonce = crypto.getRandomValues(new Uint8Array(V2_NONCE_LENGTH));
-    const aad = buildAad(this.publicID, "blob");
-    const cipher = xchacha20poly1305(this.blobKey, nonce, aad);
-    const ciphertext = cipher.encrypt(data);
-
-    return new Blob([new Uint8Array([BLOB_V2_TAG]), nonce, new Uint8Array(ciphertext)]);
-  }
-
-  /**
-   * Decrypt a blob back to plaintext bytes.
-   */
-  async decryptBlob(blob: Blob): Promise<Uint8Array> {
-    const bytes = new Uint8Array(await blob.arrayBuffer());
-
-    if (bytes[0] !== BLOB_V2_TAG || bytes.length < ENCRYPTED_BLOB_OVERHEAD_BYTES) {
-      throw new Error("invalid blob format");
-    }
-
-    const nonce = bytes.slice(1, 1 + V2_NONCE_LENGTH);
-    const ciphertext = bytes.slice(1 + V2_NONCE_LENGTH);
-    const aad = buildAad(this.publicID, "blob");
-    const cipher = xchacha20poly1305(this.blobKey, nonce, aad);
-    return cipher.decrypt(ciphertext);
   }
 
   /** Encrypts one bundle record with a fresh random nonce; the nonce is stored in the record. */

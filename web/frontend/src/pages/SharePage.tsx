@@ -3,8 +3,13 @@ import { toast } from "sonner";
 import SecretForm, { type SecretFormData } from "../components/SecretForm";
 import SecretResult from "../components/SecretResult";
 import ShareModeTabs from "../components/ShareModeTabs";
-import { ApiError, createSecret } from "../lib/api";
+import { ApiError } from "../lib/api";
 import { KeySet } from "../lib/encryption";
+import { uploadMultipartBundle } from "../lib/multipartBundleUpload";
+
+// Text is stored as a single-file bundle so there is exactly one on-the-wire
+// format; the name is inside the encrypted manifest and never reaches the server.
+const TEXT_SECRET_FILENAME = "secret.txt";
 
 interface ShareResult {
   url: string;
@@ -32,34 +37,26 @@ export default function SharePage() {
         encryptKeySet = await KeySet.fromShareSecret(encoded.shareSecret, data.password);
       }
 
-      const textBytes = new TextEncoder().encode(data.text);
-      const blob = await encryptKeySet.encryptBlob(textBytes);
-      const encryptedMeta = await keySet.encryptMeta({
-        type: "text",
-        password_protected: hasPassword,
+      const file = new File([new TextEncoder().encode(data.text)], TEXT_SECRET_FILENAME, {
+        type: "text/plain",
       });
-
-      const encoded = keySet.getEncoded();
       setStage("uploading");
 
-      const response = await createSecret(
-        {
-          public_id: encoded.publicID,
-          metadata_token: encoded.metadataToken,
-          blob_token: encryptKeySet.getEncoded().blobToken,
-          deletion_token: encoded.deletionToken,
-          encrypted_meta: encryptedMeta,
-          expiration: data.expiration,
-          burn_after_read: data.burnAfterRead,
-        },
-        blob,
-      );
+      const response = await uploadMultipartBundle({
+        files: [file],
+        secretType: "text",
+        baseKeySet: keySet,
+        bundleKeySet: encryptKeySet,
+        passwordProtected: hasPassword,
+        expiration: data.expiration,
+        burnAfterRead: data.burnAfterRead,
+      });
 
       setResult({
-        url: `${window.location.origin}/s#${encoded.shareSecret}`,
+        url: `${window.location.origin}/s#${response.encoded.shareSecret}`,
         expiresAt: response.expires_at,
         burnAfterRead: data.burnAfterRead,
-        deletionToken: encoded.deletionToken,
+        deletionToken: response.deletionToken,
       });
       toast.success("Share created");
     } catch (err) {

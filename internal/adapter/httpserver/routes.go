@@ -47,19 +47,13 @@ func (a *App) registerRoutes() *metrics.SecretMetrics {
 	e.GET("/api/v1/health/ready", ReadinessWithDB(a.pool))
 
 	// Secrets
-	sh := NewSecretHandler(a.secretRepo, a.fileStore, a.cfg.MaxFileSize, secretMetrics)
+	sh := NewSecretHandler(a.secretRepo, a.fileStore, secretMetrics)
 	secrets := e.Group("/api/v1/secrets")
-
-	// Create (10/min)
-	createGroup := secrets.Group("")
-	createGroup.Use(rateLimiter(10, time.Minute))
-	createGroup.POST("", sh.CreateSecret)
 
 	// Retrieve (30/min)
 	retrieveGroup := secrets.Group("")
 	retrieveGroup.Use(rateLimiter(30, time.Minute))
 	retrieveGroup.Use(middleware.BodyLimit(smallRequestBodyLimit))
-	retrieveGroup.POST("/:publicID", sh.RetrieveSecret)
 	retrieveGroup.POST("/:publicID/retrieval-session", sh.StartRetrievalSession)
 	retrieveGroup.GET("/:publicID/meta", sh.SecretMetadata)
 
@@ -80,13 +74,23 @@ func (a *App) registerRoutes() *metrics.SecretMetrics {
 			uh := NewUploadHandler(uploadRepo, multipartStore, a.cfg.MaxFileSize, secretMetrics)
 			uploads := e.Group("/api/v1/secrets/uploads")
 
+			// Starting a session is what creates a secret, so it carries the
+			// create budget.
 			uploadCreateGroup := uploads.Group("")
 			uploadCreateGroup.Use(rateLimiter(10, time.Minute))
 			uploadCreateGroup.Use(middleware.BodyLimit(smallRequestBodyLimit))
 			uploadCreateGroup.POST("", uh.CreateUploadSession)
-			uploadCreateGroup.POST("/:sessionID/complete", uh.CompleteUploadSession)
-			uploadCreateGroup.DELETE("/:sessionID", uh.AbortUploadSession)
-			uploadCreateGroup.GET("/:sessionID", uh.UploadSessionStatus)
+
+			// Operations on a session that already exists are guarded by its
+			// upload token and happen at least once per upload; charging them
+			// to the create budget would halve the number of shares a client
+			// can make.
+			uploadSessionGroup := uploads.Group("")
+			uploadSessionGroup.Use(rateLimiter(60, time.Minute))
+			uploadSessionGroup.Use(middleware.BodyLimit(smallRequestBodyLimit))
+			uploadSessionGroup.POST("/:sessionID/complete", uh.CompleteUploadSession)
+			uploadSessionGroup.DELETE("/:sessionID", uh.AbortUploadSession)
+			uploadSessionGroup.GET("/:sessionID", uh.UploadSessionStatus)
 
 			uploadPartGroup := uploads.Group("")
 			uploadPartGroup.Use(rateLimiter(600, time.Minute))

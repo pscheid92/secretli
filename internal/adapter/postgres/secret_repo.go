@@ -17,12 +17,6 @@ import (
 	tokencrypto "github.com/pscheid92/secretli/internal/platform/crypto"
 )
 
-// ConsumedBurnAfterReadGrace is how long a consumed burn-after-read secret is
-// kept before cleanup removes it. A legacy full download claims the secret
-// before streaming and holds no retrieval session, so cleanup must not delete
-// the object while a slow download is still in flight.
-const ConsumedBurnAfterReadGrace = 30 * time.Minute
-
 type SecretRepo struct {
 	q    *dbsqlc.Queries
 	pool *pgxpool.Pool
@@ -66,21 +60,6 @@ func (r *SecretRepo) GetByPublicID(ctx context.Context, publicID string, now tim
 		return nil, fmt.Errorf("query secret: %w", err)
 	}
 	return secretFromRow(row), nil
-}
-
-func (r *SecretRepo) ClaimBurnAfterRead(ctx context.Context, publicID, blobTokenHash string, now time.Time) error {
-	n, err := r.q.ClaimBurnAfterRead(ctx, dbsqlc.ClaimBurnAfterReadParams{
-		NowAt:         timestamptz(now),
-		PublicID:      publicID,
-		BlobTokenHash: blobTokenHash,
-	})
-	if err != nil {
-		return fmt.Errorf("claim burn-after-read: %w", err)
-	}
-	if n == 0 {
-		return domain.ErrNotFound
-	}
-	return nil
 }
 
 func (r *SecretRepo) StartRetrievalSession(ctx context.Context, publicID, blobTokenHash, sessionTokenHash string, expiresAt, now time.Time) (*domain.Secret, error) {
@@ -179,10 +158,7 @@ func (r *SecretRepo) DeleteExpired(ctx context.Context, now time.Time, beforeDel
 		return 0, fmt.Errorf("select expired: %w", err)
 	}
 
-	consumedIDs, err := qtx.SelectConsumedBurnAfterReadSecretsForCleanup(ctx, dbsqlc.SelectConsumedBurnAfterReadSecretsForCleanupParams{
-		RetrievedBefore: timestamptz(now.Add(-ConsumedBurnAfterReadGrace)),
-		NowAt:           timestamptz(now),
-	})
+	consumedIDs, err := qtx.SelectConsumedBurnAfterReadSecretsForCleanup(ctx, timestamptz(now))
 	if err != nil {
 		return 0, fmt.Errorf("select consumed burn-after-read: %w", err)
 	}

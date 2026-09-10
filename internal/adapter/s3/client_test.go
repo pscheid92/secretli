@@ -157,30 +157,48 @@ func createBucket(endpoint, bucket string) error {
 	return lastErr
 }
 
-func TestS3Client_PutAndGet(t *testing.T) {
-	t.Parallel()
-	client := setupSeaweedFS(t)
+// putTestObject writes an object the way production does: one multipart upload
+// with a single final part. There is no whole-object put in the FileStore API.
+func putTestObject(t *testing.T, client *s3.Client, key string, data []byte) {
+	t.Helper()
 	ctx := context.Background()
-
-	data := []byte("hello, seaweedfs integration test!")
-	err := client.Put(ctx, "test-key", bytes.NewReader(data), int64(len(data)))
+	uploadID, err := client.CreateMultipartUpload(ctx, key)
 	if err != nil {
-		t.Fatalf("Put: %v", err)
+		t.Fatalf("CreateMultipartUpload %q: %v", key, err)
 	}
-
-	reader, err := client.Get(ctx, "test-key")
+	etag, err := client.UploadPart(ctx, key, uploadID, 1, bytes.NewReader(data), int64(len(data)))
 	if err != nil {
-		t.Fatalf("Get: %v", err)
+		t.Fatalf("UploadPart %q: %v", key, err)
+	}
+	if err := client.CompleteMultipartUpload(ctx, key, uploadID, []domain.CompletedPart{{PartNumber: 1, ETag: etag}}); err != nil {
+		t.Fatalf("CompleteMultipartUpload %q: %v", key, err)
+	}
+}
+
+// readTestObject reads a whole object back through the range API.
+func readTestObject(t *testing.T, client *s3.Client, key string, size int) []byte {
+	t.Helper()
+	reader, err := client.GetRange(context.Background(), key, 0, int64(size-1))
+	if err != nil {
+		t.Fatalf("GetRange %q: %v", key, err)
 	}
 	defer reader.Close()
-
 	got, err := io.ReadAll(reader)
 	if err != nil {
-		t.Fatalf("ReadAll: %v", err)
+		t.Fatalf("ReadAll %q: %v", key, err)
 	}
+	return got
+}
 
-	if !bytes.Equal(got, data) {
-		t.Errorf("Get returned %q, want %q", got, data)
+func TestS3Client_WriteAndReadRange(t *testing.T) {
+	t.Parallel()
+	client := setupSeaweedFS(t)
+
+	data := []byte("hello, seaweedfs integration test!")
+	putTestObject(t, client, "test-key", data)
+
+	if got := readTestObject(t, client, "test-key", len(data)); !bytes.Equal(got, data) {
+		t.Errorf("read %q, want %q", got, data)
 	}
 }
 
@@ -190,85 +208,48 @@ func TestS3Client_Delete(t *testing.T) {
 	ctx := context.Background()
 
 	data := []byte("to be deleted")
-	if err := client.Put(ctx, "del-key", bytes.NewReader(data), int64(len(data))); err != nil {
-		t.Fatalf("Put: %v", err)
-	}
+	putTestObject(t, client, "del-key", data)
 
 	if err := client.Delete(ctx, "del-key"); err != nil {
 		t.Fatalf("Delete: %v", err)
 	}
 
-	// Get after delete may fail either when opening the object or reading it,
+	// A read after delete may fail when opening the object or when reading it,
 	// depending on the S3-compatible server implementation.
-	reader, err := client.Get(ctx, "del-key")
+	reader, err := client.GetRange(ctx, "del-key", 0, int64(len(data)-1))
 	if err != nil {
-		// Some versions return error on Get itself
 		return
 	}
 	defer reader.Close()
-	_, err = io.ReadAll(reader)
-	if err == nil {
+	if _, err := io.ReadAll(reader); err == nil {
 		t.Error("expected error reading deleted object, got nil")
 	}
 }
 
-func TestS3Client_PutOverwrite(t *testing.T) {
+func TestS3Client_Overwrite(t *testing.T) {
 	t.Parallel()
 	client := setupSeaweedFS(t)
-	ctx := context.Background()
 
-	data1 := []byte("version 1")
-	if err := client.Put(ctx, "overwrite-key", bytes.NewReader(data1), int64(len(data1))); err != nil {
-		t.Fatalf("Put v1: %v", err)
-	}
-
+	putTestObject(t, client, "overwrite-key", []byte("version 1"))
 	data2 := []byte("version 2")
-	if err := client.Put(ctx, "overwrite-key", bytes.NewReader(data2), int64(len(data2))); err != nil {
-		t.Fatalf("Put v2: %v", err)
-	}
+	putTestObject(t, client, "overwrite-key", data2)
 
-	reader, err := client.Get(ctx, "overwrite-key")
-	if err != nil {
-		t.Fatalf("Get: %v", err)
-	}
-	defer reader.Close()
-
-	got, err := io.ReadAll(reader)
-	if err != nil {
-		t.Fatalf("ReadAll: %v", err)
-	}
-
-	if !bytes.Equal(got, data2) {
-		t.Errorf("Get returned %q, want %q", got, data2)
+	if got := readTestObject(t, client, "overwrite-key", len(data2)); !bytes.Equal(got, data2) {
+		t.Errorf("read %q, want %q", got, data2)
 	}
 }
 
 func TestS3Client_LargeFile(t *testing.T) {
 	t.Parallel()
 	client := setupSeaweedFS(t)
-	ctx := context.Background()
 
-	// 1MB file
 	data := make([]byte, 1<<20)
 	for i := range data {
 		data[i] = byte(i % 256)
 	}
+	putTestObject(t, client, "large-key", data)
 
-	if err := client.Put(ctx, "large-key", bytes.NewReader(data), int64(len(data))); err != nil {
-		t.Fatalf("Put: %v", err)
-	}
-
-	reader, err := client.Get(ctx, "large-key")
-	if err != nil {
-		t.Fatalf("Get: %v", err)
-	}
-	defer reader.Close()
-
-	got, err := io.ReadAll(reader)
-	if err != nil {
-		t.Fatalf("ReadAll: %v", err)
-	}
-
+	got := readTestObject(t, client, "large-key", len(data))
 	if len(got) != len(data) {
 		t.Errorf("got %d bytes, want %d", len(got), len(data))
 	}
@@ -287,9 +268,7 @@ func TestS3Client_GetRange(t *testing.T) {
 		data[i] = byte(i % 251)
 	}
 
-	if err := client.Put(ctx, "range-key", bytes.NewReader(data), int64(len(data))); err != nil {
-		t.Fatalf("Put: %v", err)
-	}
+	putTestObject(t, client, "range-key", data)
 
 	tests := []struct {
 		name       string
@@ -375,17 +354,8 @@ func TestS3Client_MultipartRoundTrip(t *testing.T) {
 		t.Fatalf("CompleteMultipartUpload: %v", err)
 	}
 
-	reader, err := client.Get(ctx, key)
-	if err != nil {
-		t.Fatalf("Get: %v", err)
-	}
-	defer reader.Close()
-	got, err := io.ReadAll(reader)
-	if err != nil {
-		t.Fatalf("ReadAll: %v", err)
-	}
 	want := append(append([]byte(nil), partOne...), partTwo...)
-	if !bytes.Equal(got, want) {
+	if got := readTestObject(t, client, key, len(want)); !bytes.Equal(got, want) {
 		t.Fatalf("assembled object has %d bytes, want %d", len(got), len(want))
 	}
 
@@ -468,16 +438,7 @@ func TestS3Client_MultipartSinglePart(t *testing.T) {
 		t.Fatalf("CompleteMultipartUpload: %v", err)
 	}
 
-	reader, err := client.Get(ctx, key)
-	if err != nil {
-		t.Fatalf("Get: %v", err)
-	}
-	defer reader.Close()
-	got, err := io.ReadAll(reader)
-	if err != nil {
-		t.Fatalf("ReadAll: %v", err)
-	}
-	if !bytes.Equal(got, payload) {
+	if got := readTestObject(t, client, key, len(payload)); !bytes.Equal(got, payload) {
 		t.Fatalf("object = %q, want %q", got, payload)
 	}
 }

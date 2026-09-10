@@ -1,6 +1,7 @@
 import {
   BUNDLE_V2_FOOTER_LENGTH,
   type BundleFile,
+  cachingRangeFetcher,
   createEncryptedBundle,
   DEFAULT_BUNDLE_CHUNK_SIZE,
   DOWNLOAD_ALL_BUNDLE_COALESCED_PLAINTEXT_BYTES,
@@ -215,5 +216,41 @@ describe("encrypted bundles", () => {
     const tamperedRange = async (start: number, end: number) => tampered.slice(start, end + 1);
 
     await expect(decryptBundleFiles([manifest.files[0]], keySet, tamperedRange)).rejects.toThrow();
+  });
+
+  it("serves a small bundle from one fetched copy", async () => {
+    const keySet = await KeySet.generateRandom();
+    const file = new File(["a short secret"], "secret.txt", { type: "text/plain" });
+    const { blob } = await createEncryptedBundle([file], keySet);
+    const bytes = await blobBytes(blob);
+
+    let fetches = 0;
+    const counting = async (start: number, end: number) => {
+      fetches++;
+      return bytes.slice(start, end + 1);
+    };
+    const fetchRange = await cachingRangeFetcher(counting, bytes.length);
+
+    const { manifest } = await readBundleManifest(fetchRange, keySet, bytes.length);
+    const [only] = await decryptBundleFiles(manifest.files, keySet, fetchRange);
+
+    await expect(only.blob.text()).resolves.toBe("a short secret");
+    expect(fetches).toBe(1);
+  });
+
+  it("passes large bundles through without caching", async () => {
+    const ranges: Array<[number, number]> = [];
+    const passthrough = async (start: number, end: number) => {
+      ranges.push([start, end]);
+      return new Uint8Array(end - start + 1);
+    };
+    const fetchRange = await cachingRangeFetcher(passthrough, 4096, 1024);
+
+    await fetchRange(0, 9);
+    await fetchRange(10, 19);
+    expect(ranges).toEqual([
+      [0, 9],
+      [10, 19],
+    ]);
   });
 });

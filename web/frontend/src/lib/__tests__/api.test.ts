@@ -1,15 +1,12 @@
 import {
   ApiError,
   abortUploadSession,
-  type CreateSecretParams,
   completeUploadSession,
-  createSecret,
   deleteSecret,
   getSecretMetadata,
   getUploadSession,
   isTransientStatus,
   MAX_TRANSIENT_ATTEMPTS,
-  retrieveSecret,
   retrieveSecretRange,
   retryDelayMs,
   type StartUploadSessionParams,
@@ -89,109 +86,6 @@ describe("request helper (via deleteSecret)", () => {
 
     const result = await deleteSecret("pub-id", "meta-tok", "del-tok");
     expect(result).toBeUndefined();
-  });
-});
-
-describe("createSecret", () => {
-  afterEach(() => {
-    vi.restoreAllMocks();
-  });
-
-  it("sends multipart form with metadata and file blob", async () => {
-    const params: CreateSecretParams = {
-      public_id: "pub123",
-      metadata_token: "meta-tok",
-      blob_token: "blob-tok",
-      deletion_token: "del-tok",
-      encrypted_meta: "v2$nonce$ciphertext",
-      expiration: "5m",
-      burn_after_read: true,
-    };
-    const blob = new Blob(["encrypted-data"]);
-
-    const fetchSpy = vi
-      .spyOn(globalThis, "fetch")
-      .mockResolvedValue(
-        new Response(JSON.stringify({ expires_at: "2026-02-26T00:05:00Z" }), { status: 200 }),
-      );
-
-    const result = await createSecret(params, blob);
-    expect(result.expires_at).toBe("2026-02-26T00:05:00Z");
-
-    const call = fetchSpy.mock.calls[0];
-    expect(call[0]).toBe("/api/v1/secrets");
-    expectHeader(call[1], "X-Request-ID");
-    const body = call[1]?.body as FormData;
-    expect(body).toBeInstanceOf(FormData);
-    expect(body.get("public_id")).toBe(params.public_id);
-    expect(body.get("metadata_token")).toBe(params.metadata_token);
-    expect(body.get("blob_token")).toBe(params.blob_token);
-    expect(body.get("deletion_token")).toBe(params.deletion_token);
-    expect(body.get("encrypted_meta")).toBe(params.encrypted_meta);
-    expect(body.get("expiration")).toBe(params.expiration);
-    expect(body.get("burn_after_read")).toBe(String(params.burn_after_read));
-    expect(body.get("file")).toBeInstanceOf(Blob);
-  });
-});
-
-describe("retrieveSecret", () => {
-  afterEach(() => {
-    vi.restoreAllMocks();
-  });
-
-  it("returns blob and burn_after_read header", async () => {
-    const headers = new Headers({
-      "X-Burn-After-Read": "true",
-    });
-    const fileBlob = new Blob(["encrypted-blob-data"]);
-    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue({
-      ok: true,
-      status: 200,
-      headers,
-      blob: () => Promise.resolve(fileBlob),
-    } as unknown as Response);
-
-    const result = await retrieveSecret("pub-id", "blob-token");
-    expect(result.burnAfterRead).toBe(true);
-    expectHeader(fetchSpy.mock.calls[0][1], "X-Request-ID");
-    expectHeader(fetchSpy.mock.calls[0][1], "X-Blob-Token", "blob-token");
-
-    const text = await result.blob.text();
-    expect(text).toBe("encrypted-blob-data");
-  });
-
-  it("defaults burn_after_read to false when header missing", async () => {
-    const fileBlob = new Blob(["data"]);
-    vi.spyOn(globalThis, "fetch").mockResolvedValue({
-      ok: true,
-      status: 200,
-      headers: new Headers(),
-      blob: () => Promise.resolve(fileBlob),
-    } as unknown as Response);
-
-    const result = await retrieveSecret("pub-id", "blob-token");
-    expect(result.burnAfterRead).toBe(false);
-  });
-
-  it("throws ApiError on 404", async () => {
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      new Response(JSON.stringify({ error: "secret not found" }), { status: 404 }),
-    );
-
-    await expect(retrieveSecret("missing", "tok")).rejects.toThrow(ApiError);
-  });
-
-  it("throws ApiError on network failure", async () => {
-    vi.spyOn(globalThis, "fetch").mockRejectedValue(new TypeError("Network error"));
-
-    try {
-      await retrieveSecret("pub", "tok");
-      expect.unreachable("should have thrown");
-    } catch (e) {
-      expect(e).toBeInstanceOf(ApiError);
-      expect((e as ApiError).status).toBe(0);
-      expect((e as ApiError).requestId).toBeTruthy();
-    }
   });
 });
 

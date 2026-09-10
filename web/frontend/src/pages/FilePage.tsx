@@ -158,6 +158,7 @@ export default function FilePage() {
       setStage("uploading");
       const response = await uploadMultipartBundle({
         files: data.files,
+        secretType: "bundle",
         baseKeySet: keySet,
         bundleKeySet: encryptKeySet,
         passwordProtected: hasPassword,

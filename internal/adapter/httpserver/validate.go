@@ -1,7 +1,6 @@
 package httpserver
 
 import (
-	"errors"
 	"fmt"
 	"reflect"
 	"strings"
@@ -43,26 +42,6 @@ func newValidator() *validator.Validate {
 	})
 
 	return v
-}
-
-func (h *SecretHandler) validateRequest(v any) []string {
-	err := h.validate.Struct(v)
-	if err == nil {
-		// POSITIVE: no errors detected
-		return nil
-	}
-
-	errs, ok := errors.AsType[validator.ValidationErrors](err)
-	if !ok {
-		return []string{"unknown validation error"}
-	}
-
-	details := make([]string, len(errs))
-	for i, fe := range errs {
-		details[i] = fieldErrorMessage(fe)
-	}
-
-	return details
 }
 
 func fieldErrorMessage(fe validator.FieldError) string {

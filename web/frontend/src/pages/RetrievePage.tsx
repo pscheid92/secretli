@@ -8,13 +8,13 @@ import {
   ApiError,
   deleteSecret,
   getSecretMetadata,
-  retrieveSecret,
   retrieveSecretRange,
   type SecretMetadataResponse,
   startRetrievalSession,
 } from "../lib/api";
 import {
   type BundleManifest,
+  cachingRangeFetcher,
   type DecryptedBundleFile,
   DOWNLOAD_ALL_BUNDLE_COALESCED_PLAINTEXT_BYTES,
   decryptBundleFiles,
@@ -232,38 +232,39 @@ export default function RetrievePage() {
     const baseEncoded = baseKeySet.getEncoded();
     const blobEncoded = keySet.getEncoded();
 
-    if (clientMeta.type === "bundle") {
-      const session = await startRetrievalSession(baseEncoded.publicID, blobEncoded.blobToken);
-      const fetchRange = (start: number, end: number) =>
-        retrieveSecretRange(baseEncoded.publicID, session.session_token, start, end);
-      const { manifest } = await readBundleManifest(fetchRange, keySet, session.blob_size);
-      setDownloadedFiles(null);
-      setState({
-        stage: "bundle-ready",
-        manifest,
-        keySet,
-        publicID: baseEncoded.publicID,
-        sessionToken: session.session_token,
-        sessionExpiresAt: session.expires_at,
-        burnAfterRead: session.burn_after_read,
-        shareSecret,
-        deletionToken,
-      });
+    if (clientMeta.type !== "text" && clientMeta.type !== "bundle") {
+      setState({ stage: "error", message: "This link uses an unsupported format." });
       return;
     }
 
-    if (clientMeta.type !== "text") {
-      setState({
-        stage: "error",
-        message: "This link uses an unsupported file format.",
-      });
+    // Text and files share one storage format, so both are read the same way:
+    // start a session, then read the encrypted manifest.
+    const session = await startRetrievalSession(baseEncoded.publicID, blobEncoded.blobToken);
+    const fetchRange = await cachingRangeFetcher(
+      (start: number, end: number) =>
+        retrieveSecretRange(baseEncoded.publicID, session.session_token, start, end),
+      session.blob_size,
+    );
+    const { manifest } = await readBundleManifest(fetchRange, keySet, session.blob_size);
+
+    if (clientMeta.type === "text") {
+      const [only] = await decryptBundleFiles(manifest.files, keySet, fetchRange);
+      setState({ stage: "decrypted", text: await only.blob.text(), shareSecret, deletionToken });
       return;
     }
 
-    const response = await retrieveSecret(baseEncoded.publicID, blobEncoded.blobToken);
-    const decrypted = await keySet.decryptBlob(response.blob);
-    const text = new TextDecoder().decode(decrypted);
-    setState({ stage: "decrypted", text, shareSecret, deletionToken });
+    setDownloadedFiles(null);
+    setState({
+      stage: "bundle-ready",
+      manifest,
+      keySet,
+      publicID: baseEncoded.publicID,
+      sessionToken: session.session_token,
+      sessionExpiresAt: session.expires_at,
+      burnAfterRead: session.burn_after_read,
+      shareSecret,
+      deletionToken,
+    });
   }
 
   function handleRevealError(err: unknown) {

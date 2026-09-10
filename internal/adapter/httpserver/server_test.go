@@ -112,6 +112,50 @@ func TestApp_TrustedProxyKeysRateLimitOnForwardedClient(t *testing.T) {
 	}
 }
 
+func TestApp_SessionOperationsDoNotSpendTheCreateBudget(t *testing.T) {
+	app := newTestApp(t, config.Config{MaxFileSize: 1 << 20})
+
+	// Ten sessions exhaust the create budget.
+	sessions := make([]struct{ id, token string }, 0, 10)
+	for i := 0; i < 10; i++ {
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/secrets/uploads", bytes.NewReader(createSessionBody(t, fmt.Sprintf("budget-%d", i))))
+		req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+		rec := httptest.NewRecorder()
+		app.echo.ServeHTTP(rec, req)
+		if rec.Code != http.StatusCreated {
+			t.Fatalf("create %d: status = %d, want %d", i, rec.Code, http.StatusCreated)
+		}
+		var body struct {
+			SessionID   string `json:"session_id"`
+			UploadToken string `json:"upload_token"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+			t.Fatalf("decode create %d: %v", i, err)
+		}
+		sessions = append(sessions, struct{ id, token string }{body.SessionID, body.UploadToken})
+	}
+
+	// Each of those sessions can still be inspected and aborted: those routes
+	// have their own budget.
+	for i, session := range sessions {
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/secrets/uploads/"+session.id, nil)
+		req.Header.Set(echo.HeaderAuthorization, "Bearer "+session.token)
+		rec := httptest.NewRecorder()
+		app.echo.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status %d: status = %d, want %d", i, rec.Code, http.StatusOK)
+		}
+
+		req = httptest.NewRequest(http.MethodDelete, "/api/v1/secrets/uploads/"+session.id, nil)
+		req.Header.Set(echo.HeaderAuthorization, "Bearer "+session.token)
+		rec = httptest.NewRecorder()
+		app.echo.ServeHTTP(rec, req)
+		if rec.Code != http.StatusNoContent {
+			t.Fatalf("abort %d: status = %d, want %d", i, rec.Code, http.StatusNoContent)
+		}
+	}
+}
+
 func TestApp_RejectsOversizedJSONBody(t *testing.T) {
 	app := newTestApp(t, config.Config{MaxFileSize: 1 << 30})
 

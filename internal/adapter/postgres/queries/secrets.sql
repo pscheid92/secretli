@@ -54,7 +54,6 @@ SELECT s.public_id
 FROM secrets AS s
 WHERE s.burn_after_read = true
   AND s.retrieved_at IS NOT NULL
-  AND s.retrieved_at < sqlc.arg(retrieved_before)
   AND s.expires_at >= sqlc.arg(now_at)
   AND NOT EXISTS (
       SELECT 1

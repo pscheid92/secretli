@@ -334,7 +334,7 @@ func TestCORSMiddlewareAllowsRangeAPIHeaders(t *testing.T) {
 	}
 
 	exposeHeaders := rec.Header().Get(echo.HeaderAccessControlExposeHeaders)
-	for _, header := range []string{echo.HeaderXRequestID, "Content-Range", "Accept-Ranges", HeaderBurnAfterRead} {
+	for _, header := range []string{echo.HeaderXRequestID, "Content-Range", "Accept-Ranges", "Content-Length"} {
 		if !headerListContains(exposeHeaders, header) {
 			t.Fatalf("Expose-Headers %q missing %q", exposeHeaders, header)
 		}
