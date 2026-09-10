@@ -1,6 +1,6 @@
 import { BUNDLE_RECORD_OVERHEAD_BYTES, type KeySet } from "./encryption";
 
-export const BUNDLE_V2_FOOTER_LENGTH = 64;
+export const BUNDLE_FOOTER_LENGTH = 64;
 export const DEFAULT_BUNDLE_CHUNK_SIZE = 4 * 1024 * 1024;
 export const MAX_BUNDLE_COALESCED_PLAINTEXT_BYTES = 16 * 1024 * 1024;
 export const DOWNLOAD_ALL_BUNDLE_COALESCED_PLAINTEXT_BYTES = 64 * 1024 * 1024;
@@ -14,8 +14,8 @@ export const SMALL_BUNDLE_CACHE_BYTES = 1024 * 1024;
 
 export { BUNDLE_RECORD_OVERHEAD_BYTES };
 
-const BUNDLE_V2_MAGIC = new Uint8Array([0x53, 0x4c, 0x42, 0x4e, 0x44, 0x4c, 0x32, 0x00]);
-const BUNDLE_V2_VERSION = 2;
+const BUNDLE_MAGIC = new Uint8Array([0x53, 0x4c, 0x42, 0x4e, 0x44, 0x4c, 0x32, 0x00]);
+const BUNDLE_VERSION = 2;
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();
 
@@ -42,14 +42,14 @@ export interface BundleManifest {
   readonly files: BundleFile[];
 }
 
-export interface BundleV2Footer {
+export interface BundleFooter {
   readonly version: 2;
   readonly footerLength: number;
   readonly manifestLength: number;
   readonly manifestSha256: string;
 }
 
-export interface BundleV2RecordPlan {
+export interface BundleRecordPlan {
   readonly fileIndex: number;
   readonly chunkIndex: number;
   readonly start: number;
@@ -59,11 +59,11 @@ export interface BundleV2RecordPlan {
   readonly plaintextSize: number;
 }
 
-export interface BundleV2Plan {
+export interface BundlePlan {
   readonly bundleName: string;
   readonly files: File[];
   readonly manifest: BundleManifest;
-  readonly records: BundleV2RecordPlan[];
+  readonly records: BundleRecordPlan[];
   readonly dataSize: number;
   readonly encryptedManifestLength: number;
   readonly totalSize: number;
@@ -93,44 +93,13 @@ interface BundleChunkRef {
   readonly chunk: BundleChunk;
 }
 
-export async function createEncryptedBundle(
-  files: File[],
-  keySet: KeySet,
-  bundleName = defaultBundleName(files),
-): Promise<{ blob: Blob; manifest: BundleManifest }> {
-  return createEncryptedBundleV2(files, keySet, bundleName);
-}
-
-export async function createEncryptedBundleV2(
-  files: File[],
-  keySet: KeySet,
-  bundleName = defaultBundleName(files),
-): Promise<{ blob: Blob; manifest: BundleManifest; footer: BundleV2Footer }> {
-  const plan = planEncryptedBundleV2(files, bundleName);
-  const { parts, manifest, encryptedManifest, footer } = await encryptBundleV2Plan(plan, keySet);
-
-  return {
-    blob: new Blob(
-      [...parts, toArrayBuffer(encryptedManifest), toArrayBuffer(buildBundleV2Footer(footer))],
-      {
-        type: "application/octet-stream",
-      },
-    ),
-    manifest,
-    footer,
-  };
-}
-
-export function planEncryptedBundleV2(
-  files: File[],
-  bundleName = defaultBundleName(files),
-): BundleV2Plan {
+export function planBundle(files: File[], bundleName = defaultBundleName(files)): BundlePlan {
   if (files.length === 0) {
     throw new Error("bundle must contain at least one file");
   }
 
   let offset = 0;
-  const records: BundleV2RecordPlan[] = [];
+  const records: BundleRecordPlan[] = [];
   const bundleFiles: BundleFile[] = [];
 
   for (const [fileIndex, file] of files.entries()) {
@@ -177,55 +146,8 @@ export function planEncryptedBundleV2(
     records,
     dataSize: offset,
     encryptedManifestLength,
-    totalSize: offset + encryptedManifestLength + BUNDLE_V2_FOOTER_LENGTH,
+    totalSize: offset + encryptedManifestLength + BUNDLE_FOOTER_LENGTH,
   };
-}
-
-export async function encryptBundleV2Plan(
-  plan: BundleV2Plan,
-  keySet: KeySet,
-): Promise<{
-  parts: ArrayBuffer[];
-  manifest: BundleManifest;
-  encryptedManifest: Uint8Array;
-  footer: BundleV2Footer;
-}> {
-  const parts: ArrayBuffer[] = [];
-
-  for (const record of plan.records) {
-    const file = plan.files[record.fileIndex];
-    const plaintext = new Uint8Array(await file.slice(record.start, record.end).arrayBuffer());
-    if (plaintext.length !== record.plaintextSize) {
-      throw new Error("bundle file changed during encryption");
-    }
-
-    const encrypted = keySet.encryptBundlePart(
-      plaintext,
-      chunkAad(record.fileIndex, record.chunkIndex, record.plaintextSize),
-    );
-    if (encrypted.length !== record.length) {
-      throw new Error("bundle record size mismatch");
-    }
-    parts.push(toArrayBuffer(encrypted));
-  }
-
-  const manifest = plan.manifest;
-  const encryptedManifest = keySet.encryptBundlePart(
-    textEncoder.encode(JSON.stringify(manifest)),
-    manifestAadV2(),
-  );
-  if (encryptedManifest.length !== plan.encryptedManifestLength) {
-    throw new Error("bundle manifest size mismatch");
-  }
-
-  const footer: BundleV2Footer = {
-    version: 2,
-    footerLength: BUNDLE_V2_FOOTER_LENGTH,
-    manifestLength: encryptedManifest.length,
-    manifestSha256: await sha256Hex(encryptedManifest),
-  };
-
-  return { parts, manifest, encryptedManifest, footer };
 }
 
 /**
@@ -251,35 +173,19 @@ export async function readBundleManifest(
   fetchRange: BundleRangeFetcher,
   keySet: KeySet,
   bundleSize: number,
-): Promise<{ footer: BundleV2Footer; manifest: BundleManifest }> {
-  if (bundleSize < BUNDLE_V2_FOOTER_LENGTH) {
+): Promise<{ footer: BundleFooter; manifest: BundleManifest }> {
+  if (bundleSize < BUNDLE_FOOTER_LENGTH) {
     throw new Error("invalid bundle footer");
   }
 
-  const footerStart = bundleSize - BUNDLE_V2_FOOTER_LENGTH;
-  const footerBytes = await fetchRange(footerStart, bundleSize - 1);
-  return readBundleManifestV2(fetchRange, keySet, bundleSize, footerBytes);
-}
-
-export async function readBundleManifestV2(
-  fetchRange: BundleRangeFetcher,
-  keySet: KeySet,
-  bundleSize: number,
-  footerBytes?: Uint8Array,
-): Promise<{ footer: BundleV2Footer; manifest: BundleManifest }> {
-  if (bundleSize < BUNDLE_V2_FOOTER_LENGTH) {
-    throw new Error("invalid bundle footer");
-  }
-
-  const footer =
-    footerBytes === undefined
-      ? parseBundleV2Footer(await fetchRange(bundleSize - BUNDLE_V2_FOOTER_LENGTH, bundleSize - 1))
-      : parseBundleV2Footer(footerBytes);
+  const footer = parseBundleFooter(
+    await fetchRange(bundleSize - BUNDLE_FOOTER_LENGTH, bundleSize - 1),
+  );
   if (footer.manifestLength > MAX_BUNDLE_MANIFEST_BYTES + BUNDLE_RECORD_OVERHEAD_BYTES) {
     throw new Error("bundle manifest is too large");
   }
 
-  const manifestOffset = bundleSize - BUNDLE_V2_FOOTER_LENGTH - footer.manifestLength;
+  const manifestOffset = bundleSize - BUNDLE_FOOTER_LENGTH - footer.manifestLength;
   if (manifestOffset < 0) {
     throw new Error("invalid bundle footer");
   }
@@ -291,9 +197,9 @@ export async function readBundleManifestV2(
     throw new Error("invalid bundle manifest hash");
   }
 
-  const manifestPlaintext = keySet.decryptBundlePart(encryptedManifest, manifestAadV2());
+  const manifestPlaintext = keySet.decryptBundlePart(encryptedManifest, manifestAad());
   const manifest = JSON.parse(textDecoder.decode(manifestPlaintext)) as BundleManifest;
-  validateManifestV2(manifest, manifestOffset, bundleSize);
+  validateManifest(manifest, manifestOffset, bundleSize);
   return { footer, manifest };
 }
 
@@ -359,6 +265,11 @@ export async function decryptBundleFiles(
   return files.map((file, index) => ({ file, blob: blobsByFile[index] }));
 }
 
+/** Total plaintext size of every file in a bundle. */
+export function manifestTotalSize(manifest: BundleManifest): number {
+  return manifest.files.reduce((sum, file) => sum + file.size, 0);
+}
+
 export function estimateBundleEncryptedSize(fileSizes: number[]): number {
   const chunkCount = fileSizes.reduce(
     (count, size) => count + Math.ceil(size / DEFAULT_BUNDLE_CHUNK_SIZE),
@@ -370,7 +281,7 @@ export function estimateBundleEncryptedSize(fileSizes: number[]): number {
     chunkCount * BUNDLE_RECORD_OVERHEAD_BYTES +
     MAX_BUNDLE_MANIFEST_BYTES +
     BUNDLE_RECORD_OVERHEAD_BYTES +
-    BUNDLE_V2_FOOTER_LENGTH
+    BUNDLE_FOOTER_LENGTH
   );
 }
 
@@ -386,12 +297,12 @@ export function bundleRecordAad(
   return chunkAad(fileIndex, chunkIndex, plaintextSize);
 }
 
-export function bundleManifestAadV2(): Uint8Array {
-  return manifestAadV2();
+export function bundleManifestAad(): Uint8Array {
+  return manifestAad();
 }
 
-export function parseBundleV2Footer(bytes: Uint8Array): BundleV2Footer {
-  if (bytes.length !== BUNDLE_V2_FOOTER_LENGTH || !hasBundleV2FooterMagic(bytes)) {
+export function parseBundleFooter(bytes: Uint8Array): BundleFooter {
+  if (bytes.length !== BUNDLE_FOOTER_LENGTH || !hasBundleFooterMagic(bytes)) {
     throw new Error("invalid bundle footer");
   }
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
@@ -400,8 +311,8 @@ export function parseBundleV2Footer(bytes: Uint8Array): BundleV2Footer {
   const manifestLength = getUint64(view, 16);
   const manifestSha256 = bytesToHex(bytes.slice(24, 56));
   if (
-    version !== BUNDLE_V2_VERSION ||
-    footerLength !== BUNDLE_V2_FOOTER_LENGTH ||
+    version !== BUNDLE_VERSION ||
+    footerLength !== BUNDLE_FOOTER_LENGTH ||
     manifestLength <= BUNDLE_RECORD_OVERHEAD_BYTES
   ) {
     throw new Error("invalid bundle footer");
@@ -409,19 +320,19 @@ export function parseBundleV2Footer(bytes: Uint8Array): BundleV2Footer {
   return { version: 2, footerLength, manifestLength, manifestSha256 };
 }
 
-export function buildBundleV2Footer(footer: BundleV2Footer): Uint8Array {
-  if (footer.version !== 2 || footer.footerLength !== BUNDLE_V2_FOOTER_LENGTH) {
+export function buildBundleFooter(footer: BundleFooter): Uint8Array {
+  if (footer.version !== 2 || footer.footerLength !== BUNDLE_FOOTER_LENGTH) {
     throw new Error("invalid bundle footer");
   }
   if (!isHexSHA256(footer.manifestSha256)) {
     throw new Error("invalid bundle footer");
   }
 
-  const bytes = new Uint8Array(BUNDLE_V2_FOOTER_LENGTH);
-  bytes.set(BUNDLE_V2_MAGIC, 0);
+  const bytes = new Uint8Array(BUNDLE_FOOTER_LENGTH);
+  bytes.set(BUNDLE_MAGIC, 0);
   const view = new DataView(bytes.buffer);
-  view.setUint32(8, BUNDLE_V2_VERSION, false);
-  view.setUint32(12, BUNDLE_V2_FOOTER_LENGTH, false);
+  view.setUint32(8, BUNDLE_VERSION, false);
+  view.setUint32(12, BUNDLE_FOOTER_LENGTH, false);
   setUint64(view, 16, footer.manifestLength);
   bytes.set(hexToBytes(footer.manifestSha256), 24);
   return bytes;
@@ -431,7 +342,7 @@ function toArrayBuffer(bytes: Uint8Array): ArrayBuffer {
   return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
 }
 
-function validateManifestV2(manifest: BundleManifest, manifestOffset: number, bundleSize: number) {
+function validateManifest(manifest: BundleManifest, manifestOffset: number, bundleSize: number) {
   if (
     manifest.version !== 2 ||
     manifest.chunkSize !== DEFAULT_BUNDLE_CHUNK_SIZE ||
@@ -439,7 +350,7 @@ function validateManifestV2(manifest: BundleManifest, manifestOffset: number, bu
     !Array.isArray(manifest.files) ||
     manifest.files.length === 0 ||
     manifestOffset < 0 ||
-    manifestOffset + BUNDLE_V2_FOOTER_LENGTH > bundleSize
+    manifestOffset + BUNDLE_FOOTER_LENGTH > bundleSize
   ) {
     throw new Error("invalid bundle manifest");
   }
@@ -575,7 +486,7 @@ function rangeEnd(offset: number, length: number): number {
   return end;
 }
 
-function manifestAadV2(): Uint8Array {
+function manifestAad(): Uint8Array {
   return textEncoder.encode("manifest:v2");
 }
 
@@ -595,12 +506,12 @@ function defaultBundleName(files: File[]): string {
   return `Secretli bundle (${files.length} files)`;
 }
 
-function hasBundleV2FooterMagic(bytes: Uint8Array): boolean {
-  if (bytes.length !== BUNDLE_V2_FOOTER_LENGTH) {
+function hasBundleFooterMagic(bytes: Uint8Array): boolean {
+  if (bytes.length !== BUNDLE_FOOTER_LENGTH) {
     return false;
   }
-  for (let i = 0; i < BUNDLE_V2_MAGIC.length; i++) {
-    if (bytes[i] !== BUNDLE_V2_MAGIC[i]) {
+  for (let i = 0; i < BUNDLE_MAGIC.length; i++) {
+    if (bytes[i] !== BUNDLE_MAGIC[i]) {
       return false;
     }
   }

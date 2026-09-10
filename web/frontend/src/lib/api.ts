@@ -219,20 +219,15 @@ export interface StartUploadSessionParams {
   readonly blob_size: number;
 }
 
-export interface UploadSessionStatus {
+export interface StartUploadSessionResponse {
   readonly session_id: string;
-  readonly upload_token?: string;
+  readonly upload_token: string;
   readonly public_id: string;
   readonly part_size: number;
   readonly blob_size: number;
   readonly expires_at: string;
   readonly upload_expires_at: string;
   readonly state: "pending" | "completed" | "aborted";
-  readonly uploaded_parts: UploadSessionPart[];
-}
-
-export interface StartUploadSessionResponse extends UploadSessionStatus {
-  readonly upload_token: string;
 }
 
 export interface CompleteUploadSessionResponse {
@@ -246,16 +241,6 @@ export function startUploadSession(
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(params),
-  });
-}
-
-export function getUploadSession(
-  sessionID: string,
-  uploadToken: string,
-): Promise<UploadSessionStatus> {
-  return request(`/api/v1/secrets/uploads/${sessionID}`, {
-    method: "GET",
-    headers: { Authorization: `Bearer ${uploadToken}` },
   });
 }
 

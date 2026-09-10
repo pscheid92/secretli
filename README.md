@@ -34,11 +34,10 @@ The server only ever sees the public ID, metadata/blob access tokens, deletion t
 The fastest way to run everything locally:
 
 ```bash
-cd docker
-docker compose up -d
+docker compose -f docker/docker-compose.yml --profile app up -d
 ```
 
-This starts the app, PostgreSQL, and SeaweedFS. The app is available at `http://localhost:8080`.
+This starts the app, PostgreSQL, and SeaweedFS. The app is available at `http://localhost:8080`. Without `--profile app` you get just the two backing services, which is what you want when running the app from source.
 
 ### Development Setup
 
@@ -46,7 +45,7 @@ Prerequisites: Go 1.27+, Node.js 24+, pnpm 10, Docker (for Postgres and SeaweedF
 
 ```bash
 # Start infrastructure
-cd docker && docker compose -f docker-compose.dev.yml up -d && cd ..
+docker compose -f docker/docker-compose.yml up -d
 
 # Configure environment
 cp .env.example .env

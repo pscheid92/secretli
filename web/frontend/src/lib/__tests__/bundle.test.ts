@@ -1,16 +1,16 @@
 import {
-  BUNDLE_V2_FOOTER_LENGTH,
+  BUNDLE_FOOTER_LENGTH,
   type BundleFile,
   cachingRangeFetcher,
-  createEncryptedBundle,
   DEFAULT_BUNDLE_CHUNK_SIZE,
   DOWNLOAD_ALL_BUNDLE_COALESCED_PLAINTEXT_BYTES,
   decryptBundleFiles,
-  parseBundleV2Footer,
-  planEncryptedBundleV2,
+  parseBundleFooter,
+  planBundle,
   readBundleManifest,
 } from "../bundle";
 import { KeySet } from "../encryption";
+import { createEncryptedBundle } from "./bundleFixture";
 
 async function blobBytes(blob: Blob): Promise<Uint8Array> {
   return new Uint8Array(await blob.arrayBuffer());
@@ -163,8 +163,8 @@ describe("encrypted bundles", () => {
     const file = new File(["hello bundle"], "notes.txt", { type: "text/plain" });
     const { blob } = await createEncryptedBundle([file], keySet);
     const bytes = await blobBytes(blob);
-    const footer = parseBundleV2Footer(bytes.slice(bytes.length - BUNDLE_V2_FOOTER_LENGTH));
-    const manifestOffset = bytes.length - BUNDLE_V2_FOOTER_LENGTH - footer.manifestLength;
+    const footer = parseBundleFooter(bytes.slice(bytes.length - BUNDLE_FOOTER_LENGTH));
+    const manifestOffset = bytes.length - BUNDLE_FOOTER_LENGTH - footer.manifestLength;
     const tampered = bytes.slice();
     tampered[manifestOffset] ^= 1;
     const fetchRange = async (start: number, end: number) => tampered.slice(start, end + 1);
@@ -179,11 +179,11 @@ describe("encrypted bundles", () => {
     const file = new File(["hello bundle"], "notes.txt", { type: "text/plain" });
     const { blob } = await createEncryptedBundle([file], keySet);
     const bytes = await blobBytes(blob);
-    const footerBytes = bytes.slice(bytes.length - BUNDLE_V2_FOOTER_LENGTH);
+    const footerBytes = bytes.slice(bytes.length - BUNDLE_FOOTER_LENGTH);
     const malformedVersion = footerBytes.slice();
     new DataView(malformedVersion.buffer).setUint32(8, 99, false);
 
-    expect(() => parseBundleV2Footer(malformedVersion)).toThrow("invalid bundle footer");
+    expect(() => parseBundleFooter(malformedVersion)).toThrow("invalid bundle footer");
   });
 
   it("round-trips multiple files without storing a zip", async () => {
@@ -251,7 +251,7 @@ describe("encrypted bundles", () => {
 
     expect(JSON.stringify(manifest)).not.toContain("sha256");
     // The planned size is exact, so the server can validate the declared size.
-    const plan = planEncryptedBundleV2([file]);
+    const plan = planBundle([file]);
     expect(plan.totalSize).toBe(bytes.length);
   });
 

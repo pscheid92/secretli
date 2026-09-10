@@ -11,14 +11,14 @@ import {
   uploadSessionPart,
 } from "./api";
 import {
-  BUNDLE_V2_FOOTER_LENGTH,
+  BUNDLE_FOOTER_LENGTH,
   type BundleManifest,
-  type BundleV2Plan,
-  buildBundleV2Footer,
-  bundleManifestAadV2,
+  type BundlePlan,
+  buildBundleFooter,
+  bundleManifestAad,
   bundleNameForFiles,
   bundleRecordAad,
-  planEncryptedBundleV2,
+  planBundle,
   sha256Hex,
 } from "./bundle";
 import type { EncodedKeySet, KeySet } from "./encryption";
@@ -76,7 +76,7 @@ export async function uploadMultipartBundle(
   throwIfCancelled(params.signal);
 
   const bundleName = bundleNameForFiles(params.files);
-  const plan = planEncryptedBundleV2(params.files, bundleName);
+  const plan = planBundle(params.files, bundleName);
   const session = await createUploadSession(params, plan.totalSize, bundleName);
   const encoded = params.baseKeySet.getEncoded();
 
@@ -102,7 +102,7 @@ export async function uploadMultipartBundle(
 
 async function encryptAndUploadParts(
   params: MultipartBundleUploadParams,
-  plan: BundleV2Plan,
+  plan: BundlePlan,
   session: StartUploadSessionResponse,
 ): Promise<BundleManifest> {
   const uploader = new UploadQueue(MULTIPART_UPLOAD_CONCURRENCY);
@@ -188,14 +188,14 @@ async function encryptAndUploadParts(
   const manifest = plan.manifest;
   const encryptedManifest = params.bundleKeySet.encryptBundlePart(
     new TextEncoder().encode(JSON.stringify(manifest)),
-    bundleManifestAadV2(),
+    bundleManifestAad(),
   );
   if (encryptedManifest.length !== plan.encryptedManifestLength) {
     throw new Error("bundle manifest size mismatch");
   }
-  const footer = buildBundleV2Footer({
+  const footer = buildBundleFooter({
     version: 2,
-    footerLength: BUNDLE_V2_FOOTER_LENGTH,
+    footerLength: BUNDLE_FOOTER_LENGTH,
     manifestLength: encryptedManifest.length,
     manifestSha256: await sha256Hex(encryptedManifest),
   });

@@ -4,7 +4,6 @@ import {
   completeUploadSession,
   deleteSecret,
   getSecretMetadata,
-  getUploadSession,
   isTransientStatus,
   MAX_TRANSIENT_ATTEMPTS,
   retrieveSecretRange,
@@ -253,29 +252,6 @@ describe("upload sessions", () => {
     expectHeader(call[1], "Content-Type", "application/json");
     expectHeader(call[1], "X-Request-ID");
     expect(JSON.parse(call[1]?.body as string)).toEqual(params);
-  });
-
-  it("retrieves upload session status with bearer auth", async () => {
-    const response = {
-      session_id: "session-id",
-      public_id: "pub-id",
-      part_size: 32 * 1024 * 1024,
-      blob_size: 70 * 1024 * 1024,
-      expires_at: "2026-05-15T12:00:00Z",
-      upload_expires_at: "2026-05-16T12:00:00Z",
-      state: "pending",
-      uploaded_parts: [{ part_number: 1, offset: 0, size: 5, sha256: "abc", etag: "etag-1" }],
-    };
-    const fetchSpy = vi
-      .spyOn(globalThis, "fetch")
-      .mockResolvedValue(new Response(JSON.stringify(response), { status: 200 }));
-
-    await expect(getUploadSession("session-id", "upload-token")).resolves.toEqual(response);
-    const call = fetchSpy.mock.calls[0];
-    expect(call[0]).toBe("/api/v1/secrets/uploads/session-id");
-    expect(call[1]).toEqual(expect.objectContaining({ method: "GET" }));
-    expectHeader(call[1], "Authorization", "Bearer upload-token");
-    expectHeader(call[1], "X-Request-ID");
   });
 
   it("uploads a multipart part with offset, size, and hash headers", async () => {

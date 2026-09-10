@@ -1,5 +1,10 @@
+# Local infrastructure, plus the app itself behind the "app" profile.
+#
+#   docker compose -f docker/docker-compose.yml up -d                    # Postgres + SeaweedFS, for `go run .`
+#   docker compose -f docker/docker-compose.yml --profile app up -d      # everything, including the app
 services:
   app:
+    profiles: ["app"]
     build:
       context: ..
       dockerfile: Dockerfile

@@ -2,16 +2,19 @@ package httpserver
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/labstack/echo/v4"
 	"github.com/prometheus/client_golang/prometheus"
 
+	"github.com/pscheid92/secretli/internal/domain"
 	"github.com/pscheid92/secretli/internal/platform/config"
 )
 
@@ -20,6 +23,14 @@ import (
 type fullMockRepo struct {
 	*mockSecretRepo
 	*uploadMockRepo
+}
+
+func (fullMockRepo) AbortExpiredUploadSessions(
+	_ context.Context,
+	_ time.Time,
+	_ func(*domain.UploadSession, bool) error,
+) (int64, error) {
+	return 0, nil
 }
 
 func newTestApp(t *testing.T, cfg config.Config) *App {
@@ -135,20 +146,11 @@ func TestApp_SessionOperationsDoNotSpendTheCreateBudget(t *testing.T) {
 		sessions = append(sessions, struct{ id, token string }{body.SessionID, body.UploadToken})
 	}
 
-	// Each of those sessions can still be inspected and aborted: those routes
-	// have their own budget.
+	// Each of those sessions can still be aborted: that route has its own budget.
 	for i, session := range sessions {
-		req := httptest.NewRequest(http.MethodGet, "/api/v1/secrets/uploads/"+session.id, nil)
+		req := httptest.NewRequest(http.MethodDelete, "/api/v1/secrets/uploads/"+session.id, nil)
 		req.Header.Set(echo.HeaderAuthorization, "Bearer "+session.token)
 		rec := httptest.NewRecorder()
-		app.echo.ServeHTTP(rec, req)
-		if rec.Code != http.StatusOK {
-			t.Fatalf("status %d: status = %d, want %d", i, rec.Code, http.StatusOK)
-		}
-
-		req = httptest.NewRequest(http.MethodDelete, "/api/v1/secrets/uploads/"+session.id, nil)
-		req.Header.Set(echo.HeaderAuthorization, "Bearer "+session.token)
-		rec = httptest.NewRecorder()
 		app.echo.ServeHTTP(rec, req)
 		if rec.Code != http.StatusNoContent {
 			t.Fatalf("abort %d: status = %d, want %d", i, rec.Code, http.StatusNoContent)

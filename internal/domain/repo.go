@@ -26,6 +26,14 @@ type UploadSessionRepo interface {
 	ClearUploadParts(ctx context.Context, sessionID string) error
 }
 
+// Repo is the whole datastore, as wired at start-up. Consumers take the
+// narrower interface they actually need.
+type Repo interface {
+	SecretRepo
+	UploadSessionRepo
+	UploadSessionCleanupRepo
+}
+
 type UploadSessionCleanupRepo interface {
 	// AbortExpiredUploadSessions marks expired pending sessions aborted. The
 	// callback runs before each row is updated and receives whether an active

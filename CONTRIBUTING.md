@@ -12,7 +12,7 @@ git clone https://github.com/pscheid92/secretli.git
 cd secretli
 
 # Start Postgres and SeaweedFS
-cd docker && docker compose -f docker-compose.dev.yml up -d && cd ..
+docker compose -f docker/docker-compose.yml up -d
 
 # Configure environment
 cp .env.example .env
