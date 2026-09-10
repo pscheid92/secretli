@@ -1,9 +1,9 @@
 {
-  "$schema": "https://biomejs.dev/schemas/2.0.0/schema.json",
+  "$schema": "https://biomejs.dev/schemas/2.5.13/schema.json",
   "linter": {
     "enabled": true,
     "rules": {
-      "recommended": true,
+      "preset": "recommended",
       "style": {
         "noNonNullAssertion": "off"
       },
@@ -11,7 +11,7 @@
         "noAutofocus": "off",
         "useSemanticElements": "off"
       },
-      "nursery": {
+      "correctness": {
         "useUniqueElementIds": "off"
       }
     }
@@ -31,5 +31,10 @@
   },
   "files": {
     "includes": ["src/**", "e2e/**", "*.ts", "*.json"]
+  },
+  "css": {
+    "parser": {
+      "tailwindDirectives": true
+    }
   }
 }
