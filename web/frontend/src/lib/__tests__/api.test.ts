@@ -7,8 +7,11 @@ import {
   deleteSecret,
   getSecretMetadata,
   getUploadSession,
+  isTransientStatus,
+  MAX_TRANSIENT_ATTEMPTS,
   retrieveSecret,
   retrieveSecretRange,
+  retryDelayMs,
   type StartUploadSessionParams,
   startRetrievalSession,
   startUploadSession,
@@ -242,6 +245,52 @@ describe("retrieval sessions", () => {
       status: 200,
       requestId: expect.any(String),
     });
+  });
+
+  it("retries a range request after a transient failure", async () => {
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockRejectedValueOnce(new TypeError("connection reset"))
+      .mockResolvedValueOnce(new Response("oops", { status: 503, headers: { "Retry-After": "0" } }))
+      .mockResolvedValueOnce(new Response(new Uint8Array([9, 8, 7]), { status: 206 }));
+
+    const result = await retrieveSecretRange("pub-id", "session-token", 0, 2);
+    expect(result).toEqual(new Uint8Array([9, 8, 7]));
+    expect(fetchSpy).toHaveBeenCalledTimes(3);
+  });
+
+  it("does not retry a range request that failed with a client error", async () => {
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(
+        new Response(JSON.stringify({ error: "invalid session" }), { status: 403 }),
+      );
+
+    await expect(retrieveSecretRange("pub-id", "session-token", 0, 2)).rejects.toMatchObject({
+      status: 403,
+    });
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("gives up after the last transient attempt", async () => {
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(new Response("busy", { status: 429, headers: { "Retry-After": "0" } }));
+
+    await expect(retrieveSecretRange("pub-id", "session-token", 0, 2)).rejects.toMatchObject({
+      status: 429,
+    });
+    expect(fetchSpy).toHaveBeenCalledTimes(MAX_TRANSIENT_ATTEMPTS);
+  });
+
+  it("classifies transient statuses and honours Retry-After", () => {
+    expect([0, 429, 500, 503].every(isTransientStatus)).toBe(true);
+    expect([400, 403, 404, 409, 413].some(isTransientStatus)).toBe(false);
+    expect(retryDelayMs(1)).toBe(250);
+    expect(retryDelayMs(2)).toBe(500);
+    expect(retryDelayMs(1, "2")).toBe(2000);
+    expect(retryDelayMs(1, "9999")).toBe(30_000);
+    expect(retryDelayMs(3, "garbage")).toBe(750);
   });
 });
 

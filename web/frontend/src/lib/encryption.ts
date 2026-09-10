@@ -26,6 +26,7 @@ const BLOB_V2_TAG = 0x02;
 const POLY1305_TAG_LENGTH = 16;
 
 export const ENCRYPTED_BLOB_OVERHEAD_BYTES = 1 + V2_NONCE_LENGTH + POLY1305_TAG_LENGTH;
+export const SHARE_SECRET_LENGTH = 32;
 
 function buildAad(publicID: Uint8Array, purpose: "meta" | "blob" | "bundle"): Uint8Array {
   const suffix = new TextEncoder().encode(purpose);
@@ -80,6 +81,9 @@ export class KeySet {
 
   static async fromShareSecret(encoded: string, password?: string): Promise<KeySet> {
     const shareSecretBytes = base64UrlDecode(encoded);
+    if (shareSecretBytes.length !== SHARE_SECRET_LENGTH) {
+      throw new Error("invalid share secret");
+    }
     const baseKeys = deriveBaseKeys(shareSecretBytes);
     const blobMaterial = password
       ? derivePasswordMaterial(shareSecretBytes, password)
@@ -161,11 +165,6 @@ export class KeySet {
     const aad = buildAad(this.publicID, "blob");
     const cipher = xchacha20poly1305(this.blobKey, nonce, aad);
     return cipher.decrypt(ciphertext);
-  }
-
-  encryptBundlePart(data: Uint8Array, aadSuffix: Uint8Array): Uint8Array {
-    const nonce = crypto.getRandomValues(new Uint8Array(V2_NONCE_LENGTH));
-    return this.encryptBundlePartWithNonce(data, aadSuffix, nonce);
   }
 
   encryptBundlePartDeterministic(

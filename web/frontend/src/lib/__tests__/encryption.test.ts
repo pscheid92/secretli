@@ -20,6 +20,18 @@ describe("KeySet", () => {
     });
   });
 
+  describe("fromShareSecret", () => {
+    it("rejects share secrets that are not 32 bytes", async () => {
+      await expect(KeySet.fromShareSecret(base64UrlEncode(new Uint8Array(31)))).rejects.toThrow(
+        "invalid share secret",
+      );
+      await expect(KeySet.fromShareSecret("")).rejects.toThrow("invalid share secret");
+      await expect(
+        KeySet.fromShareSecret(base64UrlEncode(new Uint8Array(32))),
+      ).resolves.toBeInstanceOf(KeySet);
+    });
+  });
+
   describe("encryptBlob/decryptBlob", () => {
     it("round-trips text as bytes", async () => {
       const ks = await KeySet.generateRandom();

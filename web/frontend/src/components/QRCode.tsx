@@ -1,4 +1,3 @@
-import QRCodeLib from "qrcode";
 import { useEffect, useState } from "react";
 
 interface QRCodeProps {
@@ -9,9 +8,18 @@ export default function QRCode({ url }: QRCodeProps) {
   const [dataUrl, setDataUrl] = useState<string | null>(null);
 
   useEffect(() => {
-    QRCodeLib.toDataURL(url, { errorCorrectionLevel: "M", margin: 2 })
-      .then(setDataUrl)
+    let cancelled = false;
+    // The QR library is only needed once a link exists; keep it out of the
+    // initial bundle.
+    import("qrcode")
+      .then((QRCodeLib) => QRCodeLib.toDataURL(url, { errorCorrectionLevel: "M", margin: 2 }))
+      .then((result) => {
+        if (!cancelled) setDataUrl(result);
+      })
       .catch(console.error);
+    return () => {
+      cancelled = true;
+    };
   }, [url]);
 
   if (!dataUrl) return null;

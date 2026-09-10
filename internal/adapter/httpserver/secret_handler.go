@@ -28,6 +28,10 @@ const (
 	HeaderBurnAfterRead = "X-Burn-After-Read"
 
 	retrievalSessionTTL = 15 * time.Minute
+	// maxRangeBytes caps a single range request. The client coalesces at most
+	// 64 MiB of plaintext per request; without a cap one session could pull
+	// the full blob hundreds of times per minute.
+	maxRangeBytes = 128 * 1024 * 1024
 )
 
 type SecretHandler struct {
@@ -437,6 +441,9 @@ func parseBoundedRange(header string, size int64) (int64, int64, error) {
 		return 0, 0, errors.New("malformed Range header")
 	}
 	if size <= 0 || start >= size || end >= size {
+		return 0, 0, errRangeOutOfBounds
+	}
+	if end-start+1 > maxRangeBytes {
 		return 0, 0, errRangeOutOfBounds
 	}
 	return start, end, nil
