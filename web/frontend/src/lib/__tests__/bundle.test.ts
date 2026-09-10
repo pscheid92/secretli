@@ -128,8 +128,10 @@ describe("encrypted bundles", () => {
       return new Uint8Array(end - start + 1);
     };
 
+    const progress: number[] = [];
     const decrypted = await decryptBundleFiles([file], fakeKeySet, recordingRange, {
       maxCoalescedPlaintextBytes: 4,
+      onProgress: ({ decryptedBytes }) => progress.push(decryptedBytes),
     });
 
     expect(DOWNLOAD_ALL_BUNDLE_COALESCED_PLAINTEXT_BYTES).toBe(64 * 1024 * 1024);
@@ -137,7 +139,9 @@ describe("encrypted bundles", () => {
       [0, 3],
       [4, 5],
     ]);
+    expect(progress).toEqual([4, 6]);
     await expect(decrypted[0].blob.arrayBuffer()).resolves.toHaveProperty("byteLength", 6);
+    expect(decrypted[0].blob.type).toBe("application/octet-stream");
   });
 
   it("rejects a manifest range outside the reported bundle size", async () => {

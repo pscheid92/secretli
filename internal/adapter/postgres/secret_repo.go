@@ -17,6 +17,12 @@ import (
 	tokencrypto "github.com/pscheid92/secretli/internal/platform/crypto"
 )
 
+// ConsumedBurnAfterReadGrace is how long a consumed burn-after-read secret is
+// kept before cleanup removes it. A legacy full download claims the secret
+// before streaming and holds no retrieval session, so cleanup must not delete
+// the object while a slow download is still in flight.
+const ConsumedBurnAfterReadGrace = 30 * time.Minute
+
 type SecretRepo struct {
 	q    *dbsqlc.Queries
 	pool *pgxpool.Pool
@@ -173,7 +179,10 @@ func (r *SecretRepo) DeleteExpired(ctx context.Context, now time.Time, beforeDel
 		return 0, fmt.Errorf("select expired: %w", err)
 	}
 
-	consumedIDs, err := qtx.SelectConsumedBurnAfterReadSecretsForCleanup(ctx, timestamptz(now))
+	consumedIDs, err := qtx.SelectConsumedBurnAfterReadSecretsForCleanup(ctx, dbsqlc.SelectConsumedBurnAfterReadSecretsForCleanupParams{
+		RetrievedBefore: timestamptz(now.Add(-ConsumedBurnAfterReadGrace)),
+		NowAt:           timestamptz(now),
+	})
 	if err != nil {
 		return 0, fmt.Errorf("select consumed burn-after-read: %w", err)
 	}
@@ -372,7 +381,14 @@ func (r *SecretRepo) AbortUploadSession(ctx context.Context, sessionID string, n
 	return nil
 }
 
-func (r *SecretRepo) AbortExpiredUploadSessions(ctx context.Context, now time.Time, beforeAbort func(*domain.UploadSession) error) (int64, error) {
+func (r *SecretRepo) ClearUploadParts(ctx context.Context, sessionID string) error {
+	if err := r.q.DeleteUploadPartsBySession(ctx, sessionID); err != nil {
+		return fmt.Errorf("clear upload parts: %w", err)
+	}
+	return nil
+}
+
+func (r *SecretRepo) AbortExpiredUploadSessions(ctx context.Context, now time.Time, beforeAbort func(session *domain.UploadSession, secretExists bool) error) (int64, error) {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
 		return 0, fmt.Errorf("begin expired upload session tx: %w", err)
@@ -388,7 +404,12 @@ func (r *SecretRepo) AbortExpiredUploadSessions(ctx context.Context, now time.Ti
 	var aborted int64
 	for _, row := range rows {
 		session := uploadSessionFromRow(row)
-		if err := beforeAbort(session); err != nil {
+		secretExists, err := qtx.SecretExistsByPublicID(ctx, session.PublicID)
+		if err != nil {
+			slog.ErrorContext(ctx, "cleanup: check secret for upload session failed, skipping", "session_id", session.SessionID, "error", err)
+			continue
+		}
+		if err := beforeAbort(session, secretExists); err != nil {
 			slog.ErrorContext(ctx, "cleanup: abort multipart upload failed, skipping", "session_id", session.SessionID, "error", err)
 			continue
 		}

@@ -1,4 +1,3 @@
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Route, Routes } from "react-router";
 import { Toaster } from "sonner";
 import Layout from "./components/Layout";
@@ -7,11 +6,9 @@ import NotFoundPage from "./pages/NotFoundPage";
 import RetrievePage from "./pages/RetrievePage";
 import SharePage from "./pages/SharePage";
 
-const queryClient = new QueryClient();
-
 export default function App() {
   return (
-    <QueryClientProvider client={queryClient}>
+    <>
       <Toaster richColors position="bottom-right" closeButton />
       <BrowserRouter>
         <Routes>
@@ -24,6 +21,6 @@ export default function App() {
           </Route>
         </Routes>
       </BrowserRouter>
-    </QueryClientProvider>
+    </>
   );
 }

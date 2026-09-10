@@ -28,6 +28,20 @@ describe("FileUpload", () => {
     expect(screen.queryByText(/upload limit/i)).toBeNull();
   });
 
+  it("rejects a selection whose manifest would exceed the manifest limit", () => {
+    const onSelect = vi.fn();
+    const { container } = render(<FileUpload onSelect={onSelect} />);
+    const files = Array.from(
+      { length: 3000 },
+      (_, i) => new File(["x"], `many-${i}.bin`, { type: "application/octet-stream" }),
+    );
+
+    fireEvent.change(fileInput(container), { target: { files } });
+
+    expect(onSelect).not.toHaveBeenCalled();
+    expect(screen.getByText(/Too many files for one share/)).toBeTruthy();
+  });
+
   it("rejects a file that would exceed the encrypted backend limit", () => {
     const onSelect = vi.fn();
     const { container } = render(<FileUpload onSelect={onSelect} />);

@@ -101,6 +101,7 @@ Configuration is done via environment variables. See [`.env.example`](.env.examp
 | `CLEANUP_INTERVAL` | Expired secret cleanup frequency | `1m` |
 | `ALLOWED_ORIGINS` | CORS allowed origins | — |
 | `METRICS_TOKEN` | Optional bearer token required for `/metrics` | — |
+| `TRUSTED_PROXIES` | Comma-separated IPs/CIDRs of reverse proxies whose `X-Forwarded-For` is trusted for client IP resolution and rate limiting. Leave empty when clients connect directly. | — |
 
 ## Deployment
 

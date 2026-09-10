@@ -22,8 +22,16 @@ type UploadSessionRepo interface {
 	RecordUploadPart(ctx context.Context, part *UploadPart) (*UploadPart, error)
 	CompleteUploadSession(ctx context.Context, sessionID string, secret *Secret, now time.Time) error
 	AbortUploadSession(ctx context.Context, sessionID string, now time.Time) error
+	// ClearUploadParts forgets every recorded part of a pending session so the
+	// client can upload them again after the backend rejected them.
+	ClearUploadParts(ctx context.Context, sessionID string) error
 }
 
 type UploadSessionCleanupRepo interface {
-	AbortExpiredUploadSessions(ctx context.Context, now time.Time, beforeAbort func(*UploadSession) error) (int64, error)
+	// AbortExpiredUploadSessions marks expired pending sessions aborted. The
+	// callback runs before each row is updated and receives whether an active
+	// secret row already exists for the session's public_id, so the caller can
+	// remove an orphaned object left by a crash between storage completion and
+	// the database commit.
+	AbortExpiredUploadSessions(ctx context.Context, now time.Time, beforeAbort func(session *UploadSession, secretExists bool) error) (int64, error)
 }

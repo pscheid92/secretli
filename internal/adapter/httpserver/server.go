@@ -26,11 +26,19 @@ type App struct {
 	SecretMetrics *metrics.SecretMetrics
 }
 
-func New(cfg config.Config, pool *pgxpool.Pool, secretRepo domain.SecretRepo, fileStore domain.FileStore, reg *prometheus.Registry) *App {
+func New(cfg config.Config, pool *pgxpool.Pool, secretRepo domain.SecretRepo, fileStore domain.FileStore, reg *prometheus.Registry) (*App, error) {
+	ipExtractor, err := newIPExtractor(cfg.TrustedProxies)
+	if err != nil {
+		return nil, fmt.Errorf("configure trusted proxies: %w", err)
+	}
+
 	e := echo.New()
 	e.HideBanner = true
 	e.HidePort = true
 	e.HTTPErrorHandler = httpErrorHandler
+	// Never trust client-supplied X-Forwarded-For unless a proxy is configured;
+	// the rate limiters key on the client IP.
+	e.IPExtractor = ipExtractor
 
 	e.Server.ReadHeaderTimeout = 10 * time.Second
 	e.Server.ReadTimeout = 30 * time.Minute
@@ -49,7 +57,7 @@ func New(cfg config.Config, pool *pgxpool.Pool, secretRepo domain.SecretRepo, fi
 
 	a.SecretMetrics = a.registerRoutes()
 
-	return a
+	return a, nil
 }
 
 func (a *App) Start() error {

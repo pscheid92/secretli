@@ -12,6 +12,11 @@ import (
 	"github.com/pscheid92/secretli/web"
 )
 
+// smallRequestBodyLimit bounds JSON and header-only API requests so a client
+// cannot make the server buffer an arbitrarily large body before validation.
+// Blob and part uploads enforce their own size limits.
+const smallRequestBodyLimit = "64K"
+
 func (a *App) registerRoutes() *metrics.SecretMetrics {
 	e := a.echo
 	httpMetrics := metrics.NewHTTPMetrics(a.reg)
@@ -53,6 +58,7 @@ func (a *App) registerRoutes() *metrics.SecretMetrics {
 	// Retrieve (30/min)
 	retrieveGroup := secrets.Group("")
 	retrieveGroup.Use(rateLimiter(30, time.Minute))
+	retrieveGroup.Use(middleware.BodyLimit(smallRequestBodyLimit))
 	retrieveGroup.POST("/:publicID", sh.RetrieveSecret)
 	retrieveGroup.POST("/:publicID/retrieval-session", sh.StartRetrievalSession)
 	retrieveGroup.GET("/:publicID/meta", sh.SecretMetadata)
@@ -60,11 +66,13 @@ func (a *App) registerRoutes() *metrics.SecretMetrics {
 	// Range retrieval can require many chunk requests for one authorized session.
 	rangeGroup := secrets.Group("")
 	rangeGroup.Use(rateLimiter(600, time.Minute))
+	rangeGroup.Use(middleware.BodyLimit(smallRequestBodyLimit))
 	rangeGroup.GET("/:publicID/blob", sh.RetrieveSecretRange)
 
 	// Delete (30/min)
 	deleteGroup := secrets.Group("")
 	deleteGroup.Use(rateLimiter(30, time.Minute))
+	deleteGroup.Use(middleware.BodyLimit(smallRequestBodyLimit))
 	deleteGroup.DELETE("/:publicID", sh.DeleteSecret)
 
 	if uploadRepo, ok := a.secretRepo.(domain.UploadSessionRepo); ok {
@@ -74,6 +82,7 @@ func (a *App) registerRoutes() *metrics.SecretMetrics {
 
 			uploadCreateGroup := uploads.Group("")
 			uploadCreateGroup.Use(rateLimiter(10, time.Minute))
+			uploadCreateGroup.Use(middleware.BodyLimit(smallRequestBodyLimit))
 			uploadCreateGroup.POST("", uh.CreateUploadSession)
 			uploadCreateGroup.POST("/:sessionID/complete", uh.CompleteUploadSession)
 			uploadCreateGroup.DELETE("/:sessionID", uh.AbortUploadSession)
