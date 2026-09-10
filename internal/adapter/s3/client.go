@@ -112,7 +112,7 @@ func (s *Client) UploadPart(ctx context.Context, key, uploadID string, partNumbe
 		Bucket:        aws.String(s.bucket),
 		Key:           aws.String(key),
 		UploadId:      aws.String(uploadID),
-		PartNumber:    aws.Int32(int32(partNumber)),
+		PartNumber:    aws.Int32(int32(partNumber)), //nolint:gosec // bounded by maxMultipartPartNumber
 		Body:          reader,
 		ContentLength: aws.Int64(size),
 	})
@@ -130,7 +130,7 @@ func (s *Client) CompleteMultipartUpload(ctx context.Context, key, uploadID stri
 	for _, part := range parts {
 		completed = append(completed, types.CompletedPart{
 			ETag:       aws.String(part.ETag),
-			PartNumber: aws.Int32(int32(part.PartNumber)),
+			PartNumber: aws.Int32(int32(part.PartNumber)), //nolint:gosec // bounded by maxMultipartPartNumber
 		})
 	}
 

@@ -10,8 +10,14 @@ linters:
     - staticcheck
     - unused
     - ineffassign
+    - gosec
+    - errorlint
+    - bodyclose
+    - noctx
   exclusions:
     rules:
       - path: _test\.go
         linters:
           - errcheck
+          - gosec
+          - noctx

@@ -4,7 +4,7 @@ Thanks for your interest in contributing! Here's how to get started.
 
 ## Development Setup
 
-Prerequisites: Go 1.26+, Node.js 24+, Docker
+Prerequisites: Go 1.27+, Node.js 24+, pnpm 10, Docker
 
 ```bash
 # Clone the repo
@@ -17,10 +17,7 @@ cd docker && docker compose -f docker-compose.dev.yml up -d && cd ..
 # Configure environment
 cp .env.example .env
 
-# Run database migrations
-go run . migrate
-
-# Start dev servers
+# Start dev servers (migrations run automatically at backend startup)
 make dev
 ```
 
@@ -32,6 +29,7 @@ make test-short    # Fast unit tests only
 make e2e           # Browser E2E tests against a running app
 make e2e-large     # Opt-in large-file browser performance test
 make lint          # Linters (Go + frontend)
+make vuln          # govulncheck against Go dependencies
 ```
 
 `make e2e-large` is not part of normal PR CI. It defaults to a near-limit synthetic file and can be tuned with `LARGE_E2E_SIZE_MB`, `LARGE_E2E_MAX_TOTAL_MS`, and `LARGE_E2E_MAX_HEAP_MIB`. Set `LARGE_E2E_MODE=legacy` when comparing against a pre-bundle app.

@@ -88,7 +88,7 @@ func TestSecretRepo_CreateDuplicate(t *testing.T) {
 
 	secret2 := newTestSecret("dup-001", time.Now().Add(2*time.Hour))
 	err := repo.Create(ctx, secret2, time.Now())
-	if err != domain.ErrDuplicate {
+	if !errors.Is(err, domain.ErrDuplicate) {
 		t.Fatalf("expected ErrDuplicate, got %v", err)
 	}
 }
@@ -104,7 +104,7 @@ func TestSecretRepo_GetExpired(t *testing.T) {
 	}
 
 	_, err := repo.GetByPublicID(ctx, "expired-001", time.Now())
-	if err != domain.ErrNotFound {
+	if !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("expected ErrNotFound for expired secret, got %v", err)
 	}
 }
@@ -136,7 +136,7 @@ func TestSecretRepo_ClaimBurnAfterRead(t *testing.T) {
 	}
 
 	err = repo.ClaimBurnAfterRead(ctx, "claim-001", tokencrypto.TokenHash("blob-token-claim-001"), time.Now())
-	if err != domain.ErrNotFound {
+	if !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("expected ErrNotFound on second claim, got %v", err)
 	}
 }
@@ -171,7 +171,7 @@ func TestSecretRepo_ClaimBurnAfterRead_InvalidInputs(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			err := repo.ClaimBurnAfterRead(ctx, tt.publicID, tokencrypto.TokenHash(tt.blobToken), time.Now())
-			if err != domain.ErrNotFound {
+			if !errors.Is(err, domain.ErrNotFound) {
 				t.Fatalf("expected ErrNotFound, got %v", err)
 			}
 		})
@@ -206,10 +206,10 @@ func TestSecretRepo_ClaimBurnAfterRead_ConcurrentOnlyOneSucceeds(t *testing.T) {
 
 	var success, notFound int
 	for err := range errs {
-		switch err {
-		case nil:
+		switch {
+		case err == nil:
 			success++
-		case domain.ErrNotFound:
+		case errors.Is(err, domain.ErrNotFound):
 			notFound++
 		default:
 			t.Fatalf("unexpected error: %v", err)
@@ -259,7 +259,7 @@ func TestSecretRepo_RetrievalSession(t *testing.T) {
 	}
 
 	_, err = repo.GetByRetrievalSession(ctx, "session-001", tokencrypto.TokenHash("wrong-session"), time.Now())
-	if err != domain.ErrForbidden {
+	if !errors.Is(err, domain.ErrForbidden) {
 		t.Fatalf("expected ErrForbidden for wrong session, got %v", err)
 	}
 
@@ -271,7 +271,7 @@ func TestSecretRepo_RetrievalSession(t *testing.T) {
 		time.Now().Add(15*time.Minute),
 		time.Now(),
 	)
-	if err != domain.ErrForbidden {
+	if !errors.Is(err, domain.ErrForbidden) {
 		t.Fatalf("expected ErrForbidden for wrong blob token, got %v", err)
 	}
 }
@@ -316,7 +316,7 @@ func TestSecretRepo_RetrievalSessionExpiry(t *testing.T) {
 	if _, err := repo.GetByRetrievalSession(ctx, "session-expiry-active", activeHash, time.Now()); err != nil {
 		t.Fatalf("active session should validate: %v", err)
 	}
-	if _, err := repo.GetByRetrievalSession(ctx, "session-expiry-expired", expiredHash, time.Now()); err != domain.ErrForbidden {
+	if _, err := repo.GetByRetrievalSession(ctx, "session-expiry-expired", expiredHash, time.Now()); !errors.Is(err, domain.ErrForbidden) {
 		t.Fatalf("expected ErrForbidden for expired session, got %v", err)
 	}
 
@@ -372,7 +372,7 @@ func TestSecretRepo_StartRetrievalSession_BurnAfterRead(t *testing.T) {
 		time.Now().Add(15*time.Minute),
 		time.Now(),
 	)
-	if err != domain.ErrNotFound {
+	if !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("expected ErrNotFound on second burn session, got %v", err)
 	}
 }
@@ -392,7 +392,7 @@ func TestSecretRepo_Delete(t *testing.T) {
 	}
 
 	err := repo.Delete(ctx, "del-001")
-	if err != domain.ErrNotFound {
+	if !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("expected ErrNotFound on second delete, got %v", err)
 	}
 }
