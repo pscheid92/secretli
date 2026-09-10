@@ -24,6 +24,10 @@ type Config struct {
 	CleanupInterval time.Duration `env:"CLEANUP_INTERVAL" default:"1m"`
 	AllowedOrigins  string        `env:"ALLOWED_ORIGINS"`
 	MetricsToken    string        `env:"METRICS_TOKEN"`
+	// TrustedProxies is a comma-separated list of IPs or CIDRs of reverse
+	// proxies whose X-Forwarded-For headers may be trusted for client IP
+	// resolution. When empty, forwarding headers are ignored entirely.
+	TrustedProxies string `env:"TRUSTED_PROXIES"`
 }
 
 func Load() (Config, error) {
