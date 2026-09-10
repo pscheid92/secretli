@@ -553,50 +553,6 @@ func TestAbortUploadSession(t *testing.T) {
 	})
 }
 
-func TestUploadSessionStatus(t *testing.T) {
-	repo := newUploadMockRepo()
-	store := newUploadMockStore()
-	uploadToken := testToken("status token")
-	session := seedUploadSession(repo, uploadToken, s3MinimumPartSize+3)
-	repo.parts[session.SessionID] = map[int]domain.UploadPart{
-		1: {SessionID: session.SessionID, PartNumber: 1, Offset: 0, Size: s3MinimumPartSize, SHA256: sha256HexTest([]byte("a")), ETag: "etag-1"},
-	}
-	h := NewUploadHandler(repo, store, 100*1024*1024, testMetrics())
-
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/secrets/uploads/"+session.SessionID, nil)
-	req.Header.Set("Authorization", "Bearer "+uploadToken)
-	rec := httptest.NewRecorder()
-	c := newEchoContext(req, rec)
-	c.SetParamNames("sessionID")
-	c.SetParamValues(session.SessionID)
-	callHandler(c, h.UploadSessionStatus)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want %d. body: %s", rec.Code, http.StatusOK, rec.Body.String())
-	}
-	var body struct {
-		State         string           `json:"state"`
-		BlobSize      int64            `json:"blob_size"`
-		UploadToken   *string          `json:"upload_token"`
-		UploadedParts []map[string]any `json:"uploaded_parts"`
-	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-	if body.State != domain.UploadSessionStatePending {
-		t.Errorf("state = %q, want pending", body.State)
-	}
-	if body.BlobSize != s3MinimumPartSize+3 {
-		t.Errorf("blob_size = %d, want %d", body.BlobSize, s3MinimumPartSize+3)
-	}
-	if body.UploadToken != nil {
-		t.Error("status response must not echo the upload token")
-	}
-	if len(body.UploadedParts) != 1 || body.UploadedParts[0]["etag"] != "etag-1" {
-		t.Errorf("uploaded_parts = %v, want the recorded part", body.UploadedParts)
-	}
-}
-
 func abortUploadRequest(sessionID, uploadToken string) *http.Request {
 	req := httptest.NewRequest(http.MethodDelete, "/api/v1/secrets/uploads/"+sessionID, nil)
 	req.Header.Set("Authorization", "Bearer "+uploadToken)

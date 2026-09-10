@@ -1,4 +1,4 @@
-import { ApiError, type UploadSessionPart, type UploadSessionStatus } from "../api";
+import { ApiError, type StartUploadSessionResponse, type UploadSessionPart } from "../api";
 import { readBundleManifest } from "../bundle";
 import { KeySet } from "../encryption";
 import {
@@ -24,7 +24,7 @@ const MIB = 1024 * 1024;
 const TEST_PART_SIZE = 6 * MIB;
 
 interface FakeServer {
-  status: UploadSessionStatus;
+  status: StartUploadSessionResponse;
   parts: Map<number, { part: UploadSessionPart; bytes: Uint8Array }>;
   sessionCounter: number;
 }
@@ -33,13 +33,13 @@ function installFakeServer(): FakeServer {
   const server: FakeServer = {
     status: {
       session_id: "",
+      upload_token: "",
       public_id: "",
       part_size: TEST_PART_SIZE,
       blob_size: 0,
       expires_at: new Date(Date.now() + 3600_000).toISOString(),
       upload_expires_at: new Date(Date.now() + 3600_000).toISOString(),
       state: "pending",
-      uploaded_parts: [],
     },
     parts: new Map(),
     sessionCounter: 0,
@@ -54,9 +54,9 @@ function installFakeServer(): FakeServer {
       public_id: params.public_id,
       blob_size: params.blob_size,
       state: "pending",
-      uploaded_parts: [],
+      upload_token: `token-${server.sessionCounter}`,
     };
-    return { ...server.status, upload_token: `token-${server.sessionCounter}` };
+    return server.status;
   });
   api.uploadSessionPart.mockImplementation(
     async (_session, _token, partNumber, offset, bytes: Blob, sha256) => {

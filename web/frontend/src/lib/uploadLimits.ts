@@ -1,4 +1,4 @@
-import { estimateBundleEncryptedSize, planEncryptedBundleV2 } from "./bundle";
+import { estimateBundleEncryptedSize, planBundle } from "./bundle";
 
 export const MAX_ENCRYPTED_UPLOAD_BYTES = 1024 * 1024 * 1024;
 export const MAX_UPLOAD_LABEL = "1 GiB";
@@ -15,7 +15,7 @@ export function fitsBundleUploadLimit(fileSizes: number[]): boolean {
 export function fitsBundleManifestLimit(files: File[]): boolean {
   if (files.length === 0) return true;
   try {
-    planEncryptedBundleV2(files);
+    planBundle(files);
     return true;
   } catch {
     return false;

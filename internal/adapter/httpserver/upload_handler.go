@@ -124,15 +124,7 @@ func (h *UploadHandler) CreateUploadSession(c echo.Context) error {
 		return apperrors.InternalError("failed to create upload session", err)
 	}
 
-	return c.JSON(http.StatusCreated, uploadSessionResponse(session, nil, uploadToken))
-}
-
-func (h *UploadHandler) UploadSessionStatus(c echo.Context) error {
-	session, parts, _, err := h.authenticateUploadSession(c)
-	if err != nil {
-		return err
-	}
-	return c.JSON(http.StatusOK, uploadSessionResponse(session, parts, ""))
+	return c.JSON(http.StatusCreated, uploadSessionResponse(session, uploadToken))
 }
 
 func (h *UploadHandler) UploadPart(c echo.Context) error {
@@ -342,13 +334,8 @@ func (h *UploadHandler) validateRequest(v any) []string {
 	return details
 }
 
-func uploadSessionResponse(session *domain.UploadSession, parts []domain.UploadPart, uploadToken string) map[string]any {
-	uploadedParts := make([]map[string]any, 0, len(parts))
-	for _, part := range parts {
-		uploadedParts = append(uploadedParts, uploadPartResponse(part))
-	}
-
-	response := map[string]any{
+func uploadSessionResponse(session *domain.UploadSession, uploadToken string) map[string]any {
+	return map[string]any{
 		"session_id":        session.SessionID,
 		"public_id":         session.PublicID,
 		"part_size":         multipartUploadPartSize,
@@ -356,12 +343,8 @@ func uploadSessionResponse(session *domain.UploadSession, parts []domain.UploadP
 		"expires_at":        session.SecretExpiresAt.UTC().Format(time.RFC3339),
 		"upload_expires_at": session.UploadExpiresAt.UTC().Format(time.RFC3339),
 		"state":             session.State,
-		"uploaded_parts":    uploadedParts,
+		"upload_token":      uploadToken,
 	}
-	if uploadToken != "" {
-		response["upload_token"] = uploadToken
-	}
-	return response
 }
 
 func uploadPartResponse(part domain.UploadPart) map[string]any {

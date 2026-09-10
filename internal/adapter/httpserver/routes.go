@@ -8,7 +8,6 @@ import (
 	"github.com/labstack/echo/v4/middleware"
 
 	"github.com/pscheid92/secretli/internal/adapter/metrics"
-	"github.com/pscheid92/secretli/internal/domain"
 	"github.com/pscheid92/secretli/web"
 )
 
@@ -69,34 +68,28 @@ func (a *App) registerRoutes() *metrics.SecretMetrics {
 	deleteGroup.Use(middleware.BodyLimit(smallRequestBodyLimit))
 	deleteGroup.DELETE("/:publicID", sh.DeleteSecret)
 
-	if uploadRepo, ok := a.secretRepo.(domain.UploadSessionRepo); ok {
-		if multipartStore, ok := a.fileStore.(domain.MultipartFileStore); ok {
-			uh := NewUploadHandler(uploadRepo, multipartStore, a.cfg.MaxFileSize, secretMetrics)
-			uploads := e.Group("/api/v1/secrets/uploads")
+	uh := NewUploadHandler(a.secretRepo, a.fileStore, a.cfg.MaxFileSize, secretMetrics)
+	uploads := e.Group("/api/v1/secrets/uploads")
 
-			// Starting a session is what creates a secret, so it carries the
-			// create budget.
-			uploadCreateGroup := uploads.Group("")
-			uploadCreateGroup.Use(rateLimiter(10, time.Minute))
-			uploadCreateGroup.Use(middleware.BodyLimit(smallRequestBodyLimit))
-			uploadCreateGroup.POST("", uh.CreateUploadSession)
+	// Starting a session is what creates a secret, so it carries the create
+	// budget.
+	uploadCreateGroup := uploads.Group("")
+	uploadCreateGroup.Use(rateLimiter(10, time.Minute))
+	uploadCreateGroup.Use(middleware.BodyLimit(smallRequestBodyLimit))
+	uploadCreateGroup.POST("", uh.CreateUploadSession)
 
-			// Operations on a session that already exists are guarded by its
-			// upload token and happen at least once per upload; charging them
-			// to the create budget would halve the number of shares a client
-			// can make.
-			uploadSessionGroup := uploads.Group("")
-			uploadSessionGroup.Use(rateLimiter(60, time.Minute))
-			uploadSessionGroup.Use(middleware.BodyLimit(smallRequestBodyLimit))
-			uploadSessionGroup.POST("/:sessionID/complete", uh.CompleteUploadSession)
-			uploadSessionGroup.DELETE("/:sessionID", uh.AbortUploadSession)
-			uploadSessionGroup.GET("/:sessionID", uh.UploadSessionStatus)
+	// Operations on a session that already exists are guarded by its upload
+	// token and happen at least once per upload; charging them to the create
+	// budget would halve the number of shares a client can make.
+	uploadSessionGroup := uploads.Group("")
+	uploadSessionGroup.Use(rateLimiter(60, time.Minute))
+	uploadSessionGroup.Use(middleware.BodyLimit(smallRequestBodyLimit))
+	uploadSessionGroup.POST("/:sessionID/complete", uh.CompleteUploadSession)
+	uploadSessionGroup.DELETE("/:sessionID", uh.AbortUploadSession)
 
-			uploadPartGroup := uploads.Group("")
-			uploadPartGroup.Use(rateLimiter(600, time.Minute))
-			uploadPartGroup.PUT("/:sessionID/parts/:partNumber", uh.UploadPart)
-		}
-	}
+	uploadPartGroup := uploads.Group("")
+	uploadPartGroup.Use(rateLimiter(600, time.Minute))
+	uploadPartGroup.PUT("/:sessionID/parts/:partNumber", uh.UploadPart)
 
 	// SPA catch-all
 	distFS, _ := fs.Sub(web.DistFS, "frontend/dist")

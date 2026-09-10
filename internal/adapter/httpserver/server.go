@@ -18,15 +18,15 @@ type App struct {
 	echo       *echo.Echo
 	addr       string
 	pool       *pgxpool.Pool
-	secretRepo domain.SecretRepo
-	fileStore  domain.FileStore
+	secretRepo domain.Repo
+	fileStore  domain.MultipartFileStore
 	cfg        config.Config
 	reg        *prometheus.Registry
 
 	SecretMetrics *metrics.SecretMetrics
 }
 
-func New(cfg config.Config, pool *pgxpool.Pool, secretRepo domain.SecretRepo, fileStore domain.FileStore, reg *prometheus.Registry) (*App, error) {
+func New(cfg config.Config, pool *pgxpool.Pool, secretRepo domain.Repo, fileStore domain.MultipartFileStore, reg *prometheus.Registry) (*App, error) {
 	ipExtractor, err := newIPExtractor(cfg.TrustedProxies)
 	if err != nil {
 		return nil, fmt.Errorf("configure trusted proxies: %w", err)

@@ -23,22 +23,16 @@ type mockSecretRepo struct {
 	deleteExpiredKeys   []string
 	deleteExpiredErr    error
 	deleteExpiredCalled atomic.Int32
+
+	expiredUploads   []expiredUploadSession
+	expiredUploadErr error
 }
 
-func (m *mockSecretRepo) Create(_ context.Context, _ *domain.Secret, _ time.Time) error { return nil }
-func (m *mockSecretRepo) GetByPublicID(_ context.Context, _ string, _ time.Time) (*domain.Secret, error) {
-	return nil, nil
+type expiredUploadSession struct {
+	session      domain.UploadSession
+	secretExists bool
 }
-func (m *mockSecretRepo) ClaimBurnAfterRead(_ context.Context, _, _ string, _ time.Time) error {
-	return nil
-}
-func (m *mockSecretRepo) StartRetrievalSession(_ context.Context, _, _, _ string, _, _ time.Time) (*domain.Secret, error) {
-	return nil, nil
-}
-func (m *mockSecretRepo) GetByRetrievalSession(_ context.Context, _, _ string, _ time.Time) (*domain.Secret, error) {
-	return nil, nil
-}
-func (m *mockSecretRepo) Delete(_ context.Context, _ string) error { return nil }
+
 func (m *mockSecretRepo) DeleteExpired(_ context.Context, _ time.Time, beforeDelete func(string) error) (int64, error) {
 	m.deleteExpiredCalled.Add(1)
 	if m.deleteExpiredErr != nil {
@@ -53,43 +47,17 @@ func (m *mockSecretRepo) DeleteExpired(_ context.Context, _ time.Time, beforeDel
 	}
 	return deleted, nil
 }
+
 func (m *mockSecretRepo) DeleteExpiredRetrievalSessions(_ context.Context, _ time.Time) (int64, error) {
 	return 0, nil
 }
 
-type mockFileStore struct {
-	deletedKeys  []string
-	deleteErr    error
-	deleteCalled atomic.Int32
-}
-
-func (m *mockFileStore) GetRange(_ context.Context, _ string, _, _ int64) (io.ReadCloser, error) {
-	return nil, nil
-}
-func (m *mockFileStore) Delete(_ context.Context, key string) error {
-	m.deleteCalled.Add(1)
-	m.deletedKeys = append(m.deletedKeys, key)
-	return m.deleteErr
-}
-
-// mockUploadRepo adds the multipart cleanup capability to mockSecretRepo.
-type mockUploadRepo struct {
-	mockSecretRepo
-	expired []expiredUploadSession
-	err     error
-}
-
-type expiredUploadSession struct {
-	session      domain.UploadSession
-	secretExists bool
-}
-
-func (m *mockUploadRepo) AbortExpiredUploadSessions(_ context.Context, _ time.Time, beforeAbort func(*domain.UploadSession, bool) error) (int64, error) {
-	if m.err != nil {
-		return 0, m.err
+func (m *mockSecretRepo) AbortExpiredUploadSessions(_ context.Context, _ time.Time, beforeAbort func(*domain.UploadSession, bool) error) (int64, error) {
+	if m.expiredUploadErr != nil {
+		return 0, m.expiredUploadErr
 	}
 	var aborted int64
-	for _, e := range m.expired {
+	for _, e := range m.expiredUploads {
 		session := e.session
 		if err := beforeAbort(&session, e.secretExists); err != nil {
 			continue
@@ -99,23 +67,37 @@ func (m *mockUploadRepo) AbortExpiredUploadSessions(_ context.Context, _ time.Ti
 	return aborted, nil
 }
 
-// mockMultipartStore adds multipart aborts to mockFileStore.
-type mockMultipartStore struct {
-	mockFileStore
+type mockFileStore struct {
+	deletedKeys    []string
+	deleteErr      error
+	deleteCalled   atomic.Int32
 	abortedUploads []string
 	abortErr       error
 }
 
-func (m *mockMultipartStore) CreateMultipartUpload(_ context.Context, _ string) (string, error) {
+func (m *mockFileStore) GetRange(_ context.Context, _ string, _, _ int64) (io.ReadCloser, error) {
+	return nil, nil
+}
+
+func (m *mockFileStore) Delete(_ context.Context, key string) error {
+	m.deleteCalled.Add(1)
+	m.deletedKeys = append(m.deletedKeys, key)
+	return m.deleteErr
+}
+
+func (m *mockFileStore) CreateMultipartUpload(_ context.Context, _ string) (string, error) {
 	return "", nil
 }
-func (m *mockMultipartStore) UploadPart(_ context.Context, _, _ string, _ int, _ io.Reader, _ int64) (string, error) {
+
+func (m *mockFileStore) UploadPart(_ context.Context, _, _ string, _ int, _ io.Reader, _ int64) (string, error) {
 	return "", nil
 }
-func (m *mockMultipartStore) CompleteMultipartUpload(_ context.Context, _, _ string, _ []domain.CompletedPart) error {
+
+func (m *mockFileStore) CompleteMultipartUpload(_ context.Context, _, _ string, _ []domain.CompletedPart) error {
 	return nil
 }
-func (m *mockMultipartStore) AbortMultipartUpload(_ context.Context, key, uploadID string) error {
+
+func (m *mockFileStore) AbortMultipartUpload(_ context.Context, key, uploadID string) error {
 	m.abortedUploads = append(m.abortedUploads, key+"#"+uploadID)
 	return m.abortErr
 }
@@ -123,11 +105,11 @@ func (m *mockMultipartStore) AbortMultipartUpload(_ context.Context, key, upload
 // --- Tests ---
 
 func TestRunCycle_ExpiredUploadSessions(t *testing.T) {
-	repo := &mockUploadRepo{expired: []expiredUploadSession{
+	repo := &mockSecretRepo{expiredUploads: []expiredUploadSession{
 		{session: domain.UploadSession{SessionID: "s1", PublicID: "orphan", S3UploadID: "u1"}, secretExists: false},
 		{session: domain.UploadSession{SessionID: "s2", PublicID: "owned", S3UploadID: "u2"}, secretExists: true},
 	}}
-	store := &mockMultipartStore{}
+	store := &mockFileStore{}
 
 	w := NewWorker(time.Minute, repo, store, testMetrics())
 	w.runCycle(context.Background())
@@ -142,10 +124,10 @@ func TestRunCycle_ExpiredUploadSessions(t *testing.T) {
 }
 
 func TestRunCycle_ExpiredUploadSessionAbortFailureIsIsolated(t *testing.T) {
-	repo := &mockUploadRepo{expired: []expiredUploadSession{
+	repo := &mockSecretRepo{expiredUploads: []expiredUploadSession{
 		{session: domain.UploadSession{SessionID: "s1", PublicID: "p1", S3UploadID: "u1"}},
 	}}
-	store := &mockMultipartStore{abortErr: errors.New("storage down")}
+	store := &mockFileStore{abortErr: errors.New("storage down")}
 
 	w := NewWorker(time.Minute, repo, store, testMetrics())
 	w.runCycle(context.Background())
