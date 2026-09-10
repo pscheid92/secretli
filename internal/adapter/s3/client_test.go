@@ -3,6 +3,7 @@ package s3_test
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"net"
 	"net/http"
@@ -13,6 +14,7 @@ import (
 	"time"
 
 	"github.com/pscheid92/secretli/internal/adapter/s3"
+	"github.com/pscheid92/secretli/internal/domain"
 	"github.com/pscheid92/secretli/internal/platform/config"
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/wait"
@@ -342,5 +344,104 @@ func TestNewS3Client_BucketNotFound(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("expected error for nonexistent bucket, got nil")
+	}
+}
+
+func TestS3Client_MultipartRoundTrip(t *testing.T) {
+	t.Parallel()
+	client := setupSeaweedFS(t)
+	ctx := context.Background()
+
+	const key = "multipart/roundtrip"
+	partOne := bytes.Repeat([]byte("a"), 5*1024*1024)
+	partTwo := []byte("tail-bytes")
+
+	uploadID, err := client.CreateMultipartUpload(ctx, key)
+	if err != nil {
+		t.Fatalf("CreateMultipartUpload: %v", err)
+	}
+	etagOne, err := client.UploadPart(ctx, key, uploadID, 1, bytes.NewReader(partOne), int64(len(partOne)))
+	if err != nil {
+		t.Fatalf("UploadPart 1: %v", err)
+	}
+	etagTwo, err := client.UploadPart(ctx, key, uploadID, 2, bytes.NewReader(partTwo), int64(len(partTwo)))
+	if err != nil {
+		t.Fatalf("UploadPart 2: %v", err)
+	}
+	if err := client.CompleteMultipartUpload(ctx, key, uploadID, []domain.CompletedPart{
+		{PartNumber: 1, ETag: etagOne},
+		{PartNumber: 2, ETag: etagTwo},
+	}); err != nil {
+		t.Fatalf("CompleteMultipartUpload: %v", err)
+	}
+
+	reader, err := client.Get(ctx, key)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	defer reader.Close()
+	got, err := io.ReadAll(reader)
+	if err != nil {
+		t.Fatalf("ReadAll: %v", err)
+	}
+	want := append(append([]byte(nil), partOne...), partTwo...)
+	if !bytes.Equal(got, want) {
+		t.Fatalf("assembled object has %d bytes, want %d", len(got), len(want))
+	}
+
+	// Aborting a completed (no longer existing) upload is a no-op.
+	if err := client.AbortMultipartUpload(ctx, key, uploadID); err != nil {
+		t.Fatalf("AbortMultipartUpload after complete: %v", err)
+	}
+}
+
+func TestS3Client_AbortMultipartUploadIsIdempotent(t *testing.T) {
+	t.Parallel()
+	client := setupSeaweedFS(t)
+	ctx := context.Background()
+
+	const key = "multipart/abort"
+	uploadID, err := client.CreateMultipartUpload(ctx, key)
+	if err != nil {
+		t.Fatalf("CreateMultipartUpload: %v", err)
+	}
+	if _, err := client.UploadPart(ctx, key, uploadID, 1, bytes.NewReader([]byte("part")), 4); err != nil {
+		t.Fatalf("UploadPart: %v", err)
+	}
+
+	if err := client.AbortMultipartUpload(ctx, key, uploadID); err != nil {
+		t.Fatalf("first AbortMultipartUpload: %v", err)
+	}
+	if err := client.AbortMultipartUpload(ctx, key, uploadID); err != nil {
+		t.Fatalf("second AbortMultipartUpload should succeed: %v", err)
+	}
+	if err := client.AbortMultipartUpload(ctx, key, "never-existed"); err != nil {
+		t.Fatalf("AbortMultipartUpload of unknown upload should succeed: %v", err)
+	}
+
+	err = client.CompleteMultipartUpload(ctx, key, uploadID, []domain.CompletedPart{{PartNumber: 1, ETag: "x"}})
+	if !errors.Is(err, domain.ErrUploadNotFound) {
+		t.Fatalf("CompleteMultipartUpload after abort error = %v, want ErrUploadNotFound", err)
+	}
+}
+
+func TestS3Client_CompleteMultipartUploadRejectsStaleETag(t *testing.T) {
+	t.Parallel()
+	client := setupSeaweedFS(t)
+	ctx := context.Background()
+
+	const key = "multipart/stale-etag"
+	uploadID, err := client.CreateMultipartUpload(ctx, key)
+	if err != nil {
+		t.Fatalf("CreateMultipartUpload: %v", err)
+	}
+	t.Cleanup(func() { _ = client.AbortMultipartUpload(context.Background(), key, uploadID) })
+	if _, err := client.UploadPart(ctx, key, uploadID, 1, bytes.NewReader([]byte("part")), 4); err != nil {
+		t.Fatalf("UploadPart: %v", err)
+	}
+
+	err = client.CompleteMultipartUpload(ctx, key, uploadID, []domain.CompletedPart{{PartNumber: 1, ETag: "\"deadbeef\""}})
+	if !errors.Is(err, domain.ErrInvalidParts) {
+		t.Fatalf("CompleteMultipartUpload with stale etag error = %v, want ErrInvalidParts", err)
 	}
 }

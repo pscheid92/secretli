@@ -28,7 +28,12 @@ func newTestSecret(publicID string, expiresAt time.Time) *domain.Secret {
 
 func markRetrieved(t *testing.T, pool *pgxpool.Pool, publicID string) {
 	t.Helper()
-	if _, err := pool.Exec(context.Background(), "UPDATE secrets SET retrieved_at = $2 WHERE public_id = $1", publicID, time.Now()); err != nil {
+	markRetrievedAt(t, pool, publicID, time.Now().Add(-pgadapter.ConsumedBurnAfterReadGrace-time.Minute))
+}
+
+func markRetrievedAt(t *testing.T, pool *pgxpool.Pool, publicID string, retrievedAt time.Time) {
+	t.Helper()
+	if _, err := pool.Exec(context.Background(), "UPDATE secrets SET retrieved_at = $2 WHERE public_id = $1", publicID, retrievedAt); err != nil {
 		t.Fatalf("mark retrieved %s: %v", publicID, err)
 	}
 }
@@ -451,6 +456,15 @@ func TestSecretRepo_DeleteExpired_BurnAfterRead(t *testing.T) {
 		t.Fatalf("create burn-unretrieved: %v", err)
 	}
 
+	// 4. Just-retrieved burn-after-read secret — still inside the grace
+	// period a legacy full download may need, so NOT deleted yet.
+	burnRecent := newTestSecret("burn-recent-001", time.Now().Add(1*time.Hour))
+	burnRecent.BurnAfterRead = true
+	if err := repo.Create(ctx, burnRecent, time.Now()); err != nil {
+		t.Fatalf("create burn-recent: %v", err)
+	}
+	markRetrievedAt(t, pool, "burn-recent-001", time.Now())
+
 	noop := func(string) error { return nil }
 	count, err := repo.DeleteExpired(ctx, time.Now(), noop)
 	if err != nil {
@@ -459,6 +473,15 @@ func TestSecretRepo_DeleteExpired_BurnAfterRead(t *testing.T) {
 
 	if count != 1 {
 		t.Errorf("deleted count = %d, want 1", count)
+	}
+
+	// Once the grace period has passed the recent one is collected too.
+	count, err = repo.DeleteExpired(ctx, time.Now().Add(pgadapter.ConsumedBurnAfterReadGrace+time.Minute), noop)
+	if err != nil {
+		t.Fatalf("delete expired after grace: %v", err)
+	}
+	if count != 1 {
+		t.Errorf("deleted count after grace = %d, want 1", count)
 	}
 
 	// Regular retrieved secret should still exist
@@ -513,7 +536,10 @@ func TestSecretRepo_DeleteExpired_KeepsBurnedSecretWithActiveSession(t *testing.
 		t.Errorf("deleted sessions = %d, want 1", deletedSessions)
 	}
 
-	count, err = repo.DeleteExpired(ctx, time.Now(), noop)
+	// The session claimed the secret just now, so the grace period still
+	// protects it; evaluate cleanup as of a time past the grace window.
+	afterGrace := time.Now().Add(pgadapter.ConsumedBurnAfterReadGrace + time.Minute)
+	count, err = repo.DeleteExpired(ctx, afterGrace, noop)
 	if err != nil {
 		t.Fatalf("delete expired after session cleanup: %v", err)
 	}

@@ -159,6 +159,9 @@ func (h *UploadHandler) UploadPart(c echo.Context) error {
 	if size <= 0 || size > maxMultipartUploadPart || size > h.maxFileSize {
 		return apperrors.BadRequestError("invalid " + HeaderPartSize + " header")
 	}
+	if err := validatePartPlacement(session.BlobSize, partNumber, offset, size); err != nil {
+		return apperrors.BadRequestError(err.Error())
+	}
 	if c.Request().ContentLength >= 0 && c.Request().ContentLength != size {
 		return apperrors.BadRequestError("request body size does not match " + HeaderPartSize)
 	}
@@ -231,6 +234,21 @@ func (h *UploadHandler) CompleteUploadSession(c echo.Context) error {
 	ctx := c.Request().Context()
 	sk := domain.SecretStorageKey(session.PublicID)
 	if err := h.fileStore.CompleteMultipartUpload(ctx, sk, session.S3UploadID, completedParts); err != nil {
+		if errors.Is(err, domain.ErrInvalidParts) {
+			// Recorded parts no longer match storage (for example a concurrent
+			// re-upload of the same part number with different content). Forget
+			// them so the client can upload the parts again.
+			if clearErr := h.repo.ClearUploadParts(ctx, session.SessionID); clearErr != nil {
+				return apperrors.InternalError("failed to reset upload parts", clearErr)
+			}
+			return apperrors.ConflictError("uploaded parts were rejected by storage; upload the parts again")
+		}
+		if errors.Is(err, domain.ErrUploadNotFound) {
+			if abortErr := h.repo.AbortUploadSession(ctx, session.SessionID, time.Now()); abortErr != nil {
+				return apperrors.InternalError("failed to abort stale upload session", abortErr)
+			}
+			return apperrors.ConflictError("upload session is no longer valid; start a new upload")
+		}
 		return apperrors.InternalError("failed to complete multipart upload", err)
 	}
 
@@ -400,6 +418,31 @@ func validateUploadParts(session *domain.UploadSession, parts []domain.UploadPar
 		return nil, errors.New("upload is missing parts")
 	}
 	return completed, nil
+}
+
+// validatePartPlacement rejects parts that cannot belong to a valid final
+// layout of blobSize bytes. Without it a session declaring a tiny blob could
+// push thousands of full-size parts into storage until the session expires.
+func validatePartPlacement(blobSize int64, partNumber int, offset, size int64) error {
+	maxParts := (blobSize + s3MinimumPartSize - 1) / s3MinimumPartSize
+	if maxParts < 1 {
+		maxParts = 1
+	}
+	if int64(partNumber) > maxParts {
+		return errors.New("part number exceeds the number of parts for the declared blob size")
+	}
+	// Every part before this one is non-final and therefore at least the S3
+	// minimum, so the offset has a hard lower bound.
+	if offset < int64(partNumber-1)*s3MinimumPartSize {
+		return errors.New("invalid " + HeaderPartOffset + " header")
+	}
+	if offset+size > blobSize {
+		return errors.New("part exceeds the declared blob size")
+	}
+	if offset+size < blobSize && size < s3MinimumPartSize {
+		return errors.New("non-final part is below the minimum part size")
+	}
+	return nil
 }
 
 func parsePartNumber(value string) (int, error) {
