@@ -9,6 +9,10 @@ import (
 	"github.com/pscheid92/secretli/internal/domain"
 )
 
+// cycleTimeout bounds one cleanup pass. The repo holds row locks while the
+// storage callbacks run, so a hung S3 call must not block API deletes forever.
+const cycleTimeout = 10 * time.Minute
+
 type Worker struct {
 	interval   time.Duration
 	secretRepo domain.SecretRepo
@@ -42,6 +46,8 @@ func (w *Worker) Run(ctx context.Context) {
 }
 
 func (w *Worker) runCycle(ctx context.Context) {
+	ctx, cancel := context.WithTimeout(ctx, cycleTimeout)
+	defer cancel()
 	now := time.Now()
 
 	if count, err := w.secretRepo.DeleteExpiredRetrievalSessions(ctx, now); err != nil {
@@ -56,8 +62,18 @@ func (w *Worker) runCycle(ctx context.Context) {
 		if !ok {
 			slog.ErrorContext(ctx, "cleanup: multipart upload cleanup unavailable")
 			w.metrics.CleanupErrors.Inc()
-		} else if count, err := uploadRepo.AbortExpiredUploadSessions(ctx, now, func(session *domain.UploadSession) error {
-			return multipartStore.AbortMultipartUpload(ctx, domain.SecretStorageKey(session.PublicID), session.S3UploadID)
+		} else if count, err := uploadRepo.AbortExpiredUploadSessions(ctx, now, func(session *domain.UploadSession, secretExists bool) error {
+			key := domain.SecretStorageKey(session.PublicID)
+			if err := multipartStore.AbortMultipartUpload(ctx, key, session.S3UploadID); err != nil {
+				return err
+			}
+			// A crash between storage completion and the database commit leaves
+			// a finished object with no secret row. Nothing can ever serve it,
+			// so remove it rather than leaking storage.
+			if !secretExists {
+				return multipartStore.Delete(ctx, key)
+			}
+			return nil
 		}); err != nil {
 			slog.ErrorContext(ctx, "cleanup: expired upload session cleanup failed", "error", err)
 			w.metrics.CleanupErrors.Inc()

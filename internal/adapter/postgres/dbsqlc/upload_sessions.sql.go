@@ -117,6 +117,16 @@ func (q *Queries) CreateUploadSession(ctx context.Context, arg CreateUploadSessi
 	return err
 }
 
+const deleteUploadPartsBySession = `-- name: DeleteUploadPartsBySession :exec
+DELETE FROM upload_parts
+WHERE session_id = $1
+`
+
+func (q *Queries) DeleteUploadPartsBySession(ctx context.Context, sessionID string) error {
+	_, err := q.db.Exec(ctx, deleteUploadPartsBySession, sessionID)
+	return err
+}
+
 const getUploadPartForUpdate = `-- name: GetUploadPartForUpdate :one
 SELECT session_id, part_number, part_offset, part_size, part_sha256, etag, created_at
 FROM upload_parts

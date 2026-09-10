@@ -2,6 +2,7 @@ package s3
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -11,6 +12,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
+	"github.com/aws/smithy-go"
 	"github.com/pscheid92/secretli/internal/domain"
 	platformconfig "github.com/pscheid92/secretli/internal/platform/config"
 )
@@ -140,20 +142,44 @@ func (s *Client) CompleteMultipartUpload(ctx context.Context, key, uploadID stri
 			Parts: completed,
 		},
 	}); err != nil {
+		switch errorCode(err) {
+		case "InvalidPart", "InvalidPartOrder", "EntityTooSmall":
+			return fmt.Errorf("complete multipart upload %q: %w: %w", key, domain.ErrInvalidParts, err)
+		case "NoSuchUpload":
+			return fmt.Errorf("complete multipart upload %q: %w: %w", key, domain.ErrUploadNotFound, err)
+		}
 		return fmt.Errorf("complete multipart upload %q: %w", key, err)
 	}
 	return nil
 }
 
+// AbortMultipartUpload is idempotent: aborting an upload the backend no longer
+// knows (already completed or aborted) is treated as success so cleanup and
+// client-initiated aborts converge instead of failing forever.
 func (s *Client) AbortMultipartUpload(ctx context.Context, key, uploadID string) error {
 	if _, err := s.client.AbortMultipartUpload(ctx, &s3.AbortMultipartUploadInput{
 		Bucket:   aws.String(s.bucket),
 		Key:      aws.String(key),
 		UploadId: aws.String(uploadID),
 	}); err != nil {
+		if errorCode(err) == "NoSuchUpload" {
+			return nil
+		}
 		return fmt.Errorf("abort multipart upload %q: %w", key, err)
 	}
 	return nil
+}
+
+func errorCode(err error) string {
+	var apiErr smithy.APIError
+	if errors.As(err, &apiErr) {
+		return apiErr.ErrorCode()
+	}
+	var noSuchUpload *types.NoSuchUpload
+	if errors.As(err, &noSuchUpload) {
+		return "NoSuchUpload"
+	}
+	return ""
 }
 
 func endpointURL(endpoint string, useSSL bool) string {
