@@ -186,6 +186,7 @@ export default function FileUpload({ onSelect }: FileUploadProps) {
           <div className="divide-y divide-zinc-200 rounded-md border border-zinc-200 bg-white dark:divide-zinc-800 dark:border-zinc-800 dark:bg-zinc-900">
             {selectedFiles.map((f, i) => (
               <div
+                // biome-ignore lint/suspicious/noArrayIndexKey: rows are stateless and the index disambiguates files sharing name and size
                 key={`${f.name}-${f.size}-${i}`}
                 className="group grid grid-cols-[1fr_auto_1.5rem] items-center gap-3 px-3 py-2 text-xs transition-colors duration-100 hover:bg-zinc-50 dark:hover:bg-zinc-800/50"
               >
