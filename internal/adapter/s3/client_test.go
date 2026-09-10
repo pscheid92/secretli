@@ -445,3 +445,39 @@ func TestS3Client_CompleteMultipartUploadRejectsStaleETag(t *testing.T) {
 		t.Fatalf("CompleteMultipartUpload with stale etag error = %v, want ErrInvalidParts", err)
 	}
 }
+
+func TestS3Client_MultipartSinglePart(t *testing.T) {
+	t.Parallel()
+	client := setupSeaweedFS(t)
+	ctx := context.Background()
+
+	// Small bundles are uploaded as one final part well below the S3 minimum
+	// for non-final parts; the backend must accept that.
+	const key = "multipart/single-part"
+	payload := []byte("tiny single-part bundle")
+
+	uploadID, err := client.CreateMultipartUpload(ctx, key)
+	if err != nil {
+		t.Fatalf("CreateMultipartUpload: %v", err)
+	}
+	etag, err := client.UploadPart(ctx, key, uploadID, 1, bytes.NewReader(payload), int64(len(payload)))
+	if err != nil {
+		t.Fatalf("UploadPart: %v", err)
+	}
+	if err := client.CompleteMultipartUpload(ctx, key, uploadID, []domain.CompletedPart{{PartNumber: 1, ETag: etag}}); err != nil {
+		t.Fatalf("CompleteMultipartUpload: %v", err)
+	}
+
+	reader, err := client.Get(ctx, key)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	defer reader.Close()
+	got, err := io.ReadAll(reader)
+	if err != nil {
+		t.Fatalf("ReadAll: %v", err)
+	}
+	if !bytes.Equal(got, payload) {
+		t.Fatalf("object = %q, want %q", got, payload)
+	}
+}

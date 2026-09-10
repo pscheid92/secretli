@@ -97,7 +97,7 @@ Configuration is done via environment variables. See [`.env.example`](.env.examp
 | `S3_ACCESS_KEY` / `S3_SECRET_KEY` | S3 credentials | — |
 | `S3_USE_SSL` | Use HTTPS for a bare host:port endpoint | `true` |
 | `S3_REGION` | Region used for request signing | `us-east-1` |
-| `MAX_FILE_SIZE` | Encrypted upload size limit in bytes; bundles above 64 MiB are uploaded as S3 multipart parts of up to 32 MiB | `1073741824` (1 GiB) |
+| `MAX_FILE_SIZE` | Encrypted upload size limit in bytes; file bundles are always streamed as S3 multipart parts of up to 32 MiB, text secrets are a single request | `1073741824` (1 GiB) |
 | `CLEANUP_INTERVAL` | Expired secret cleanup frequency | `1m` |
 | `ALLOWED_ORIGINS` | CORS allowed origins | — |
 | `METRICS_TOKEN` | Optional bearer token required for `/metrics` | — |

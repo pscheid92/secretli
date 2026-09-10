@@ -32,7 +32,7 @@ make lint          # Linters (Go + frontend)
 make vuln          # govulncheck against Go dependencies
 ```
 
-`make e2e-large` is not part of normal PR CI. It defaults to a near-limit synthetic file and can be tuned with `LARGE_E2E_SIZE_MB`, `LARGE_E2E_MAX_TOTAL_MS`, and `LARGE_E2E_MAX_HEAP_MIB`. Set `LARGE_E2E_MODE=legacy` when comparing against a pre-bundle app.
+`make e2e-large` is not part of normal PR CI. It defaults to a near-limit synthetic file and can be tuned with `LARGE_E2E_SIZE_MB`, `LARGE_E2E_MAX_TOTAL_MS`, and `LARGE_E2E_MAX_HEAP_MIB`.
 
 ## Submitting Changes
 

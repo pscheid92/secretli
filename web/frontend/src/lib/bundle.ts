@@ -201,10 +201,9 @@ export async function encryptBundleV2Plan(
       throw new Error("bundle file changed during encryption");
     }
 
-    const encrypted = keySet.encryptBundlePartDeterministic(
+    const encrypted = keySet.encryptBundlePart(
       plaintext,
       chunkAad(record.fileIndex, record.chunkIndex, record.plaintextSize),
-      `record:${record.fileIndex}:${record.chunkIndex}:${record.plaintextSize}`,
     );
     if (encrypted.length !== record.length) {
       throw new Error("bundle record size mismatch");
@@ -222,11 +221,7 @@ export async function encryptBundleV2Plan(
     throw new Error("bundle manifest is too large");
   }
 
-  const encryptedManifest = keySet.encryptBundlePartDeterministic(
-    manifestPlaintext,
-    manifestAadV2(),
-    "manifest:v2",
-  );
+  const encryptedManifest = keySet.encryptBundlePart(manifestPlaintext, manifestAadV2());
   if (encryptedManifest.length !== plan.encryptedManifestLength) {
     throw new Error("bundle manifest size mismatch");
   }
