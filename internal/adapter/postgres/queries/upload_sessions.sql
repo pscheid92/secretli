@@ -20,10 +20,11 @@ INSERT INTO upload_sessions (
     secret_expires_at,
     upload_expires_at,
     created_at,
+    storage_key,
     state
 )
 VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, 'pending'
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, 'pending'
 );
 
 -- name: GetUploadSession :one
@@ -52,15 +53,25 @@ WHERE state = 'pending'
 FOR UPDATE SKIP LOCKED;
 
 -- name: MarkUploadSessionCompleted :exec
+-- The share material now lives on the secret row; the session keeps only
+-- what a repeated complete needs.
 UPDATE upload_sessions
 SET state = 'completed',
-    completed_at = sqlc.arg(now_at)
+    completed_at = sqlc.arg(now_at),
+    metadata_token_hash = NULL,
+    blob_token_hash = NULL,
+    deletion_token_hash = NULL,
+    encrypted_meta = NULL
 WHERE session_id = sqlc.arg(session_id);
 
 -- name: MarkUploadSessionAborted :execrows
 UPDATE upload_sessions
 SET state = 'aborted',
-    aborted_at = sqlc.arg(now_at)
+    aborted_at = sqlc.arg(now_at),
+    metadata_token_hash = NULL,
+    blob_token_hash = NULL,
+    deletion_token_hash = NULL,
+    encrypted_meta = NULL
 WHERE session_id = sqlc.arg(session_id)
   AND state = 'pending';
 
@@ -95,3 +106,8 @@ RETURNING *;
 -- name: DeleteUploadPartsBySession :exec
 DELETE FROM upload_parts
 WHERE session_id = $1;
+
+-- name: DeleteFinishedUploadSessions :execrows
+DELETE FROM upload_sessions
+WHERE state <> 'pending'
+  AND COALESCE(completed_at, aborted_at) < sqlc.arg(finished_before);

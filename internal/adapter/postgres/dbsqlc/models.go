@@ -27,6 +27,7 @@ type Secret struct {
 	ExpiresAt         pgtype.Timestamptz
 	CreatedAt         pgtype.Timestamptz
 	RetrievedAt       pgtype.Timestamptz
+	StorageKey        string
 }
 
 type UploadPart struct {
@@ -43,12 +44,12 @@ type UploadSession struct {
 	SessionID         string
 	PublicID          string
 	UploadTokenHash   string
-	MetadataTokenHash string
-	BlobTokenHash     string
-	DeletionTokenHash string
+	MetadataTokenHash pgtype.Text
+	BlobTokenHash     pgtype.Text
+	DeletionTokenHash pgtype.Text
 	S3UploadID        string
 	BlobSize          int64
-	EncryptedMeta     string
+	EncryptedMeta     pgtype.Text
 	BurnAfterRead     bool
 	SecretExpiresAt   pgtype.Timestamptz
 	UploadExpiresAt   pgtype.Timestamptz
@@ -56,4 +57,5 @@ type UploadSession struct {
 	CreatedAt         pgtype.Timestamptz
 	CompletedAt       pgtype.Timestamptz
 	AbortedAt         pgtype.Timestamptz
+	StorageKey        string
 }

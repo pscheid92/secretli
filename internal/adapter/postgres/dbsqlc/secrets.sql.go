@@ -45,10 +45,11 @@ INSERT INTO secrets (
     blob_size,
     burn_after_read,
     expires_at,
-    created_at
+    created_at,
+    storage_key
 )
 VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10
 )
 `
 
@@ -62,6 +63,7 @@ type CreateSecretParams struct {
 	BurnAfterRead     bool
 	ExpiresAt         pgtype.Timestamptz
 	CreatedAt         pgtype.Timestamptz
+	StorageKey        string
 }
 
 func (q *Queries) CreateSecret(ctx context.Context, arg CreateSecretParams) error {
@@ -75,6 +77,7 @@ func (q *Queries) CreateSecret(ctx context.Context, arg CreateSecretParams) erro
 		arg.BurnAfterRead,
 		arg.ExpiresAt,
 		arg.CreatedAt,
+		arg.StorageKey,
 	)
 	return err
 }
@@ -103,7 +106,8 @@ SELECT
     burn_after_read,
     expires_at,
     created_at,
-    retrieved_at
+    retrieved_at,
+    storage_key
 FROM secrets
 WHERE public_id = $1
   AND expires_at > $2
@@ -128,12 +132,13 @@ func (q *Queries) GetSecretByPublicID(ctx context.Context, arg GetSecretByPublic
 		&i.ExpiresAt,
 		&i.CreatedAt,
 		&i.RetrievedAt,
+		&i.StorageKey,
 	)
 	return i, err
 }
 
 const selectConsumedBurnAfterReadSecretsForCleanup = `-- name: SelectConsumedBurnAfterReadSecretsForCleanup :many
-SELECT s.public_id
+SELECT s.public_id, s.storage_key
 FROM secrets AS s
 WHERE s.burn_after_read = true
   AND s.retrieved_at IS NOT NULL
@@ -147,19 +152,24 @@ WHERE s.burn_after_read = true
 FOR UPDATE OF s SKIP LOCKED
 `
 
-func (q *Queries) SelectConsumedBurnAfterReadSecretsForCleanup(ctx context.Context, nowAt pgtype.Timestamptz) ([]string, error) {
+type SelectConsumedBurnAfterReadSecretsForCleanupRow struct {
+	PublicID   string
+	StorageKey string
+}
+
+func (q *Queries) SelectConsumedBurnAfterReadSecretsForCleanup(ctx context.Context, nowAt pgtype.Timestamptz) ([]SelectConsumedBurnAfterReadSecretsForCleanupRow, error) {
 	rows, err := q.db.Query(ctx, selectConsumedBurnAfterReadSecretsForCleanup, nowAt)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []string{}
+	items := []SelectConsumedBurnAfterReadSecretsForCleanupRow{}
 	for rows.Next() {
-		var public_id string
-		if err := rows.Scan(&public_id); err != nil {
+		var i SelectConsumedBurnAfterReadSecretsForCleanupRow
+		if err := rows.Scan(&i.PublicID, &i.StorageKey); err != nil {
 			return nil, err
 		}
-		items = append(items, public_id)
+		items = append(items, i)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -168,25 +178,30 @@ func (q *Queries) SelectConsumedBurnAfterReadSecretsForCleanup(ctx context.Conte
 }
 
 const selectExpiredSecretsForCleanup = `-- name: SelectExpiredSecretsForCleanup :many
-SELECT s.public_id
+SELECT s.public_id, s.storage_key
 FROM secrets AS s
 WHERE s.expires_at < $1
 FOR UPDATE OF s SKIP LOCKED
 `
 
-func (q *Queries) SelectExpiredSecretsForCleanup(ctx context.Context, nowAt pgtype.Timestamptz) ([]string, error) {
+type SelectExpiredSecretsForCleanupRow struct {
+	PublicID   string
+	StorageKey string
+}
+
+func (q *Queries) SelectExpiredSecretsForCleanup(ctx context.Context, nowAt pgtype.Timestamptz) ([]SelectExpiredSecretsForCleanupRow, error) {
 	rows, err := q.db.Query(ctx, selectExpiredSecretsForCleanup, nowAt)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []string{}
+	items := []SelectExpiredSecretsForCleanupRow{}
 	for rows.Next() {
-		var public_id string
-		if err := rows.Scan(&public_id); err != nil {
+		var i SelectExpiredSecretsForCleanupRow
+		if err := rows.Scan(&i.PublicID, &i.StorageKey); err != nil {
 			return nil, err
 		}
-		items = append(items, public_id)
+		items = append(items, i)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err

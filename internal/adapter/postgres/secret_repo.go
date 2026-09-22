@@ -37,6 +37,7 @@ func (r *SecretRepo) Create(ctx context.Context, secret *domain.Secret, now time
 		BurnAfterRead:     secret.BurnAfterRead,
 		ExpiresAt:         timestamptz(secret.ExpiresAt),
 		CreatedAt:         timestamptz(now),
+		StorageKey:        secret.StorageKey,
 	}
 	err := r.q.CreateSecret(ctx, params)
 	if err != nil && isDuplicateKeyError(err) {
@@ -144,7 +145,7 @@ func (r *SecretRepo) Delete(ctx context.Context, publicID string) error {
 	return nil
 }
 
-func (r *SecretRepo) DeleteExpired(ctx context.Context, now time.Time, beforeDelete func(publicID string) error) (int64, error) {
+func (r *SecretRepo) DeleteExpired(ctx context.Context, now time.Time, beforeDelete func(storageKey string) error) (int64, error) {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
 		return 0, fmt.Errorf("begin tx: %w", err)
@@ -163,15 +164,23 @@ func (r *SecretRepo) DeleteExpired(ctx context.Context, now time.Time, beforeDel
 		return 0, fmt.Errorf("select consumed burn-after-read: %w", err)
 	}
 
+	type doomed struct{ publicID, storageKey string }
+	candidates := make([]doomed, 0, len(expiredIDs)+len(consumedIDs))
+	for _, row := range expiredIDs {
+		candidates = append(candidates, doomed{row.PublicID, row.StorageKey})
+	}
+	for _, row := range consumedIDs {
+		candidates = append(candidates, doomed{row.PublicID, row.StorageKey})
+	}
+
 	var deleted int64
-	publicIDs := append(expiredIDs, consumedIDs...)
-	for _, id := range publicIDs {
-		if err := beforeDelete(id); err != nil {
-			slog.ErrorContext(ctx, "cleanup: beforeDelete failed, skipping", "public_id", id, "error", err)
+	for _, c := range candidates {
+		if err := beforeDelete(c.storageKey); err != nil {
+			slog.ErrorContext(ctx, "cleanup: beforeDelete failed, skipping", "public_id", c.publicID, "error", err)
 			continue
 		}
-		if _, err := qtx.DeleteSecret(ctx, id); err != nil {
-			slog.ErrorContext(ctx, "cleanup: delete row failed", "public_id", id, "error", err)
+		if _, err := qtx.DeleteSecret(ctx, c.publicID); err != nil {
+			slog.ErrorContext(ctx, "cleanup: delete row failed", "public_id", c.publicID, "error", err)
 			continue
 		}
 		deleted++
@@ -204,16 +213,17 @@ func (r *SecretRepo) CreateUploadSession(ctx context.Context, session *domain.Up
 		SessionID:         session.SessionID,
 		PublicID:          session.PublicID,
 		UploadTokenHash:   session.UploadTokenHash,
-		MetadataTokenHash: session.MetadataTokenHash,
-		BlobTokenHash:     session.BlobTokenHash,
-		DeletionTokenHash: session.DeletionTokenHash,
+		MetadataTokenHash: text(session.MetadataTokenHash),
+		BlobTokenHash:     text(session.BlobTokenHash),
+		DeletionTokenHash: text(session.DeletionTokenHash),
 		S3UploadID:        session.S3UploadID,
 		BlobSize:          session.BlobSize,
-		EncryptedMeta:     session.EncryptedMeta,
+		EncryptedMeta:     text(session.EncryptedMeta),
 		BurnAfterRead:     session.BurnAfterRead,
 		SecretExpiresAt:   timestamptz(session.SecretExpiresAt),
 		UploadExpiresAt:   timestamptz(session.UploadExpiresAt),
 		CreatedAt:         timestamptz(session.CreatedAt),
+		StorageKey:        session.StorageKey,
 	})
 	if err != nil && isDuplicateKeyError(err) {
 		return domain.ErrDuplicate
@@ -287,54 +297,80 @@ func (r *SecretRepo) RecordUploadPart(ctx context.Context, part *domain.UploadPa
 	return uploadPartFromRow(inserted), nil
 }
 
-func (r *SecretRepo) CompleteUploadSession(ctx context.Context, sessionID string, secret *domain.Secret, now time.Time) error {
+func (r *SecretRepo) CompleteUploadSession(ctx context.Context, sessionID string, now time.Time, finalize func(*domain.UploadSession, []domain.UploadPart) error) (*domain.UploadSession, error) {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
-		return fmt.Errorf("begin complete upload session tx: %w", err)
+		return nil, fmt.Errorf("begin complete upload session tx: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 	qtx := r.q.WithTx(tx)
 
-	session, err := qtx.GetUploadSessionForUpdate(ctx, sessionID)
+	row, err := qtx.GetUploadSessionForUpdate(ctx, sessionID)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return domain.ErrNotFound
+		return nil, domain.ErrNotFound
 	}
 	if err != nil {
-		return fmt.Errorf("query upload session for complete: %w", err)
+		return nil, fmt.Errorf("query upload session for complete: %w", err)
 	}
-	if session.State != domain.UploadSessionStatePending {
-		return domain.ErrConflict
+	session := uploadSessionFromRow(row)
+	switch session.State {
+	case domain.UploadSessionStateCompleted:
+		return session, nil
+	case domain.UploadSessionStatePending:
+	default:
+		return nil, domain.ErrConflict
+	}
+
+	// Read the parts under the lock: the caller's earlier read may predate a
+	// concurrent part upload or reset.
+	partRows, err := qtx.ListUploadPartsBySession(ctx, sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("query upload parts for complete: %w", err)
+	}
+	if err := finalize(session, uploadPartsFromRows(partRows)); err != nil {
+		return nil, err
 	}
 
 	err = qtx.CreateSecret(ctx, dbsqlc.CreateSecretParams{
-		PublicID:          secret.PublicID,
-		MetadataTokenHash: secret.MetadataTokenHash,
-		BlobTokenHash:     secret.BlobTokenHash,
-		DeletionTokenHash: secret.DeletionTokenHash,
-		EncryptedMeta:     secret.EncryptedMeta,
-		BlobSize:          secret.BlobSize,
-		BurnAfterRead:     secret.BurnAfterRead,
-		ExpiresAt:         timestamptz(secret.ExpiresAt),
+		PublicID:          session.PublicID,
+		MetadataTokenHash: session.MetadataTokenHash,
+		BlobTokenHash:     session.BlobTokenHash,
+		DeletionTokenHash: session.DeletionTokenHash,
+		EncryptedMeta:     session.EncryptedMeta,
+		BlobSize:          session.BlobSize,
+		BurnAfterRead:     session.BurnAfterRead,
+		ExpiresAt:         timestamptz(session.SecretExpiresAt),
 		CreatedAt:         timestamptz(now),
+		StorageKey:        session.StorageKey,
 	})
 	if err != nil && isDuplicateKeyError(err) {
-		return domain.ErrDuplicate
+		return nil, domain.ErrDuplicate
 	}
 	if err != nil {
-		return fmt.Errorf("insert completed secret: %w", err)
+		return nil, fmt.Errorf("insert completed secret: %w", err)
 	}
 
 	if err := qtx.MarkUploadSessionCompleted(ctx, dbsqlc.MarkUploadSessionCompletedParams{
 		NowAt:     timestamptz(now),
 		SessionID: sessionID,
 	}); err != nil {
-		return fmt.Errorf("mark upload session completed: %w", err)
+		return nil, fmt.Errorf("mark upload session completed: %w", err)
+	}
+	if err := qtx.DeleteUploadPartsBySession(ctx, sessionID); err != nil {
+		return nil, fmt.Errorf("delete completed upload parts: %w", err)
 	}
 
 	if err := tx.Commit(ctx); err != nil {
-		return fmt.Errorf("commit complete upload session: %w", err)
+		return nil, fmt.Errorf("commit complete upload session: %w", err)
 	}
-	return nil
+
+	session.State = domain.UploadSessionStateCompleted
+	session.CompletedAt = &now
+	session.MetadataTokenHash = ""
+	session.BlobTokenHash = ""
+	session.DeletionTokenHash = ""
+	session.EncryptedMeta = ""
+	return session, nil
 }
 
 func (r *SecretRepo) AbortUploadSession(ctx context.Context, sessionID string, now time.Time) error {
@@ -353,6 +389,7 @@ func (r *SecretRepo) AbortUploadSession(ctx context.Context, sessionID string, n
 		if !exists {
 			return domain.ErrNotFound
 		}
+		return domain.ErrConflict
 	}
 	return nil
 }
@@ -364,7 +401,7 @@ func (r *SecretRepo) ClearUploadParts(ctx context.Context, sessionID string) err
 	return nil
 }
 
-func (r *SecretRepo) AbortExpiredUploadSessions(ctx context.Context, now time.Time, beforeAbort func(session *domain.UploadSession, secretExists bool) error) (int64, error) {
+func (r *SecretRepo) AbortExpiredUploadSessions(ctx context.Context, now time.Time, beforeAbort func(session *domain.UploadSession) error) (int64, error) {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
 		return 0, fmt.Errorf("begin expired upload session tx: %w", err)
@@ -380,12 +417,7 @@ func (r *SecretRepo) AbortExpiredUploadSessions(ctx context.Context, now time.Ti
 	var aborted int64
 	for _, row := range rows {
 		session := uploadSessionFromRow(row)
-		secretExists, err := qtx.SecretExistsByPublicID(ctx, session.PublicID)
-		if err != nil {
-			slog.ErrorContext(ctx, "cleanup: check secret for upload session failed, skipping", "session_id", session.SessionID, "error", err)
-			continue
-		}
-		if err := beforeAbort(session, secretExists); err != nil {
+		if err := beforeAbort(session); err != nil {
 			slog.ErrorContext(ctx, "cleanup: abort multipart upload failed, skipping", "session_id", session.SessionID, "error", err)
 			continue
 		}
@@ -405,6 +437,14 @@ func (r *SecretRepo) AbortExpiredUploadSessions(ctx context.Context, now time.Ti
 	return aborted, nil
 }
 
+func (r *SecretRepo) DeleteFinishedUploadSessions(ctx context.Context, finishedBefore time.Time) (int64, error) {
+	n, err := r.q.DeleteFinishedUploadSessions(ctx, timestamptz(finishedBefore))
+	if err != nil {
+		return 0, fmt.Errorf("delete finished upload sessions: %w", err)
+	}
+	return n, nil
+}
+
 func secretFromRow(row dbsqlc.Secret) *domain.Secret {
 	return &domain.Secret{
 		PublicID:          row.PublicID,
@@ -417,6 +457,7 @@ func secretFromRow(row dbsqlc.Secret) *domain.Secret {
 		ExpiresAt:         row.ExpiresAt.Time,
 		CreatedAt:         row.CreatedAt.Time,
 		RetrievedAt:       pointerFromTimestamp(row.RetrievedAt),
+		StorageKey:        row.StorageKey,
 	}
 }
 
@@ -425,12 +466,13 @@ func uploadSessionFromRow(row dbsqlc.UploadSession) *domain.UploadSession {
 		SessionID:         row.SessionID,
 		UploadTokenHash:   row.UploadTokenHash,
 		PublicID:          row.PublicID,
+		StorageKey:        row.StorageKey,
 		S3UploadID:        row.S3UploadID,
 		BlobSize:          row.BlobSize,
-		MetadataTokenHash: row.MetadataTokenHash,
-		BlobTokenHash:     row.BlobTokenHash,
-		DeletionTokenHash: row.DeletionTokenHash,
-		EncryptedMeta:     row.EncryptedMeta,
+		MetadataTokenHash: row.MetadataTokenHash.String,
+		BlobTokenHash:     row.BlobTokenHash.String,
+		DeletionTokenHash: row.DeletionTokenHash.String,
+		EncryptedMeta:     row.EncryptedMeta.String,
 		BurnAfterRead:     row.BurnAfterRead,
 		SecretExpiresAt:   row.SecretExpiresAt.Time,
 		UploadExpiresAt:   row.UploadExpiresAt.Time,
@@ -470,6 +512,10 @@ func pointerFromTimestamp(t pgtype.Timestamptz) *time.Time {
 
 func timestamptz(t time.Time) pgtype.Timestamptz {
 	return pgtype.Timestamptz{Time: t, Valid: true}
+}
+
+func text(s string) pgtype.Text {
+	return pgtype.Text{String: s, Valid: true}
 }
 
 func isDuplicateKeyError(err error) bool {
