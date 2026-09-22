@@ -24,13 +24,10 @@ type mockSecretRepo struct {
 	deleteExpiredErr    error
 	deleteExpiredCalled atomic.Int32
 
-	expiredUploads   []expiredUploadSession
+	expiredUploads   []domain.UploadSession
 	expiredUploadErr error
-}
 
-type expiredUploadSession struct {
-	session      domain.UploadSession
-	secretExists bool
+	finishedBefore time.Time
 }
 
 func (m *mockSecretRepo) DeleteExpired(_ context.Context, _ time.Time, beforeDelete func(string) error) (int64, error) {
@@ -52,19 +49,23 @@ func (m *mockSecretRepo) DeleteExpiredRetrievalSessions(_ context.Context, _ tim
 	return 0, nil
 }
 
-func (m *mockSecretRepo) AbortExpiredUploadSessions(_ context.Context, _ time.Time, beforeAbort func(*domain.UploadSession, bool) error) (int64, error) {
+func (m *mockSecretRepo) AbortExpiredUploadSessions(_ context.Context, _ time.Time, beforeAbort func(*domain.UploadSession) error) (int64, error) {
 	if m.expiredUploadErr != nil {
 		return 0, m.expiredUploadErr
 	}
 	var aborted int64
-	for _, e := range m.expiredUploads {
-		session := e.session
-		if err := beforeAbort(&session, e.secretExists); err != nil {
+	for _, session := range m.expiredUploads {
+		if err := beforeAbort(&session); err != nil {
 			continue
 		}
 		aborted++
 	}
 	return aborted, nil
+}
+
+func (m *mockSecretRepo) DeleteFinishedUploadSessions(_ context.Context, finishedBefore time.Time) (int64, error) {
+	m.finishedBefore = finishedBefore
+	return 0, nil
 }
 
 type mockFileStore struct {
@@ -105,27 +106,40 @@ func (m *mockFileStore) AbortMultipartUpload(_ context.Context, key, uploadID st
 // --- Tests ---
 
 func TestRunCycle_ExpiredUploadSessions(t *testing.T) {
-	repo := &mockSecretRepo{expiredUploads: []expiredUploadSession{
-		{session: domain.UploadSession{SessionID: "s1", PublicID: "orphan", S3UploadID: "u1"}, secretExists: false},
-		{session: domain.UploadSession{SessionID: "s2", PublicID: "owned", S3UploadID: "u2"}, secretExists: true},
+	repo := &mockSecretRepo{expiredUploads: []domain.UploadSession{
+		{SessionID: "s1", StorageKey: "blobs/s1", S3UploadID: "u1"},
+		{SessionID: "s2", StorageKey: "blobs/s2", S3UploadID: "u2"},
 	}}
 	store := &mockFileStore{}
 
 	w := NewWorker(time.Minute, repo, store, testMetrics())
 	w.runCycle(context.Background())
 
-	if len(store.abortedUploads) != 2 || store.abortedUploads[0] != "secrets/orphan#u1" || store.abortedUploads[1] != "secrets/owned#u2" {
+	if len(store.abortedUploads) != 2 || store.abortedUploads[0] != "blobs/s1#u1" || store.abortedUploads[1] != "blobs/s2#u2" {
 		t.Errorf("aborted uploads = %v, want both sessions aborted", store.abortedUploads)
 	}
-	// Only the session with no secret row has its (orphaned) object removed.
-	if len(store.deletedKeys) != 1 || store.deletedKeys[0] != "secrets/orphan" {
-		t.Errorf("deleted keys = %v, want only the orphaned object", store.deletedKeys)
+	// Each session's key is its own, so any object left behind is removed.
+	if len(store.deletedKeys) != 2 || store.deletedKeys[0] != "blobs/s1" || store.deletedKeys[1] != "blobs/s2" {
+		t.Errorf("deleted keys = %v, want both sessions' objects", store.deletedKeys)
+	}
+}
+
+func TestRunCycle_PurgesFinishedUploadSessions(t *testing.T) {
+	repo := &mockSecretRepo{}
+	w := NewWorker(time.Minute, repo, &mockFileStore{}, testMetrics())
+
+	before := time.Now()
+	w.runCycle(context.Background())
+	after := time.Now()
+
+	if repo.finishedBefore.Before(before.Add(-finishedUploadRetention)) || repo.finishedBefore.After(after.Add(-finishedUploadRetention)) {
+		t.Errorf("finished sessions purged before %v, want %v before the cycle", repo.finishedBefore, finishedUploadRetention)
 	}
 }
 
 func TestRunCycle_ExpiredUploadSessionAbortFailureIsIsolated(t *testing.T) {
-	repo := &mockSecretRepo{expiredUploads: []expiredUploadSession{
-		{session: domain.UploadSession{SessionID: "s1", PublicID: "p1", S3UploadID: "u1"}},
+	repo := &mockSecretRepo{expiredUploads: []domain.UploadSession{
+		{SessionID: "s1", StorageKey: "blobs/s1", S3UploadID: "u1"},
 	}}
 	store := &mockFileStore{abortErr: errors.New("storage down")}
 
@@ -142,7 +156,7 @@ func TestRunCycle_ExpiredUploadSessionAbortFailureIsIsolated(t *testing.T) {
 
 func TestRunCycle_Success(t *testing.T) {
 	secretRepo := &mockSecretRepo{
-		deleteExpiredKeys: []string{"pub1", "pub2", "pub3"},
+		deleteExpiredKeys: []string{"blobs/s1", "blobs/s2", "secrets/legacy"},
 	}
 	fileStore := &mockFileStore{}
 
@@ -158,7 +172,7 @@ func TestRunCycle_Success(t *testing.T) {
 	if len(fileStore.deletedKeys) != 3 {
 		t.Fatalf("expected 3 deleted keys, got %d", len(fileStore.deletedKeys))
 	}
-	for i, expected := range []string{"secrets/pub1", "secrets/pub2", "secrets/pub3"} {
+	for i, expected := range []string{"blobs/s1", "blobs/s2", "secrets/legacy"} {
 		if fileStore.deletedKeys[i] != expected {
 			t.Errorf("deletedKeys[%d] = %q, want %q", i, fileStore.deletedKeys[i], expected)
 		}

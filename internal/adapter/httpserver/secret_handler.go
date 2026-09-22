@@ -136,7 +136,7 @@ func (h *SecretHandler) RetrieveSecretRange(c echo.Context) error {
 	}
 
 	ctx := c.Request().Context()
-	obj, err := h.fileStore.GetRange(ctx, domain.SecretStorageKey(publicID), start, end)
+	obj, err := h.fileStore.GetRange(ctx, secret.StorageKey, start, end)
 	if err != nil {
 		return apperrors.InternalError("failed to get blob range from S3", err)
 	}
@@ -194,16 +194,13 @@ func (h *SecretHandler) DeleteSecret(c echo.Context) error {
 		return apperrors.ForbiddenError("invalid deletion token")
 	}
 
-	publicID := c.Param("publicID")
-
-	sk := domain.SecretStorageKey(publicID)
-	if err := h.fileStore.Delete(ctx, sk); err != nil {
+	if err := h.fileStore.Delete(ctx, secret.StorageKey); err != nil {
 		return apperrors.InternalError("failed to delete blob from S3", err)
 	}
 
 	// The row may already be gone if cleanup raced with this request; the
 	// object is deleted either way, so report success.
-	if err := h.repo.Delete(ctx, publicID); err != nil && !errors.Is(err, domain.ErrNotFound) {
+	if err := h.repo.Delete(ctx, secret.PublicID); err != nil && !errors.Is(err, domain.ErrNotFound) {
 		return apperrors.InternalError("failed to delete secret", err)
 	}
 

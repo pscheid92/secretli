@@ -3,6 +3,8 @@ package postgres_test
 import (
 	"context"
 	"errors"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -17,6 +19,7 @@ func newTestUploadSession(sessionID, publicID string, uploadExpiresAt time.Time)
 		SessionID:         sessionID,
 		UploadTokenHash:   tokencrypto.TokenHash("upload-token-" + sessionID),
 		PublicID:          publicID,
+		StorageKey:        domain.UploadStorageKey(sessionID),
 		S3UploadID:        "s3-upload-" + sessionID,
 		BlobSize:          4096,
 		MetadataTokenHash: tokencrypto.TokenHash("metadata-token-" + publicID),
@@ -57,7 +60,7 @@ func TestUploadSessionRepo_CreateAndGet(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get upload session: %v", err)
 	}
-	if got.PublicID != session.PublicID || got.S3UploadID != session.S3UploadID || got.BlobSize != session.BlobSize {
+	if got.PublicID != session.PublicID || got.StorageKey != session.StorageKey || got.S3UploadID != session.S3UploadID || got.BlobSize != session.BlobSize {
 		t.Errorf("session round trip mismatch: %+v", got)
 	}
 	if got.State != domain.UploadSessionStatePending {
@@ -169,65 +172,197 @@ func TestUploadSessionRepo_Complete(t *testing.T) {
 	if err := repo.CreateUploadSession(ctx, session); err != nil {
 		t.Fatalf("create upload session: %v", err)
 	}
+	if _, err := repo.RecordUploadPart(ctx, newTestUploadPart("us-complete", 1, 0, 4096)); err != nil {
+		t.Fatalf("record part: %v", err)
+	}
 
-	secret := newTestSecret("us-complete-public", session.SecretExpiresAt)
-	if err := repo.CompleteUploadSession(ctx, "us-complete", secret, time.Now()); err != nil {
+	var finalizedParts []domain.UploadPart
+	completed, err := repo.CompleteUploadSession(ctx, "us-complete", time.Now(), func(locked *domain.UploadSession, parts []domain.UploadPart) error {
+		if locked.EncryptedMeta != session.EncryptedMeta || locked.StorageKey != session.StorageKey {
+			t.Errorf("finalize got session %+v, want the pending session's data", locked)
+		}
+		finalizedParts = parts
+		return nil
+	})
+	if err != nil {
 		t.Fatalf("complete: %v", err)
 	}
+	if len(finalizedParts) != 1 || finalizedParts[0].PartNumber != 1 {
+		t.Errorf("finalize parts = %+v, want part 1", finalizedParts)
+	}
+	if completed.State != domain.UploadSessionStateCompleted || completed.SecretExpiresAt.Sub(session.SecretExpiresAt).Abs() > time.Millisecond {
+		t.Errorf("completed session = %+v", completed)
+	}
 
-	got, _, err := repo.GetUploadSession(ctx, "us-complete")
+	secret, err := repo.GetByPublicID(ctx, "us-complete-public", time.Now())
 	if err != nil {
-		t.Fatalf("get upload session: %v", err)
-	}
-	if got.State != domain.UploadSessionStateCompleted || got.CompletedAt == nil {
-		t.Errorf("session state = %q, completed_at = %v; want completed", got.State, got.CompletedAt)
-	}
-	if _, err := repo.GetByPublicID(ctx, "us-complete-public", time.Now()); err != nil {
 		t.Fatalf("completed secret should be retrievable: %v", err)
 	}
-
-	// Completing twice is a conflict and does not duplicate the secret.
-	if err := repo.CompleteUploadSession(ctx, "us-complete", secret, time.Now()); !errors.Is(err, domain.ErrConflict) {
-		t.Fatalf("second complete error = %v, want ErrConflict", err)
+	if secret.StorageKey != session.StorageKey || secret.EncryptedMeta != session.EncryptedMeta || secret.BlobTokenHash != session.BlobTokenHash {
+		t.Errorf("secret = %+v, want the session's share data and storage key", secret)
 	}
-	if err := repo.CompleteUploadSession(ctx, "missing", secret, time.Now()); !errors.Is(err, domain.ErrNotFound) {
+
+	// Completing again is idempotent: the tombstone answers without running
+	// finalize or creating anything.
+	again, err := repo.CompleteUploadSession(ctx, "us-complete", time.Now(), func(*domain.UploadSession, []domain.UploadPart) error {
+		t.Error("finalize must not run for a completed session")
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("second complete: %v", err)
+	}
+	if again.State != domain.UploadSessionStateCompleted || !again.SecretExpiresAt.Equal(completed.SecretExpiresAt) {
+		t.Errorf("second complete = %+v, want the completed tombstone", again)
+	}
+
+	if _, err := repo.CompleteUploadSession(ctx, "missing", time.Now(), noFinalize(t)); !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("complete missing error = %v, want ErrNotFound", err)
 	}
 
-	// Aborting a completed session is a no-op rather than an error.
-	if err := repo.AbortUploadSession(ctx, "us-complete", time.Now()); err != nil {
-		t.Fatalf("abort completed session: %v", err)
+	// Aborting a completed session reports that it is no longer pending.
+	if err := repo.AbortUploadSession(ctx, "us-complete", time.Now()); !errors.Is(err, domain.ErrConflict) {
+		t.Fatalf("abort completed session error = %v, want ErrConflict", err)
 	}
 	if err := repo.AbortUploadSession(ctx, "missing", time.Now()); !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("abort missing error = %v, want ErrNotFound", err)
 	}
 }
 
-func TestUploadSessionRepo_CompleteIsAtomicWhenSecretExists(t *testing.T) {
+func TestUploadSessionRepo_CompleteScrubsShareMaterial(t *testing.T) {
 	pool := setupTestDB(t)
 	repo := pgadapter.NewSecretRepo(pool)
 	ctx := context.Background()
 
-	session := newTestUploadSession("us-atomic", "us-atomic-public", time.Now().Add(time.Hour))
-	if err := repo.CreateUploadSession(ctx, session); err != nil {
-		t.Fatalf("create upload session: %v", err)
+	for _, s := range []*domain.UploadSession{
+		newTestUploadSession("us-scrub-done", "us-scrub-done-public", time.Now().Add(time.Hour)),
+		newTestUploadSession("us-scrub-aborted", "us-scrub-aborted-public", time.Now().Add(time.Hour)),
+	} {
+		if err := repo.CreateUploadSession(ctx, s); err != nil {
+			t.Fatalf("create %s: %v", s.SessionID, err)
+		}
+		if _, err := repo.RecordUploadPart(ctx, newTestUploadPart(s.SessionID, 1, 0, 4096)); err != nil {
+			t.Fatalf("record part: %v", err)
+		}
 	}
-	// A secret appears under the same public_id before completion.
-	if err := repo.Create(ctx, newTestSecret("us-atomic-public", time.Now().Add(time.Hour)), time.Now()); err != nil {
-		t.Fatalf("create secret: %v", err)
+	if _, err := repo.CompleteUploadSession(ctx, "us-scrub-done", time.Now(), noopFinalize); err != nil {
+		t.Fatalf("complete: %v", err)
+	}
+	if err := repo.AbortUploadSession(ctx, "us-scrub-aborted", time.Now()); err != nil {
+		t.Fatalf("abort: %v", err)
 	}
 
-	err := repo.CompleteUploadSession(ctx, "us-atomic", newTestSecret("us-atomic-public", time.Now().Add(time.Hour)), time.Now())
-	if !errors.Is(err, domain.ErrDuplicate) {
-		t.Fatalf("complete error = %v, want ErrDuplicate", err)
+	for _, id := range []string{"us-scrub-done", "us-scrub-aborted"} {
+		var leftovers int
+		if err := pool.QueryRow(ctx, `
+			SELECT num_nonnulls(metadata_token_hash, blob_token_hash, deletion_token_hash, encrypted_meta)
+			FROM upload_sessions WHERE session_id = $1`, id).Scan(&leftovers); err != nil {
+			t.Fatalf("query %s: %v", id, err)
+		}
+		if leftovers != 0 {
+			t.Errorf("%s keeps %d share-material columns, want 0", id, leftovers)
+		}
 	}
-	got, _, err := repo.GetUploadSession(ctx, "us-atomic")
-	if err != nil {
-		t.Fatalf("get upload session: %v", err)
+
+	var parts int
+	if err := pool.QueryRow(ctx, "SELECT count(*) FROM upload_parts WHERE session_id = 'us-scrub-done'").Scan(&parts); err != nil {
+		t.Fatalf("count parts: %v", err)
 	}
-	if got.State != domain.UploadSessionStatePending {
-		t.Errorf("session state = %q, want pending (transaction rolled back)", got.State)
+	if parts != 0 {
+		t.Errorf("completed session keeps %d parts, want 0", parts)
 	}
+}
+
+func TestUploadSessionRepo_ConcurrentCompletesFinalizeOnce(t *testing.T) {
+	pool := setupTestDB(t)
+	repo := pgadapter.NewSecretRepo(pool)
+	ctx := context.Background()
+
+	if err := repo.CreateUploadSession(ctx, newTestUploadSession("us-race", "us-race-public", time.Now().Add(time.Hour))); err != nil {
+		t.Fatalf("create upload session: %v", err)
+	}
+
+	const callers = 5
+	var finalizeCalls atomic.Int32
+	errs := make([]error, callers)
+	states := make([]string, callers)
+	var wg sync.WaitGroup
+	for i := range callers {
+		wg.Go(func() {
+			session, err := repo.CompleteUploadSession(ctx, "us-race", time.Now(), func(*domain.UploadSession, []domain.UploadPart) error {
+				finalizeCalls.Add(1)
+				// Hold the lock long enough for the other callers to queue.
+				time.Sleep(50 * time.Millisecond)
+				return nil
+			})
+			errs[i] = err
+			if session != nil {
+				states[i] = session.State
+			}
+		})
+	}
+	wg.Wait()
+
+	if got := finalizeCalls.Load(); got != 1 {
+		t.Errorf("finalize ran %d times, want exactly 1", got)
+	}
+	for i := range callers {
+		if errs[i] != nil || states[i] != domain.UploadSessionStateCompleted {
+			t.Errorf("caller %d: state = %q, err = %v; want completed", i, states[i], errs[i])
+		}
+	}
+	var secrets int
+	if err := pool.QueryRow(ctx, "SELECT count(*) FROM secrets WHERE public_id = 'us-race-public'").Scan(&secrets); err != nil {
+		t.Fatalf("count secrets: %v", err)
+	}
+	if secrets != 1 {
+		t.Errorf("secrets = %d, want 1", secrets)
+	}
+}
+
+func TestUploadSessionRepo_CompleteRollsBack(t *testing.T) {
+	pool := setupTestDB(t)
+	repo := pgadapter.NewSecretRepo(pool)
+	ctx := context.Background()
+
+	t.Run("finalize error", func(t *testing.T) {
+		if err := repo.CreateUploadSession(ctx, newTestUploadSession("us-fin-err", "us-fin-err-public", time.Now().Add(time.Hour))); err != nil {
+			t.Fatalf("create upload session: %v", err)
+		}
+		wantErr := errors.New("storage rejected parts")
+		_, err := repo.CompleteUploadSession(ctx, "us-fin-err", time.Now(), func(*domain.UploadSession, []domain.UploadPart) error {
+			return wantErr
+		})
+		if !errors.Is(err, wantErr) {
+			t.Fatalf("complete error = %v, want finalize's error", err)
+		}
+		assertUploadSessionState(t, repo, "us-fin-err", domain.UploadSessionStatePending)
+	})
+
+	t.Run("secret already exists", func(t *testing.T) {
+		if err := repo.CreateUploadSession(ctx, newTestUploadSession("us-atomic", "us-atomic-public", time.Now().Add(time.Hour))); err != nil {
+			t.Fatalf("create upload session: %v", err)
+		}
+		// A secret appears under the same public_id before completion.
+		if err := repo.Create(ctx, newTestSecret("us-atomic-public", time.Now().Add(time.Hour)), time.Now()); err != nil {
+			t.Fatalf("create secret: %v", err)
+		}
+		if _, err := repo.CompleteUploadSession(ctx, "us-atomic", time.Now(), noopFinalize); !errors.Is(err, domain.ErrDuplicate) {
+			t.Fatalf("complete error = %v, want ErrDuplicate", err)
+		}
+		assertUploadSessionState(t, repo, "us-atomic", domain.UploadSessionStatePending)
+	})
+
+	t.Run("aborted session", func(t *testing.T) {
+		if err := repo.CreateUploadSession(ctx, newTestUploadSession("us-was-aborted", "us-was-aborted-public", time.Now().Add(time.Hour))); err != nil {
+			t.Fatalf("create upload session: %v", err)
+		}
+		if err := repo.AbortUploadSession(ctx, "us-was-aborted", time.Now()); err != nil {
+			t.Fatalf("abort: %v", err)
+		}
+		if _, err := repo.CompleteUploadSession(ctx, "us-was-aborted", time.Now(), noFinalize(t)); !errors.Is(err, domain.ErrConflict) {
+			t.Fatalf("complete aborted error = %v, want ErrConflict", err)
+		}
+	})
 }
 
 func TestUploadSessionRepo_AbortExpired(t *testing.T) {
@@ -235,61 +370,37 @@ func TestUploadSessionRepo_AbortExpired(t *testing.T) {
 	repo := pgadapter.NewSecretRepo(pool)
 	ctx := context.Background()
 
-	expiredOrphan := newTestUploadSession("us-exp-orphan", "us-exp-orphan-public", time.Now().Add(-time.Hour))
-	expiredWithSecret := newTestUploadSession("us-exp-secret", "us-exp-secret-public", time.Now().Add(-time.Hour))
+	expired := newTestUploadSession("us-exp", "us-exp-public", time.Now().Add(-time.Hour))
 	live := newTestUploadSession("us-live", "us-live-public", time.Now().Add(time.Hour))
-	for _, s := range []*domain.UploadSession{expiredOrphan, expiredWithSecret, live} {
+	for _, s := range []*domain.UploadSession{expired, live} {
 		if err := repo.CreateUploadSession(ctx, s); err != nil {
 			t.Fatalf("create %s: %v", s.SessionID, err)
 		}
 	}
-	// Simulate a crash after storage completion and DB commit of the secret
-	// but before the session row was marked, so a secret row exists.
-	if _, err := pool.Exec(ctx, "INSERT INTO secrets (public_id, metadata_token_hash, blob_token_hash, deletion_token_hash, encrypted_meta, blob_size, burn_after_read, expires_at, created_at) VALUES ($1, 'm', 'b', 'd', 'meta', 1, false, $2, $3)", "us-exp-secret-public", time.Now().Add(time.Hour), time.Now()); err != nil {
-		t.Fatalf("insert secret: %v", err)
-	}
 
-	seen := map[string]bool{}
-	count, err := repo.AbortExpiredUploadSessions(ctx, time.Now(), func(session *domain.UploadSession, secretExists bool) error {
-		seen[session.SessionID] = secretExists
-		if session.SessionID == "us-exp-orphan" && secretExists {
-			t.Error("orphan session reported as having a secret")
-		}
-		if session.SessionID == "us-exp-secret" && !secretExists {
-			t.Error("session with secret reported as orphan")
+	var seen []string
+	count, err := repo.AbortExpiredUploadSessions(ctx, time.Now(), func(session *domain.UploadSession) error {
+		seen = append(seen, session.SessionID)
+		if session.StorageKey != expired.StorageKey {
+			t.Errorf("storage key = %q, want %q", session.StorageKey, expired.StorageKey)
 		}
 		return nil
 	})
 	if err != nil {
 		t.Fatalf("abort expired: %v", err)
 	}
-	if count != 2 {
-		t.Errorf("aborted count = %d, want 2", count)
+	if count != 1 || len(seen) != 1 || seen[0] != "us-exp" {
+		t.Errorf("aborted count = %d, callback saw %v; want only us-exp", count, seen)
 	}
-	if len(seen) != 2 || seen["us-live"] {
-		t.Errorf("callback saw %v, want only the two expired sessions", seen)
-	}
-
-	for id, want := range map[string]string{
-		"us-exp-orphan": domain.UploadSessionStateAborted,
-		"us-exp-secret": domain.UploadSessionStateAborted,
-		"us-live":       domain.UploadSessionStatePending,
-	} {
-		got, _, err := repo.GetUploadSession(ctx, id)
-		if err != nil {
-			t.Fatalf("get %s: %v", id, err)
-		}
-		if got.State != want {
-			t.Errorf("%s state = %q, want %q", id, got.State, want)
-		}
-	}
+	assertUploadSessionState(t, repo, "us-exp", domain.UploadSessionStateAborted)
+	assertUploadSessionState(t, repo, "us-live", domain.UploadSessionStatePending)
 
 	// A failing callback keeps the row pending for the next cycle.
 	retry := newTestUploadSession("us-exp-retry", "us-exp-retry-public", time.Now().Add(-time.Hour))
 	if err := repo.CreateUploadSession(ctx, retry); err != nil {
 		t.Fatalf("create retry: %v", err)
 	}
-	count, err = repo.AbortExpiredUploadSessions(ctx, time.Now(), func(*domain.UploadSession, bool) error {
+	count, err = repo.AbortExpiredUploadSessions(ctx, time.Now(), func(*domain.UploadSession) error {
 		return errors.New("storage unavailable")
 	})
 	if err != nil {
@@ -298,11 +409,67 @@ func TestUploadSessionRepo_AbortExpired(t *testing.T) {
 	if count != 0 {
 		t.Errorf("aborted count with failing hook = %d, want 0", count)
 	}
-	got, _, err := repo.GetUploadSession(ctx, "us-exp-retry")
-	if err != nil {
-		t.Fatalf("get retry: %v", err)
+	assertUploadSessionState(t, repo, "us-exp-retry", domain.UploadSessionStatePending)
+}
+
+func TestUploadSessionRepo_DeleteFinished(t *testing.T) {
+	pool := setupTestDB(t)
+	repo := pgadapter.NewSecretRepo(pool)
+	ctx := context.Background()
+
+	longAgo := time.Now().Add(-2 * time.Hour)
+	for _, id := range []string{"us-old-done", "us-old-aborted", "us-new-done", "us-pending"} {
+		if err := repo.CreateUploadSession(ctx, newTestUploadSession(id, id+"-public", time.Now().Add(time.Hour))); err != nil {
+			t.Fatalf("create %s: %v", id, err)
+		}
 	}
-	if got.State != domain.UploadSessionStatePending {
-		t.Errorf("retry state = %q, want pending", got.State)
+	if _, err := repo.CompleteUploadSession(ctx, "us-old-done", longAgo, noopFinalize); err != nil {
+		t.Fatalf("complete old: %v", err)
+	}
+	if err := repo.AbortUploadSession(ctx, "us-old-aborted", longAgo); err != nil {
+		t.Fatalf("abort old: %v", err)
+	}
+	if _, err := repo.CompleteUploadSession(ctx, "us-new-done", time.Now(), noopFinalize); err != nil {
+		t.Fatalf("complete new: %v", err)
+	}
+
+	count, err := repo.DeleteFinishedUploadSessions(ctx, time.Now().Add(-time.Hour))
+	if err != nil {
+		t.Fatalf("delete finished: %v", err)
+	}
+	if count != 2 {
+		t.Errorf("deleted = %d, want 2", count)
+	}
+	for _, id := range []string{"us-old-done", "us-old-aborted"} {
+		if _, _, err := repo.GetUploadSession(ctx, id); !errors.Is(err, domain.ErrNotFound) {
+			t.Errorf("%s: err = %v, want purged", id, err)
+		}
+	}
+	assertUploadSessionState(t, repo, "us-new-done", domain.UploadSessionStateCompleted)
+	assertUploadSessionState(t, repo, "us-pending", domain.UploadSessionStatePending)
+
+	// Purging the tombstone does not touch the secret it produced.
+	if _, err := repo.GetByPublicID(ctx, "us-old-done-public", time.Now()); err != nil {
+		t.Errorf("secret from purged session: %v", err)
+	}
+}
+
+func noopFinalize(*domain.UploadSession, []domain.UploadPart) error { return nil }
+
+func noFinalize(t *testing.T) func(*domain.UploadSession, []domain.UploadPart) error {
+	return func(*domain.UploadSession, []domain.UploadPart) error {
+		t.Error("finalize must not run")
+		return nil
+	}
+}
+
+func assertUploadSessionState(t *testing.T, repo *pgadapter.SecretRepo, sessionID, want string) {
+	t.Helper()
+	got, _, err := repo.GetUploadSession(context.Background(), sessionID)
+	if err != nil {
+		t.Fatalf("get %s: %v", sessionID, err)
+	}
+	if got.State != want {
+		t.Errorf("%s state = %q, want %q", sessionID, got.State, want)
 	}
 }

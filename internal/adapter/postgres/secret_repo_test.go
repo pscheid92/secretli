@@ -22,6 +22,7 @@ func newTestSecret(publicID string, expiresAt time.Time) *domain.Secret {
 		BlobSize:          1024,
 		BurnAfterRead:     false,
 		ExpiresAt:         expiresAt,
+		StorageKey:        "secrets/" + publicID,
 	}
 }
 
@@ -421,8 +422,8 @@ func TestSecretRepo_DeleteExpired_HookError(t *testing.T) {
 	}
 
 	// Hook fails for hook-err-001, succeeds for hook-err-002
-	failOne := func(id string) error {
-		if id == "hook-err-001" {
+	failOne := func(storageKey string) error {
+		if storageKey == "secrets/hook-err-001" {
 			return errors.New("S3 delete failed")
 		}
 		return nil

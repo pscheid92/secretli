@@ -28,8 +28,12 @@ type fullMockRepo struct {
 func (fullMockRepo) AbortExpiredUploadSessions(
 	_ context.Context,
 	_ time.Time,
-	_ func(*domain.UploadSession, bool) error,
+	_ func(*domain.UploadSession) error,
 ) (int64, error) {
+	return 0, nil
+}
+
+func (fullMockRepo) DeleteFinishedUploadSessions(_ context.Context, _ time.Time) (int64, error) {
 	return 0, nil
 }
 

@@ -239,6 +239,10 @@ func testToken(label string) string {
 	return base64.RawURLEncoding.EncodeToString(sum[:])
 }
 
+func testStorageKey(publicID string) string {
+	return domain.UploadStorageKey(testToken("upload " + publicID))
+}
+
 func testEncryptedMeta() string {
 	nonce := base64.RawURLEncoding.EncodeToString([]byte("123456789012123456789012"))
 	ciphertext := base64.RawURLEncoding.EncodeToString([]byte("ciphertext"))
@@ -260,8 +264,9 @@ func seedSecretWithTokens(repo *mockSecretRepo, fs *mockFileStore, publicID, met
 		BlobSize:          int64(len(blobData)),
 		BurnAfterRead:     burnAfterRead,
 		ExpiresAt:         time.Now().Add(time.Hour),
+		StorageKey:        testStorageKey(publicID),
 	}
-	fs.objects[domain.SecretStorageKey(publicID)] = blobData
+	fs.objects[secret.StorageKey] = blobData
 	repo.secrets[publicID] = secret
 }
 
@@ -819,7 +824,7 @@ func TestDeleteSecret_Success(t *testing.T) {
 	}
 
 	// Verify S3 object was deleted
-	if _, ok := fs.objects[domain.SecretStorageKey(publicID)]; ok {
+	if _, ok := fs.objects[testStorageKey(publicID)]; ok {
 		t.Error("S3 object should have been deleted")
 	}
 }
@@ -978,7 +983,7 @@ func TestDeleteSecret_RowAlreadyGoneReturnsNoContent(t *testing.T) {
 	if rec.Code != http.StatusNoContent {
 		t.Errorf("status = %d, want %d. body: %s", rec.Code, http.StatusNoContent, rec.Body.String())
 	}
-	if _, ok := fs.objects[domain.SecretStorageKey(publicID)]; ok {
+	if _, ok := fs.objects[testStorageKey(publicID)]; ok {
 		t.Error("S3 object should have been deleted")
 	}
 }
@@ -1009,7 +1014,7 @@ func TestDeleteSecret_S3DeleteError(t *testing.T) {
 	if _, ok := repo.secrets[publicID]; !ok {
 		t.Error("secret row should remain when S3 delete fails")
 	}
-	if _, ok := fs.objects[domain.SecretStorageKey(publicID)]; !ok {
+	if _, ok := fs.objects[testStorageKey(publicID)]; !ok {
 		t.Error("S3 object should remain when delete fails")
 	}
 }

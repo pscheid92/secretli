@@ -75,10 +75,11 @@ INSERT INTO upload_sessions (
     secret_expires_at,
     upload_expires_at,
     created_at,
+    storage_key,
     state
 )
 VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, 'pending'
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, 'pending'
 )
 `
 
@@ -86,16 +87,17 @@ type CreateUploadSessionParams struct {
 	SessionID         string
 	PublicID          string
 	UploadTokenHash   string
-	MetadataTokenHash string
-	BlobTokenHash     string
-	DeletionTokenHash string
+	MetadataTokenHash pgtype.Text
+	BlobTokenHash     pgtype.Text
+	DeletionTokenHash pgtype.Text
 	S3UploadID        string
 	BlobSize          int64
-	EncryptedMeta     string
+	EncryptedMeta     pgtype.Text
 	BurnAfterRead     bool
 	SecretExpiresAt   pgtype.Timestamptz
 	UploadExpiresAt   pgtype.Timestamptz
 	CreatedAt         pgtype.Timestamptz
+	StorageKey        string
 }
 
 func (q *Queries) CreateUploadSession(ctx context.Context, arg CreateUploadSessionParams) error {
@@ -113,8 +115,23 @@ func (q *Queries) CreateUploadSession(ctx context.Context, arg CreateUploadSessi
 		arg.SecretExpiresAt,
 		arg.UploadExpiresAt,
 		arg.CreatedAt,
+		arg.StorageKey,
 	)
 	return err
+}
+
+const deleteFinishedUploadSessions = `-- name: DeleteFinishedUploadSessions :execrows
+DELETE FROM upload_sessions
+WHERE state <> 'pending'
+  AND COALESCE(completed_at, aborted_at) < $1
+`
+
+func (q *Queries) DeleteFinishedUploadSessions(ctx context.Context, finishedBefore pgtype.Timestamptz) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteFinishedUploadSessions, finishedBefore)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const deleteUploadPartsBySession = `-- name: DeleteUploadPartsBySession :exec
@@ -156,7 +173,7 @@ func (q *Queries) GetUploadPartForUpdate(ctx context.Context, arg GetUploadPartF
 }
 
 const getUploadSession = `-- name: GetUploadSession :one
-SELECT session_id, public_id, upload_token_hash, metadata_token_hash, blob_token_hash, deletion_token_hash, s3_upload_id, blob_size, encrypted_meta, burn_after_read, secret_expires_at, upload_expires_at, state, created_at, completed_at, aborted_at
+SELECT session_id, public_id, upload_token_hash, metadata_token_hash, blob_token_hash, deletion_token_hash, s3_upload_id, blob_size, encrypted_meta, burn_after_read, secret_expires_at, upload_expires_at, state, created_at, completed_at, aborted_at, storage_key
 FROM upload_sessions
 WHERE session_id = $1
 `
@@ -181,12 +198,13 @@ func (q *Queries) GetUploadSession(ctx context.Context, sessionID string) (Uploa
 		&i.CreatedAt,
 		&i.CompletedAt,
 		&i.AbortedAt,
+		&i.StorageKey,
 	)
 	return i, err
 }
 
 const getUploadSessionForUpdate = `-- name: GetUploadSessionForUpdate :one
-SELECT session_id, public_id, upload_token_hash, metadata_token_hash, blob_token_hash, deletion_token_hash, s3_upload_id, blob_size, encrypted_meta, burn_after_read, secret_expires_at, upload_expires_at, state, created_at, completed_at, aborted_at
+SELECT session_id, public_id, upload_token_hash, metadata_token_hash, blob_token_hash, deletion_token_hash, s3_upload_id, blob_size, encrypted_meta, burn_after_read, secret_expires_at, upload_expires_at, state, created_at, completed_at, aborted_at, storage_key
 FROM upload_sessions
 WHERE session_id = $1
 FOR UPDATE
@@ -212,12 +230,13 @@ func (q *Queries) GetUploadSessionForUpdate(ctx context.Context, sessionID strin
 		&i.CreatedAt,
 		&i.CompletedAt,
 		&i.AbortedAt,
+		&i.StorageKey,
 	)
 	return i, err
 }
 
 const listExpiredUploadSessionsForUpdate = `-- name: ListExpiredUploadSessionsForUpdate :many
-SELECT session_id, public_id, upload_token_hash, metadata_token_hash, blob_token_hash, deletion_token_hash, s3_upload_id, blob_size, encrypted_meta, burn_after_read, secret_expires_at, upload_expires_at, state, created_at, completed_at, aborted_at
+SELECT session_id, public_id, upload_token_hash, metadata_token_hash, blob_token_hash, deletion_token_hash, s3_upload_id, blob_size, encrypted_meta, burn_after_read, secret_expires_at, upload_expires_at, state, created_at, completed_at, aborted_at, storage_key
 FROM upload_sessions
 WHERE state = 'pending'
   AND upload_expires_at < $1
@@ -250,6 +269,7 @@ func (q *Queries) ListExpiredUploadSessionsForUpdate(ctx context.Context, nowAt 
 			&i.CreatedAt,
 			&i.CompletedAt,
 			&i.AbortedAt,
+			&i.StorageKey,
 		); err != nil {
 			return nil, err
 		}
@@ -299,7 +319,11 @@ func (q *Queries) ListUploadPartsBySession(ctx context.Context, sessionID string
 const markUploadSessionAborted = `-- name: MarkUploadSessionAborted :execrows
 UPDATE upload_sessions
 SET state = 'aborted',
-    aborted_at = $1
+    aborted_at = $1,
+    metadata_token_hash = NULL,
+    blob_token_hash = NULL,
+    deletion_token_hash = NULL,
+    encrypted_meta = NULL
 WHERE session_id = $2
   AND state = 'pending'
 `
@@ -320,7 +344,11 @@ func (q *Queries) MarkUploadSessionAborted(ctx context.Context, arg MarkUploadSe
 const markUploadSessionCompleted = `-- name: MarkUploadSessionCompleted :exec
 UPDATE upload_sessions
 SET state = 'completed',
-    completed_at = $1
+    completed_at = $1,
+    metadata_token_hash = NULL,
+    blob_token_hash = NULL,
+    deletion_token_hash = NULL,
+    encrypted_meta = NULL
 WHERE session_id = $2
 `
 
@@ -329,6 +357,8 @@ type MarkUploadSessionCompletedParams struct {
 	SessionID string
 }
 
+// The share material now lives on the secret row; the session keeps only
+// what a repeated complete needs.
 func (q *Queries) MarkUploadSessionCompleted(ctx context.Context, arg MarkUploadSessionCompletedParams) error {
 	_, err := q.db.Exec(ctx, markUploadSessionCompleted, arg.NowAt, arg.SessionID)
 	return err

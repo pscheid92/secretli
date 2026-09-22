@@ -55,7 +55,7 @@ func (q *Queries) DeleteExpiredRetrievalSessions(ctx context.Context, nowAt pgty
 }
 
 const getSecretByPublicIDForUpdate = `-- name: GetSecretByPublicIDForUpdate :one
-SELECT public_id, metadata_token_hash, blob_token_hash, deletion_token_hash, encrypted_meta, blob_size, burn_after_read, expires_at, created_at, retrieved_at
+SELECT public_id, metadata_token_hash, blob_token_hash, deletion_token_hash, encrypted_meta, blob_size, burn_after_read, expires_at, created_at, retrieved_at, storage_key
 FROM secrets
 WHERE public_id = $1
   AND expires_at > $2
@@ -81,6 +81,7 @@ func (q *Queries) GetSecretByPublicIDForUpdate(ctx context.Context, arg GetSecre
 		&i.ExpiresAt,
 		&i.CreatedAt,
 		&i.RetrievedAt,
+		&i.StorageKey,
 	)
 	return i, err
 }
@@ -96,7 +97,8 @@ SELECT
     s.burn_after_read,
     s.expires_at,
     s.created_at,
-    s.retrieved_at
+    s.retrieved_at,
+    s.storage_key
 FROM retrieval_sessions AS rs
 JOIN secrets AS s ON s.public_id = rs.public_id
 WHERE s.public_id = $1
@@ -125,6 +127,7 @@ func (q *Queries) GetSecretByRetrievalSession(ctx context.Context, arg GetSecret
 		&i.ExpiresAt,
 		&i.CreatedAt,
 		&i.RetrievedAt,
+		&i.StorageKey,
 	)
 	return i, err
 }

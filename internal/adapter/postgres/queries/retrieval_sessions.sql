@@ -27,7 +27,8 @@ SELECT
     s.burn_after_read,
     s.expires_at,
     s.created_at,
-    s.retrieved_at
+    s.retrieved_at,
+    s.storage_key
 FROM retrieval_sessions AS rs
 JOIN secrets AS s ON s.public_id = rs.public_id
 WHERE s.public_id = sqlc.arg(public_id)

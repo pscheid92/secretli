@@ -8,10 +8,11 @@ INSERT INTO secrets (
     blob_size,
     burn_after_read,
     expires_at,
-    created_at
+    created_at,
+    storage_key
 )
 VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10
 );
 
 -- name: GetSecretByPublicID :one
@@ -25,7 +26,8 @@ SELECT
     burn_after_read,
     expires_at,
     created_at,
-    retrieved_at
+    retrieved_at,
+    storage_key
 FROM secrets
 WHERE public_id = sqlc.arg(public_id)
   AND expires_at > sqlc.arg(now_at);
@@ -44,13 +46,13 @@ DELETE FROM secrets
 WHERE public_id = $1;
 
 -- name: SelectExpiredSecretsForCleanup :many
-SELECT s.public_id
+SELECT s.public_id, s.storage_key
 FROM secrets AS s
 WHERE s.expires_at < sqlc.arg(now_at)
 FOR UPDATE OF s SKIP LOCKED;
 
 -- name: SelectConsumedBurnAfterReadSecretsForCleanup :many
-SELECT s.public_id
+SELECT s.public_id, s.storage_key
 FROM secrets AS s
 WHERE s.burn_after_read = true
   AND s.retrieved_at IS NOT NULL

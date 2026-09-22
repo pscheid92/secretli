@@ -9,15 +9,23 @@ import (
 	"github.com/pscheid92/secretli/internal/domain"
 )
 
-// cycleTimeout bounds one cleanup pass. The repo holds row locks while the
-// storage callbacks run, so a hung S3 call must not block API deletes forever.
-const cycleTimeout = 10 * time.Minute
+const (
+	// cycleTimeout bounds one cleanup pass. The repo holds row locks while the
+	// storage callbacks run, so a hung S3 call must not block API deletes
+	// forever.
+	cycleTimeout = 10 * time.Minute
+	// finishedUploadRetention is how long a completed or aborted upload
+	// session's tombstone is kept, so a client retrying complete or abort
+	// still gets a consistent answer.
+	finishedUploadRetention = time.Hour
+)
 
 // Repo is the slice of the datastore this worker touches.
 type Repo interface {
-	DeleteExpired(ctx context.Context, now time.Time, beforeDelete func(publicID string) error) (int64, error)
+	DeleteExpired(ctx context.Context, now time.Time, beforeDelete func(storageKey string) error) (int64, error)
 	DeleteExpiredRetrievalSessions(ctx context.Context, now time.Time) (int64, error)
-	AbortExpiredUploadSessions(ctx context.Context, now time.Time, beforeAbort func(session *domain.UploadSession, secretExists bool) error) (int64, error)
+	AbortExpiredUploadSessions(ctx context.Context, now time.Time, beforeAbort func(session *domain.UploadSession) error) (int64, error)
+	DeleteFinishedUploadSessions(ctx context.Context, finishedBefore time.Time) (int64, error)
 }
 
 type Worker struct {
@@ -64,18 +72,14 @@ func (w *Worker) runCycle(ctx context.Context) {
 		slog.InfoContext(ctx, "cleanup: deleted retrieval sessions", "count", count)
 	}
 
-	if count, err := w.secretRepo.AbortExpiredUploadSessions(ctx, now, func(session *domain.UploadSession, secretExists bool) error {
-		key := domain.SecretStorageKey(session.PublicID)
-		if err := w.fileStore.AbortMultipartUpload(ctx, key, session.S3UploadID); err != nil {
+	if count, err := w.secretRepo.AbortExpiredUploadSessions(ctx, now, func(session *domain.UploadSession) error {
+		if err := w.fileStore.AbortMultipartUpload(ctx, session.StorageKey, session.S3UploadID); err != nil {
 			return err
 		}
 		// A crash between storage completion and the database commit leaves a
-		// finished object with no secret row. Nothing can ever serve it, so
-		// remove it rather than leaking storage.
-		if !secretExists {
-			return w.fileStore.Delete(ctx, key)
-		}
-		return nil
+		// finished object with no secret row. The key belongs to this session
+		// alone, so remove it rather than leaking storage.
+		return w.fileStore.Delete(ctx, session.StorageKey)
 	}); err != nil {
 		slog.ErrorContext(ctx, "cleanup: expired upload session cleanup failed", "error", err)
 		w.metrics.CleanupErrors.Inc()
@@ -83,8 +87,15 @@ func (w *Worker) runCycle(ctx context.Context) {
 		slog.InfoContext(ctx, "cleanup: aborted expired upload sessions", "count", count)
 	}
 
-	beforeDelete := func(publicID string) error {
-		return w.fileStore.Delete(ctx, domain.SecretStorageKey(publicID))
+	if count, err := w.secretRepo.DeleteFinishedUploadSessions(ctx, now.Add(-finishedUploadRetention)); err != nil {
+		slog.ErrorContext(ctx, "cleanup: finished upload session cleanup failed", "error", err)
+		w.metrics.CleanupErrors.Inc()
+	} else if count > 0 {
+		slog.InfoContext(ctx, "cleanup: deleted finished upload sessions", "count", count)
+	}
+
+	beforeDelete := func(storageKey string) error {
+		return w.fileStore.Delete(ctx, storageKey)
 	}
 
 	count, err := w.secretRepo.DeleteExpired(ctx, now, beforeDelete)

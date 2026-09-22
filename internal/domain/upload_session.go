@@ -8,10 +8,14 @@ const (
 	UploadSessionStateAborted   = "aborted"
 )
 
+// UploadSession is a pending multipart upload. Once completed or aborted it is
+// only a tombstone: the share material (token hashes, encrypted metadata) is
+// blanked and the row is purged by cleanup.
 type UploadSession struct {
 	SessionID         string
 	UploadTokenHash   string
 	PublicID          string
+	StorageKey        string
 	S3UploadID        string
 	BlobSize          int64
 	MetadataTokenHash string

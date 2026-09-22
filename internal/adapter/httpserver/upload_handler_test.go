@@ -11,6 +11,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 	"time"
 
@@ -19,10 +20,13 @@ import (
 )
 
 type uploadMockRepo struct {
-	sessions    map[string]*domain.UploadSession
-	parts       map[string]map[int]domain.UploadPart
-	secrets     map[string]*domain.Secret
-	completeErr error
+	// mu stands in for the session row lock: CompleteUploadSession holds it
+	// while finalize runs.
+	mu        sync.Mutex
+	sessions  map[string]*domain.UploadSession
+	parts     map[string]map[int]domain.UploadPart
+	secrets   map[string]*domain.Secret
+	insertErr error
 }
 
 func newUploadMockRepo() *uploadMockRepo {
@@ -34,6 +38,9 @@ func newUploadMockRepo() *uploadMockRepo {
 }
 
 func (m *uploadMockRepo) CreateUploadSession(_ context.Context, session *domain.UploadSession) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	if _, ok := m.sessions[session.SessionID]; ok {
 		return domain.ErrDuplicate
 	}
@@ -43,6 +50,9 @@ func (m *uploadMockRepo) CreateUploadSession(_ context.Context, session *domain.
 }
 
 func (m *uploadMockRepo) GetUploadSession(_ context.Context, sessionID string) (*domain.UploadSession, []domain.UploadPart, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	session, ok := m.sessions[sessionID]
 	if !ok {
 		return nil, nil, domain.ErrNotFound
@@ -57,6 +67,9 @@ func (m *uploadMockRepo) GetUploadSession(_ context.Context, sessionID string) (
 }
 
 func (m *uploadMockRepo) RecordUploadPart(_ context.Context, part *domain.UploadPart) (*domain.UploadPart, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	if m.parts[part.SessionID] == nil {
 		m.parts[part.SessionID] = make(map[int]domain.UploadPart)
 	}
@@ -71,10 +84,56 @@ func (m *uploadMockRepo) RecordUploadPart(_ context.Context, part *domain.Upload
 	return &copy, nil
 }
 
-func (m *uploadMockRepo) CompleteUploadSession(_ context.Context, sessionID string, secret *domain.Secret, _ time.Time) error {
-	if m.completeErr != nil {
-		return m.completeErr
+func (m *uploadMockRepo) CompleteUploadSession(_ context.Context, sessionID string, now time.Time, finalize func(*domain.UploadSession, []domain.UploadPart) error) (*domain.UploadSession, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	session, ok := m.sessions[sessionID]
+	if !ok {
+		return nil, domain.ErrNotFound
 	}
+	switch session.State {
+	case domain.UploadSessionStateCompleted:
+		copy := *session
+		return &copy, nil
+	case domain.UploadSessionStatePending:
+	default:
+		return nil, domain.ErrConflict
+	}
+
+	parts := make([]domain.UploadPart, 0, len(m.parts[sessionID]))
+	for _, part := range m.parts[sessionID] {
+		parts = append(parts, part)
+	}
+	locked := *session
+	if err := finalize(&locked, parts); err != nil {
+		return nil, err
+	}
+	if m.insertErr != nil {
+		return nil, m.insertErr
+	}
+	if _, exists := m.secrets[session.PublicID]; exists {
+		return nil, domain.ErrDuplicate
+	}
+
+	m.secrets[session.PublicID] = &domain.Secret{
+		PublicID:   session.PublicID,
+		StorageKey: session.StorageKey,
+		BlobSize:   session.BlobSize,
+		ExpiresAt:  session.SecretExpiresAt,
+	}
+	session.State = domain.UploadSessionStateCompleted
+	session.CompletedAt = &now
+	session.EncryptedMeta = ""
+	delete(m.parts, sessionID)
+	copy := *session
+	return &copy, nil
+}
+
+func (m *uploadMockRepo) AbortUploadSession(_ context.Context, sessionID string, _ time.Time) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	session, ok := m.sessions[sessionID]
 	if !ok {
 		return domain.ErrNotFound
@@ -82,22 +141,14 @@ func (m *uploadMockRepo) CompleteUploadSession(_ context.Context, sessionID stri
 	if session.State != domain.UploadSessionStatePending {
 		return domain.ErrConflict
 	}
-	session.State = domain.UploadSessionStateCompleted
-	copy := *secret
-	m.secrets[secret.PublicID] = &copy
-	return nil
-}
-
-func (m *uploadMockRepo) AbortUploadSession(_ context.Context, sessionID string, _ time.Time) error {
-	session, ok := m.sessions[sessionID]
-	if !ok {
-		return domain.ErrNotFound
-	}
 	session.State = domain.UploadSessionStateAborted
 	return nil
 }
 
 func (m *uploadMockRepo) ClearUploadParts(_ context.Context, sessionID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	delete(m.parts, sessionID)
 	return nil
 }
@@ -106,6 +157,7 @@ type uploadMockStore struct {
 	uploadID       string
 	uploadedParts  map[int][]byte
 	completedParts []domain.CompletedPart
+	completeCalls  int
 	completeErr    error
 	aborted        bool
 	abortErr       error
@@ -139,6 +191,7 @@ func (m *uploadMockStore) UploadPart(_ context.Context, _ string, _ string, part
 	return fmt.Sprintf("etag-%d", partNumber), nil
 }
 func (m *uploadMockStore) CompleteMultipartUpload(_ context.Context, _ string, _ string, parts []domain.CompletedPart) error {
+	m.completeCalls++
 	if m.completeErr != nil {
 		return m.completeErr
 	}
@@ -192,6 +245,9 @@ func TestUploadSession_CreateSuccess(t *testing.T) {
 	}
 	if len(repo.secrets) != 0 {
 		t.Fatal("create upload session should not create active secret")
+	}
+	if got, want := repo.sessions[body.SessionID].StorageKey, domain.UploadStorageKey(body.SessionID); got != want {
+		t.Errorf("storage key = %q, want per-session key %q", got, want)
 	}
 }
 
@@ -381,29 +437,122 @@ func TestValidatePartPlacement(t *testing.T) {
 	}
 }
 
-func TestCompleteUploadSession_DBFailureDeletesObject(t *testing.T) {
+func TestCompleteUploadSession_DBFailureDiscardsOwnObject(t *testing.T) {
 	repo := newUploadMockRepo()
 	store := newUploadMockStore()
 	uploadToken := testToken("complete db failure token")
-	session := seedUploadSession(repo, uploadToken, 3)
-	repo.parts[session.SessionID] = map[int]domain.UploadPart{
-		1: {SessionID: session.SessionID, PartNumber: 1, Offset: 0, Size: 3, SHA256: sha256HexTest([]byte("a")), ETag: "etag-1"},
-	}
-	repo.completeErr = errors.New("database down")
+	session := seedSinglePartUploadSession(repo, uploadToken)
+	repo.insertErr = errors.New("database down")
 	h := NewUploadHandler(repo, store, 100*1024*1024, testMetrics())
 
-	req := completeUploadRequest(session.SessionID, uploadToken)
-	rec := httptest.NewRecorder()
-	c := newEchoContext(req, rec)
-	c.SetParamNames("sessionID")
-	c.SetParamValues(session.SessionID)
-	callHandler(c, h.CompleteUploadSession)
+	rec := callComplete(h, session.SessionID, uploadToken)
 
 	if rec.Code != http.StatusInternalServerError {
 		t.Fatalf("status = %d, want %d. body: %s", rec.Code, http.StatusInternalServerError, rec.Body.String())
 	}
-	if len(store.deleted) != 1 || store.deleted[0] != domain.SecretStorageKey(session.PublicID) {
+	if len(store.deleted) != 1 || store.deleted[0] != session.StorageKey {
 		t.Fatalf("completed object should be deleted after DB failure, deleted = %v", store.deleted)
+	}
+	if repo.sessions[session.SessionID].State != domain.UploadSessionStateAborted {
+		t.Fatal("session should be aborted before its object is deleted")
+	}
+}
+
+func TestCompleteUploadSession_RepeatedCompleteIsIdempotent(t *testing.T) {
+	repo := newUploadMockRepo()
+	store := newUploadMockStore()
+	uploadToken := testToken("complete twice token")
+	session := seedSinglePartUploadSession(repo, uploadToken)
+	h := NewUploadHandler(repo, store, 100*1024*1024, testMetrics())
+
+	first := callComplete(h, session.SessionID, uploadToken)
+	second := callComplete(h, session.SessionID, uploadToken)
+
+	if first.Code != http.StatusCreated || second.Code != http.StatusCreated {
+		t.Fatalf("statuses = %d, %d; want both %d. second body: %s", first.Code, second.Code, http.StatusCreated, second.Body.String())
+	}
+	if first.Body.String() != second.Body.String() {
+		t.Errorf("repeated complete answered differently: %s vs %s", first.Body.String(), second.Body.String())
+	}
+	if store.completeCalls != 1 {
+		t.Errorf("storage complete calls = %d, want 1", store.completeCalls)
+	}
+	if len(store.deleted) != 0 {
+		t.Fatalf("a repeated complete must not delete the live object, deleted = %v", store.deleted)
+	}
+}
+
+func TestCompleteUploadSession_ConcurrentCompletesKeepObject(t *testing.T) {
+	repo := newUploadMockRepo()
+	store := newUploadMockStore()
+	uploadToken := testToken("complete concurrently token")
+	session := seedSinglePartUploadSession(repo, uploadToken)
+	h := NewUploadHandler(repo, store, 100*1024*1024, testMetrics())
+
+	const requests = 8
+	codes := make([]int, requests)
+	var wg sync.WaitGroup
+	for i := range requests {
+		wg.Go(func() {
+			codes[i] = callComplete(h, session.SessionID, uploadToken).Code
+		})
+	}
+	wg.Wait()
+
+	for i, code := range codes {
+		if code != http.StatusCreated {
+			t.Errorf("request %d status = %d, want %d", i, code, http.StatusCreated)
+		}
+	}
+	if store.completeCalls != 1 {
+		t.Errorf("storage complete calls = %d, want 1", store.completeCalls)
+	}
+	if len(store.deleted) != 0 {
+		t.Fatalf("concurrent completes must not delete the live object, deleted = %v", store.deleted)
+	}
+	if _, ok := repo.secrets[session.PublicID]; !ok {
+		t.Fatal("secret should exist")
+	}
+}
+
+func TestCompleteUploadSession_DuplicatePublicIDDeletesOnlyOwnObject(t *testing.T) {
+	repo := newUploadMockRepo()
+	store := newUploadMockStore()
+	uploadToken := testToken("complete duplicate token")
+	session := seedSinglePartUploadSession(repo, uploadToken)
+	// Another upload already turned this public_id into a secret.
+	otherKey := domain.UploadStorageKey(testToken("other session"))
+	repo.secrets[session.PublicID] = &domain.Secret{PublicID: session.PublicID, StorageKey: otherKey}
+	h := NewUploadHandler(repo, store, 100*1024*1024, testMetrics())
+
+	rec := callComplete(h, session.SessionID, uploadToken)
+
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want %d. body: %s", rec.Code, http.StatusConflict, rec.Body.String())
+	}
+	if len(store.deleted) != 1 || store.deleted[0] != session.StorageKey {
+		t.Fatalf("deleted = %v, want only this session's object %q", store.deleted, session.StorageKey)
+	}
+	if repo.secrets[session.PublicID].StorageKey != otherKey {
+		t.Fatal("the existing secret must be left alone")
+	}
+}
+
+func TestCompleteUploadSession_AbortedSessionConflicts(t *testing.T) {
+	repo := newUploadMockRepo()
+	store := newUploadMockStore()
+	uploadToken := testToken("complete aborted token")
+	session := seedSinglePartUploadSession(repo, uploadToken)
+	session.State = domain.UploadSessionStateAborted
+	h := NewUploadHandler(repo, store, 100*1024*1024, testMetrics())
+
+	rec := callComplete(h, session.SessionID, uploadToken)
+
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want %d. body: %s", rec.Code, http.StatusConflict, rec.Body.String())
+	}
+	if store.completeCalls != 0 || len(store.deleted) != 0 {
+		t.Fatalf("aborted session must not touch storage: complete calls = %d, deleted = %v", store.completeCalls, store.deleted)
 	}
 }
 
@@ -459,6 +608,9 @@ func TestCompleteUploadSession_UploadGoneAbortsSession(t *testing.T) {
 	}
 	if repo.sessions[session.SessionID].State != domain.UploadSessionStateAborted {
 		t.Fatal("session should be aborted when storage no longer knows the upload")
+	}
+	if len(store.deleted) != 1 || store.deleted[0] != session.StorageKey {
+		t.Fatalf("deleted = %v, want the session's own object removed", store.deleted)
 	}
 }
 
@@ -564,6 +716,7 @@ func seedUploadSession(repo *uploadMockRepo, uploadToken string, blobSize int64)
 		SessionID:         testToken("session " + uploadToken),
 		UploadTokenHash:   tokencrypto.TokenHash(uploadToken),
 		PublicID:          testPublicID("session " + uploadToken),
+		StorageKey:        domain.UploadStorageKey(testToken("session " + uploadToken)),
 		S3UploadID:        "s3-upload-id",
 		BlobSize:          blobSize,
 		MetadataTokenHash: tokencrypto.TokenHash(testToken("meta " + uploadToken)),
@@ -577,6 +730,23 @@ func seedUploadSession(repo *uploadMockRepo, uploadToken string, blobSize int64)
 	}
 	repo.sessions[session.SessionID] = session
 	return session
+}
+
+func seedSinglePartUploadSession(repo *uploadMockRepo, uploadToken string) *domain.UploadSession {
+	session := seedUploadSession(repo, uploadToken, 3)
+	repo.parts[session.SessionID] = map[int]domain.UploadPart{
+		1: {SessionID: session.SessionID, PartNumber: 1, Offset: 0, Size: 3, SHA256: sha256HexTest([]byte("a")), ETag: "etag-1"},
+	}
+	return session
+}
+
+func callComplete(h *UploadHandler, sessionID, uploadToken string) *httptest.ResponseRecorder {
+	rec := httptest.NewRecorder()
+	c := newEchoContext(completeUploadRequest(sessionID, uploadToken), rec)
+	c.SetParamNames("sessionID")
+	c.SetParamValues(sessionID)
+	callHandler(c, h.CompleteUploadSession)
+	return rec
 }
 
 func createUploadSessionHTTPRequest(t *testing.T, body map[string]any) *http.Request {
