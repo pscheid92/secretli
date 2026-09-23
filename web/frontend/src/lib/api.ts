@@ -1,12 +1,15 @@
 export class ApiError extends Error {
   readonly status: number;
   readonly requestId?: string;
+  /** The server's Retry-After header, for callers that retry. */
+  readonly retryAfter?: string;
 
-  constructor(status: number, message: string, requestId?: string) {
+  constructor(status: number, message: string, requestId?: string, retryAfter?: string) {
     super(requestId ? `${message} (request id: ${requestId})` : message);
     this.name = "ApiError";
     this.status = status;
     this.requestId = requestId;
+    this.retryAfter = retryAfter;
   }
 }
 
@@ -49,6 +52,22 @@ async function doFetch(url: string, init: RequestInit, requestID: string): Promi
   }
 }
 
+/**
+ * Reads a response body. A connection lost after the headers arrived rejects
+ * with a TypeError; report it as the network failure it is, so callers retry
+ * it instead of treating it as an unexpected error.
+ */
+async function readBody<T>(read: () => Promise<T>, requestID: string): Promise<T> {
+  try {
+    return await read();
+  } catch (err) {
+    if (err instanceof TypeError) {
+      throw new ApiError(0, "Network error — please check your connection", requestID);
+    }
+    throw err;
+  }
+}
+
 async function request<T>(url: string, init: RequestInit): Promise<T> {
   const { requestID, init: requestInit } = withRequestID(init);
   const res = await doFetch(url, requestInit, requestID);
@@ -58,7 +77,7 @@ async function request<T>(url: string, init: RequestInit): Promise<T> {
   }
 
   if (res.status === 204) return undefined as T;
-  return res.json();
+  return readBody(() => res.json(), requestID);
 }
 
 function delay(ms: number): Promise<void> {
@@ -130,7 +149,13 @@ export async function retrieveSecretRange(
       );
     }
 
-    return new Uint8Array(await res.arrayBuffer());
+    try {
+      return new Uint8Array(await readBody(() => res.arrayBuffer(), requestID));
+    } catch (err) {
+      if (!(err instanceof ApiError)) throw err;
+      lastError = err;
+      if (attempt < MAX_TRANSIENT_ATTEMPTS) await delay(retryDelayMs(attempt));
+    }
   }
   throw lastError ?? new ApiError(0, "Network error — please check your connection");
 }
@@ -138,7 +163,12 @@ export async function retrieveSecretRange(
 async function apiErrorFromResponse(res: Response, fallbackRequestID: string): Promise<ApiError> {
   const body = await res.json().catch(() => null);
   const message = body?.error ?? `Request failed (${res.status})`;
-  return new ApiError(res.status, message, requestIDFromResponse(res, fallbackRequestID));
+  return new ApiError(
+    res.status,
+    message,
+    requestIDFromResponse(res, fallbackRequestID),
+    res.headers.get("Retry-After") ?? undefined,
+  );
 }
 
 function withRequestID(init: RequestInit): { requestID: string; init: RequestInit } {

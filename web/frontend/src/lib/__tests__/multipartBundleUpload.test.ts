@@ -12,6 +12,8 @@ const api = vi.hoisted(() => ({
   uploadSessionPart: vi.fn(),
   completeUploadSession: vi.fn(),
   abortUploadSession: vi.fn(),
+  // Reset to return undefined, so retries in tests do not actually wait.
+  retryDelayMs: vi.fn(),
 }));
 
 vi.mock("../api", async (importOriginal) => {
@@ -204,13 +206,121 @@ describe("uploadMultipartBundle", () => {
     expect(api.uploadSessionPart).toHaveBeenCalledTimes(1);
   });
 
-  it("aborts the server session on any failure", async () => {
+  it("reports a failed part instead of completing without it", async () => {
     installFakeServer();
-    api.completeUploadSession.mockRejectedValueOnce(new ApiError(503, "try later"));
+    const original = api.uploadSessionPart.getMockImplementation();
+    api.uploadSessionPart.mockImplementation(async (...args) => {
+      if (args[2] === 1) throw new ApiError(409, "upload session has expired");
+      return original?.(...args);
+    });
+
+    // Part 1 fails while part 2 is still being encrypted, with nothing
+    // awaiting the queue at that moment.
+    await expect(
+      uploadMultipartBundle(await baseParams([patternedFile(13 * MIB)])),
+    ).rejects.toMatchObject({ status: 409 });
+    expect(api.completeUploadSession).not.toHaveBeenCalled();
+    expect(api.abortUploadSession).toHaveBeenCalledWith("session-1", "token-1");
+    // Encryption stops at the failure instead of uploading the rest.
+    expect(api.uploadSessionPart).toHaveBeenCalledTimes(1);
+  }, 30_000);
+
+  it("aborts the parts still in flight when another part fails", async () => {
+    installFakeServer();
+    let inFlightSignal: AbortSignal | undefined;
+    api.uploadSessionPart.mockImplementation(
+      (_session, _token, partNumber: number, _offset, _bytes, _sha256, signal: AbortSignal) => {
+        if (partNumber === 1) {
+          // Part 1 hangs until the queue aborts it.
+          inFlightSignal = signal;
+          return new Promise((_resolve, reject) => {
+            signal.addEventListener("abort", () =>
+              reject(new DOMException("aborted", "AbortError")),
+            );
+          });
+        }
+        return Promise.reject(new ApiError(400, "part rejected"));
+      },
+    );
+
+    await expect(
+      uploadMultipartBundle(await baseParams([patternedFile(13 * MIB)])),
+    ).rejects.toMatchObject({ status: 400 });
+    expect(inFlightSignal?.aborted).toBe(true);
+    expect(api.completeUploadSession).not.toHaveBeenCalled();
+  }, 30_000);
+
+  it("retries completing the upload after a transient failure", async () => {
+    installFakeServer();
+    api.completeUploadSession.mockRejectedValueOnce(new ApiError(503, "try later", undefined, "4"));
 
     await expect(
       uploadMultipartBundle(await baseParams([patternedFile(64)])),
-    ).rejects.toMatchObject({ status: 503 });
+    ).resolves.toBeTruthy();
+    expect(api.completeUploadSession).toHaveBeenCalledTimes(2);
+    expect(api.retryDelayMs).toHaveBeenCalledWith(1, "4");
+    expect(api.abortUploadSession).not.toHaveBeenCalled();
+  });
+
+  it("waits as long as the server asks before retrying a rate-limited part", async () => {
+    installFakeServer();
+    api.uploadSessionPart.mockImplementationOnce(async () => {
+      throw new ApiError(429, "rate limit exceeded", undefined, "60");
+    });
+
+    await expect(
+      uploadMultipartBundle(await baseParams([patternedFile(64)])),
+    ).resolves.toBeTruthy();
+    expect(api.retryDelayMs).toHaveBeenCalledWith(1, "60");
+  });
+
+  it("stops waiting to retry a part once another part has failed", async () => {
+    installFakeServer();
+    // A retry wait far longer than the test timeout: only an abort ends it.
+    api.retryDelayMs.mockReturnValue(10 * 60_000);
+    api.uploadSessionPart.mockImplementation(async (_session, _token, partNumber: number) => {
+      throw partNumber === 1
+        ? new ApiError(503, "storage unavailable")
+        : new ApiError(400, "part rejected");
+    });
+
+    await expect(
+      uploadMultipartBundle(await baseParams([patternedFile(13 * MIB)])),
+    ).rejects.toMatchObject({ status: 400 });
+  }, 10_000);
+
+  it("aborts the parts still in flight when encryption fails", async () => {
+    installFakeServer();
+    const file = patternedFile(13 * MIB);
+    // The file changes on disk after the first part was queued.
+    const slice = file.slice.bind(file);
+    file.slice = (start?: number, end?: number) =>
+      (start ?? 0) >= 8 * MIB ? new Blob([]) : slice(start, end);
+    let inFlightSignal: AbortSignal | undefined;
+    api.uploadSessionPart.mockImplementation(
+      (_session, _token, _partNumber, _offset, _bytes, _sha256, signal: AbortSignal) => {
+        inFlightSignal = signal;
+        return new Promise((_resolve, reject) => {
+          signal.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")));
+        });
+      },
+    );
+
+    await expect(uploadMultipartBundle(await baseParams([file]))).rejects.toThrow(
+      "bundle file changed during encryption",
+    );
+    expect(inFlightSignal?.aborted).toBe(true);
+  }, 30_000);
+
+  it("aborts the server session on any failure", async () => {
+    installFakeServer();
+    api.completeUploadSession.mockRejectedValueOnce(
+      new ApiError(409, "upload session is not pending"),
+    );
+
+    await expect(
+      uploadMultipartBundle(await baseParams([patternedFile(64)])),
+    ).rejects.toMatchObject({ status: 409 });
     expect(api.abortUploadSession).toHaveBeenCalledWith("session-1", "token-1");
 
     // A second attempt is a completely new session.
