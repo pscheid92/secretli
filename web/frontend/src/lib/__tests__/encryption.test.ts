@@ -157,6 +157,21 @@ describe("KeySet", () => {
   });
 
   describe("fromShareSecret with password", () => {
+    // Pinned to what existing links derive: any change to the password key
+    // derivation would lock every password-protected share out.
+    it("derives the same keys as before for a known share secret and password", async () => {
+      const shareSecret = base64UrlEncode(Uint8Array.from({ length: 32 }, (_, i) => i));
+      expect(shareSecret).toBe("AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8");
+
+      const ks = await KeySet.fromShareSecret(shareSecret, "correct horse battery staple");
+
+      expect(ks.getEncoded()).toMatchObject({
+        publicID: "gTqWSKubP-RW3j-tZxyMBQ",
+        metadataToken: "upt3zqqpEe7dfskJqEb2rLwnYZHkKscHbfK4r0U_O7o",
+        blobToken: "NTy8bKx4HqQl5hYppfexV7RGrA0M3UbJueugqsVeG-w",
+      });
+    });
+
     it("derives keys with password and can decrypt own data", async () => {
       const original = await KeySet.generateRandom();
       const shareSecret = original.getEncoded().shareSecret;

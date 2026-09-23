@@ -1,6 +1,6 @@
 import { xchacha20poly1305 } from "@noble/ciphers/chacha.js";
 import { hkdf } from "@noble/hashes/hkdf.js";
-import { scrypt } from "@noble/hashes/scrypt.js";
+import { scryptAsync } from "@noble/hashes/scrypt.js";
 import { sha512 } from "@noble/hashes/sha2.js";
 import { base64UrlDecode, base64UrlEncode } from "./base64";
 
@@ -86,7 +86,7 @@ export class KeySet {
     }
     const baseKeys = deriveBaseKeys(shareSecretBytes);
     const blobMaterial = password
-      ? derivePasswordMaterial(shareSecretBytes, password)
+      ? await derivePasswordMaterial(shareSecretBytes, password)
       : shareSecretBytes;
     const blobKeys = deriveBlobKeys(blobMaterial);
     const deletionToken = new Uint8Array(0);
@@ -211,8 +211,13 @@ function deriveBlobKeys(keyBytes: Uint8Array): {
   return { blobKey, blobToken };
 }
 
-function derivePasswordMaterial(shareSecret: Uint8Array, password: string): Uint8Array {
-  return scrypt(new TextEncoder().encode(password), passwordSalt(shareSecret), {
+/**
+ * scrypt, yielding to the browser every few milliseconds so the page keeps
+ * rendering (spinners, input) while the key is derived. The output is the
+ * same as the synchronous function's.
+ */
+function derivePasswordMaterial(shareSecret: Uint8Array, password: string): Promise<Uint8Array> {
+  return scryptAsync(new TextEncoder().encode(password), passwordSalt(shareSecret), {
     N: 2 ** 14,
     r: 8,
     p: 1,
