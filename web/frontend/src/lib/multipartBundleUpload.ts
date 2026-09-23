@@ -83,7 +83,12 @@ export async function uploadMultipartBundle(
   try {
     const manifest = await encryptAndUploadParts(params, plan, session);
     throwIfCancelled(params.signal);
-    const response = await completeUploadSession(session.session_id, session.upload_token);
+    // The server answers a repeated complete with the same result, so a
+    // transient failure here must not throw the whole upload away.
+    const response = await withTransientRetry(
+      () => completeUploadSession(session.session_id, session.upload_token),
+      params.signal,
+    );
     return {
       expires_at: response.expires_at,
       manifest,
@@ -105,7 +110,7 @@ async function encryptAndUploadParts(
   plan: BundlePlan,
   session: StartUploadSessionResponse,
 ): Promise<BundleManifest> {
-  const uploader = new UploadQueue(MULTIPART_UPLOAD_CONCURRENCY);
+  const uploader = new UploadQueue(MULTIPART_UPLOAD_CONCURRENCY, params.signal);
   let uploadedBytes = 0;
   let uploadedPartCount = 0;
 
@@ -140,7 +145,7 @@ async function encryptAndUploadParts(
     partNumber++;
 
     throwIfCancelled(params.signal);
-    await uploader.schedule(async () => {
+    await uploader.schedule(async (signal) => {
       const uploaded = await uploadPartWithRetry(
         session.session_id,
         session.upload_token,
@@ -148,7 +153,7 @@ async function encryptAndUploadParts(
         offset,
         part,
         sha256,
-        params.signal,
+        signal,
       );
       uploadedBytes += uploaded.size;
       uploadedPartCount++;
@@ -158,6 +163,8 @@ async function encryptAndUploadParts(
 
   for (const record of plan.records) {
     throwIfCancelled(params.signal);
+    // Stop encrypting as soon as any part has failed for good.
+    uploader.throwIfFailed();
     if (
       currentParts.length > 0 &&
       currentSize + record.length > session.part_size &&
@@ -239,60 +246,95 @@ async function abortQuietly(sessionID: string, uploadToken: string) {
   }
 }
 
-async function uploadPartWithRetry(
+function uploadPartWithRetry(
   sessionID: string,
   uploadToken: string,
   partNumber: number,
   offset: number,
   part: Blob,
   sha256: string,
-  signal?: AbortSignal,
+  signal: AbortSignal,
 ): Promise<UploadSessionPart> {
-  let lastError: unknown;
-  for (let attempt = 1; attempt <= MAX_TRANSIENT_ATTEMPTS; attempt++) {
-    throwIfCancelled(signal);
-    try {
-      return await uploadSessionPart(
-        sessionID,
-        uploadToken,
-        partNumber,
-        offset,
-        part,
-        sha256,
-        signal,
-      );
-    } catch (err) {
-      if (!(err instanceof ApiError) || !isTransientStatus(err.status)) {
-        throw err;
-      }
-      lastError = err;
-      if (attempt === MAX_TRANSIENT_ATTEMPTS) break;
-      await delay(retryDelayMs(attempt, err.status === 429 ? "1" : undefined));
-    }
-  }
-  throw lastError;
+  return withTransientRetry(
+    () => uploadSessionPart(sessionID, uploadToken, partNumber, offset, part, sha256, signal),
+    signal,
+  );
 }
 
+/**
+ * Retries network failures, rate limiting and server errors, waiting as long
+ * as the server asks (capped by retryDelayMs). Client errors are final.
+ */
+async function withTransientRetry<T>(request: () => Promise<T>, signal?: AbortSignal): Promise<T> {
+  for (let attempt = 1; ; attempt++) {
+    throwIfCancelled(signal);
+    try {
+      return await request();
+    } catch (err) {
+      if (
+        !(err instanceof ApiError) ||
+        !isTransientStatus(err.status) ||
+        attempt === MAX_TRANSIENT_ATTEMPTS
+      ) {
+        throw err;
+      }
+      await delay(retryDelayMs(attempt, err.retryAfter), signal);
+    }
+  }
+}
+
+/**
+ * Runs part uploads with bounded concurrency. The first failure is kept and
+ * aborts the uploads still running; the caller sees it on its next schedule(),
+ * throwIfFailed() or drain(), so a failed part can never go unnoticed.
+ */
 class UploadQueue {
   private readonly inFlight = new Set<Promise<void>>();
   private readonly concurrency: number;
+  private readonly controller = new AbortController();
+  private failure: { error: unknown } | undefined;
 
-  constructor(concurrency: number) {
+  /** Cancelling the upload aborts every part still in flight. */
+  constructor(concurrency: number, cancel?: AbortSignal) {
     this.concurrency = concurrency;
+    if (cancel?.aborted) {
+      this.controller.abort();
+    }
+    cancel?.addEventListener("abort", () => this.controller.abort(), { once: true });
   }
 
-  async schedule(task: () => Promise<void>) {
+  async schedule(task: (signal: AbortSignal) => Promise<void>) {
+    this.throwIfFailed();
     while (this.inFlight.size >= this.concurrency) {
       await Promise.race(this.inFlight);
+      this.throwIfFailed();
     }
-    const promise = task().finally(() => {
-      this.inFlight.delete(promise);
-    });
+    // Queued promises never reject: a failure is recorded instead, so it is
+    // reported exactly once and never becomes an unhandled rejection.
+    const promise = task(this.controller.signal)
+      .catch((error: unknown) => this.fail(error))
+      .finally(() => {
+        this.inFlight.delete(promise);
+      });
     this.inFlight.add(promise);
+  }
+
+  throwIfFailed() {
+    if (this.failure) {
+      throw this.failure.error;
+    }
   }
 
   async drain() {
     await Promise.all(this.inFlight);
+    this.throwIfFailed();
+  }
+
+  private fail(error: unknown) {
+    // Only the first failure matters; the rest are the aborts it caused.
+    if (this.failure) return;
+    this.failure = { error };
+    this.controller.abort();
   }
 }
 
@@ -310,6 +352,21 @@ function toArrayBuffer(bytes: Uint8Array): ArrayBuffer {
   return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
 }
 
-function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+/** Waits, unless the signal fires first: a cancelled upload stops waiting. */
+function delay(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new UploadCancelledError());
+      return;
+    }
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(new UploadCancelledError());
+    };
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
 }

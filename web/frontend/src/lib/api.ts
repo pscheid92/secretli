@@ -1,12 +1,15 @@
 export class ApiError extends Error {
   readonly status: number;
   readonly requestId?: string;
+  /** The server's Retry-After header, for callers that retry. */
+  readonly retryAfter?: string;
 
-  constructor(status: number, message: string, requestId?: string) {
+  constructor(status: number, message: string, requestId?: string, retryAfter?: string) {
     super(requestId ? `${message} (request id: ${requestId})` : message);
     this.name = "ApiError";
     this.status = status;
     this.requestId = requestId;
+    this.retryAfter = retryAfter;
   }
 }
 
@@ -138,7 +141,12 @@ export async function retrieveSecretRange(
 async function apiErrorFromResponse(res: Response, fallbackRequestID: string): Promise<ApiError> {
   const body = await res.json().catch(() => null);
   const message = body?.error ?? `Request failed (${res.status})`;
-  return new ApiError(res.status, message, requestIDFromResponse(res, fallbackRequestID));
+  return new ApiError(
+    res.status,
+    message,
+    requestIDFromResponse(res, fallbackRequestID),
+    res.headers.get("Retry-After") ?? undefined,
+  );
 }
 
 function withRequestID(init: RequestInit): { requestID: string; init: RequestInit } {

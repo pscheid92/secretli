@@ -176,6 +176,20 @@ describe("retrieval sessions", () => {
     expect(fetchSpy).toHaveBeenCalledTimes(MAX_TRANSIENT_ATTEMPTS);
   });
 
+  it("carries the server's Retry-After on the error", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ error: "rate limit exceeded" }), {
+        status: 429,
+        headers: { "Retry-After": "60" },
+      }),
+    );
+
+    await expect(completeUploadSession("session", "token")).rejects.toMatchObject({
+      status: 429,
+      retryAfter: "60",
+    });
+  });
+
   it("classifies transient statuses and honours Retry-After", () => {
     expect([0, 429, 500, 503].every(isTransientStatus)).toBe(true);
     expect([400, 403, 404, 409, 413].some(isTransientStatus)).toBe(false);

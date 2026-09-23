@@ -15,6 +15,8 @@ import {
   ApiError,
   deleteSecret,
   getSecretMetadata,
+  isTransientStatus,
+  type RetrievalSessionResponse,
   retrieveSecretRange,
   type SecretMetadataResponse,
   startRetrievalSession,
@@ -67,6 +69,12 @@ type State =
   | { stage: "deleted" }
   | { stage: "error"; message: string };
 
+/** The server did not accept the blob token: the link or password is wrong. */
+class BlobTokenRejectedError extends Error {}
+
+/** The retrieval session ran out before the share could be read. */
+class RetrievalSessionExpiredError extends Error {}
+
 /** Strips the share secret from the address bar so it does not linger in history. */
 function stripFragmentFromLocation() {
   if (!window.location.hash) return;
@@ -86,6 +94,12 @@ export default function RetrievePage() {
   const [downloadingBundle, setDownloadingBundle] = useState(false);
   const [downloadProgress, setDownloadProgress] = useState<TransferProgress | null>(null);
   const [downloadedFiles, setDownloadedFiles] = useState<DecryptedBundleFile[] | null>(null);
+  // Starting a retrieval session is what burns a burn-after-read share, so a
+  // started session is kept and reused until the server stops accepting it. A
+  // failure while reading must not throw away the only chance to read.
+  const retrievalRef = useRef<{ blobToken: string; session: RetrievalSessionResponse } | null>(
+    null,
+  );
 
   const fetchMetadata = useCallback(async () => {
     const hash = initialHashRef.current;
@@ -159,14 +173,13 @@ export default function RetrievePage() {
       await reveal(identity, blobKeySet, meta.clientMeta);
       return null;
     } catch (err) {
-      // A wrong password derives a wrong blob token (403) or fails to decrypt.
-      // Anything else (burned, expired, rate limited, offline) must not be
-      // reported as a password problem.
-      if (err instanceof ApiError && err.status !== 403) {
-        handleRevealError(err);
-        return null;
+      // Only a rejected blob token means a wrong password. Once the server
+      // accepted it the password was right, whatever fails afterwards.
+      if (err instanceof BlobTokenRejectedError) {
+        return "Wrong password. Please try again.";
       }
-      return "Wrong password. Please try again.";
+      handleRevealError(err);
+      return null;
     } finally {
       setPasswordLoading(false);
     }
@@ -181,19 +194,33 @@ export default function RetrievePage() {
     // The public ID always comes from the share secret; blob access may be
     // password-derived.
     const publicID = identity.baseKeySet.getEncoded().publicID;
-    const session = await startRetrievalSession(publicID, blobKeySet.getEncoded().blobToken);
-    const fetchRange = await cachingRangeFetcher(
-      (start: number, end: number) =>
-        retrieveSecretRange(publicID, session.session_token, start, end),
-      session.blob_size,
-    );
+    const session = await retrievalSession(publicID, blobKeySet.getEncoded().blobToken);
 
-    // Text and files share one storage format, so both start the same way.
-    const { manifest } = await readBundleManifest(fetchRange, blobKeySet, session.blob_size);
+    let manifest: BundleManifest;
+    let text: string | undefined;
+    try {
+      const fetchRange = await cachingRangeFetcher(
+        (start: number, end: number) =>
+          retrieveSecretRange(publicID, session.session_token, start, end),
+        session.blob_size,
+      );
 
-    if (clientMeta.type === "text") {
-      const [only] = await decryptBundleFiles(manifest.files, blobKeySet, fetchRange);
-      setState({ stage: "decrypted", identity, text: await only.blob.text() });
+      // Text and files share one storage format, so both start the same way.
+      ({ manifest } = await readBundleManifest(fetchRange, blobKeySet, session.blob_size));
+      if (clientMeta.type === "text") {
+        const [only] = await decryptBundleFiles(manifest.files, blobKeySet, fetchRange);
+        text = await only.blob.text();
+      }
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 403) {
+        retrievalRef.current = null;
+        throw new RetrievalSessionExpiredError();
+      }
+      throw err;
+    }
+
+    if (text !== undefined) {
+      setState({ stage: "decrypted", identity, text });
       return;
     }
 
@@ -210,19 +237,52 @@ export default function RetrievePage() {
     });
   }
 
+  /** Reuses the session already started with this blob token, if any. */
+  async function retrievalSession(
+    publicID: string,
+    blobToken: string,
+  ): Promise<RetrievalSessionResponse> {
+    const kept = retrievalRef.current;
+    if (kept && kept.blobToken === blobToken) {
+      return kept.session;
+    }
+    try {
+      const session = await startRetrievalSession(publicID, blobToken);
+      retrievalRef.current = { blobToken, session };
+      return session;
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 403) {
+        throw new BlobTokenRejectedError();
+      }
+      throw err;
+    }
+  }
+
+  /**
+   * Transient failures leave the page as it is so the reader can retry with
+   * the session already started; only definite answers end on an error page.
+   */
   function handleRevealError(err: unknown) {
+    if (err instanceof BlobTokenRejectedError) {
+      setState({ stage: "error", message: "This link cannot unlock the share." });
+      return;
+    }
+    if (err instanceof RetrievalSessionExpiredError) {
+      toast.error("The download window has expired. Please try again.");
+      return;
+    }
     if (!(err instanceof ApiError)) {
       setState({ stage: "error", message: "An unexpected error occurred." });
       return;
     }
     if (err.status === 404) {
       setState({ stage: "error", message: "This share has expired or does not exist." });
-    } else if (err.status === 403) {
-      setState({ stage: "error", message: "This link cannot unlock the share." });
     } else if (err.status === 429) {
       toast.error("Too many attempts. Please wait a minute and try again.");
     } else if (err.status === 0) {
       toast.error(err.message);
+    } else if (isTransientStatus(err.status)) {
+      toast.error("The server could not complete the request. Please try again.");
     } else {
       setState({ stage: "error", message: err.message });
     }
