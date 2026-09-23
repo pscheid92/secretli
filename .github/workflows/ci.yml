@@ -3,6 +3,8 @@ name: CI
 on:
   push:
     branches: [main]
+    # A version tag (v1.2.3) publishes a versioned image and a GitHub release.
+    tags: ["v*.*.*"]
   pull_request:
     branches: [main]
 
@@ -221,6 +223,8 @@ jobs:
           images: ghcr.io/${{ github.repository }}
           tags: |
             type=ref,event=branch
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
             type=sha
             type=raw,value={{date 'YYYYMMDD-HHmmss'}}-{{sha}}
 
@@ -239,7 +243,7 @@ jobs:
           push: true
           platforms: linux/amd64,linux/arm64
           build-args: |
-            VERSION=${{ github.sha }}
+            VERSION=${{ github.ref_type == 'tag' && github.ref_name || github.sha }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           sbom: true
@@ -260,3 +264,24 @@ jobs:
             images="$images ${tag}@${DIGEST}"
           done
           cosign sign --yes $images
+
+  release:
+    needs: [build-and-publish]
+    if: github.event_name == 'push' && github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      # A draft, so the notes can be edited before the release is published.
+      - name: Create draft GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          gh release create "$TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --verify-tag \
+            --draft \
+            --generate-notes \
+            --notes "Image: \`ghcr.io/${GITHUB_REPOSITORY}:${TAG#v}\`"

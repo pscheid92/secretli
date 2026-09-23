@@ -105,12 +105,27 @@ Configuration is done via environment variables. See [`.env.example`](.env.examp
 
 ## Deployment
 
-The CI pipeline builds a minimal Docker image (distroless) and publishes it to GitHub Container Registry:
+The CI pipeline builds a minimal Docker image (distroless) and publishes it to GitHub Container Registry. Every push to `main` publishes the rolling tags, and every version tag publishes a release:
 
 ```
-ghcr.io/pscheid92/secretli:main
-ghcr.io/pscheid92/secretli:sha-<commit>
+ghcr.io/pscheid92/secretli:main           # latest main
+ghcr.io/pscheid92/secretli:sha-<commit>   # a specific commit
+ghcr.io/pscheid92/secretli:0.1.0          # a release
+ghcr.io/pscheid92/secretli:0.1            # latest patch of a minor release
 ```
+
+Pin deployments to a release tag. Migrations run on startup and an image refuses to start against a database migrated by a newer release, so upgrade forward and take a database backup before upgrading.
+
+### Releasing
+
+Tag a commit on `main` with a semantic version and push the tag:
+
+```bash
+git tag -a v0.1.0 -m "v0.1.0"
+git push origin v0.1.0
+```
+
+CI runs the full pipeline, publishes and signs the versioned images, and creates a draft GitHub release with generated notes. Edit the notes, then publish the draft.
 
 Images are built for `linux/amd64` and `linux/arm64`, carry an SBOM and SLSA provenance attestation, and are signed with [cosign](https://github.com/sigstore/cosign) (keyless, via GitHub OIDC). Verify a tag with:
 
