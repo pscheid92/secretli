@@ -252,11 +252,11 @@ describe("uploadMultipartBundle", () => {
 
   it("retries completing the upload after a transient failure", async () => {
     installFakeServer();
-    api.completeUploadSession.mockRejectedValueOnce(
-      new ApiError(503, "try later", undefined, "4"),
-    );
+    api.completeUploadSession.mockRejectedValueOnce(new ApiError(503, "try later", undefined, "4"));
 
-    await expect(uploadMultipartBundle(await baseParams([patternedFile(64)]))).resolves.toBeTruthy();
+    await expect(
+      uploadMultipartBundle(await baseParams([patternedFile(64)])),
+    ).resolves.toBeTruthy();
     expect(api.completeUploadSession).toHaveBeenCalledTimes(2);
     expect(api.retryDelayMs).toHaveBeenCalledWith(1, "4");
     expect(api.abortUploadSession).not.toHaveBeenCalled();
@@ -268,7 +268,9 @@ describe("uploadMultipartBundle", () => {
       throw new ApiError(429, "rate limit exceeded", undefined, "60");
     });
 
-    await expect(uploadMultipartBundle(await baseParams([patternedFile(64)]))).resolves.toBeTruthy();
+    await expect(
+      uploadMultipartBundle(await baseParams([patternedFile(64)])),
+    ).resolves.toBeTruthy();
     expect(api.retryDelayMs).toHaveBeenCalledWith(1, "60");
   });
 

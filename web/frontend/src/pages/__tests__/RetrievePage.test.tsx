@@ -20,6 +20,10 @@ vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
 
 const SECRET_TEXT = "the launch code is 0000";
 
+// The page derives the password key with scrypt on the main thread, which is
+// slow on CI runners; waits that follow a password submit get more time.
+const AFTER_PASSWORD = { timeout: 15_000 };
+
 /**
  * Publishes a text share on a fake server: metadata and blob are really
  * encrypted, so the page decrypts them exactly as it would in production.
@@ -127,9 +131,11 @@ describe("RetrievePage", () => {
 
     await openPasswordPrompt();
     await submitPassword("wrong horse");
-    expect(await screen.findByText("Wrong password. Please try again.")).toBeTruthy();
+    expect(
+      await screen.findByText("Wrong password. Please try again.", {}, AFTER_PASSWORD),
+    ).toBeTruthy();
     expect(api.retrieveSecretRange).not.toHaveBeenCalled();
-  });
+  }, 30_000);
 
   it("does not blame the password when reading fails after it was accepted", async () => {
     await publishTextShare({ burnAfterRead: true, password: "correct horse" });
@@ -138,13 +144,15 @@ describe("RetrievePage", () => {
 
     await openPasswordPrompt();
     await submitPassword("correct horse");
-    await waitFor(() =>
-      expect(toast.error).toHaveBeenCalledWith("Network error — please check your connection"),
+    await waitFor(
+      () =>
+        expect(toast.error).toHaveBeenCalledWith("Network error — please check your connection"),
+      AFTER_PASSWORD,
     );
     expect(screen.queryByText("Wrong password. Please try again.")).toBeNull();
 
     await submitPassword("correct horse");
-    expect(await screen.findByText(SECRET_TEXT)).toBeTruthy();
+    expect(await screen.findByText(SECRET_TEXT, {}, AFTER_PASSWORD)).toBeTruthy();
     expect(api.startRetrievalSession).toHaveBeenCalledTimes(1);
-  });
+  }, 45_000);
 });
