@@ -240,11 +240,18 @@ SELECT session_id, public_id, upload_token_hash, metadata_token_hash, blob_token
 FROM upload_sessions
 WHERE state = 'pending'
   AND upload_expires_at < $1
+ORDER BY upload_expires_at
+LIMIT $2
 FOR UPDATE SKIP LOCKED
 `
 
-func (q *Queries) ListExpiredUploadSessionsForUpdate(ctx context.Context, nowAt pgtype.Timestamptz) ([]UploadSession, error) {
-	rows, err := q.db.Query(ctx, listExpiredUploadSessionsForUpdate, nowAt)
+type ListExpiredUploadSessionsForUpdateParams struct {
+	NowAt     pgtype.Timestamptz
+	BatchSize int32
+}
+
+func (q *Queries) ListExpiredUploadSessionsForUpdate(ctx context.Context, arg ListExpiredUploadSessionsForUpdateParams) ([]UploadSession, error) {
+	rows, err := q.db.Query(ctx, listExpiredUploadSessionsForUpdate, arg.NowAt, arg.BatchSize)
 	if err != nil {
 		return nil, err
 	}
@@ -362,6 +369,31 @@ type MarkUploadSessionCompletedParams struct {
 func (q *Queries) MarkUploadSessionCompleted(ctx context.Context, arg MarkUploadSessionCompletedParams) error {
 	_, err := q.db.Exec(ctx, markUploadSessionCompleted, arg.NowAt, arg.SessionID)
 	return err
+}
+
+const markUploadSessionsAborted = `-- name: MarkUploadSessionsAborted :execrows
+UPDATE upload_sessions
+SET state = 'aborted',
+    aborted_at = $1,
+    metadata_token_hash = NULL,
+    blob_token_hash = NULL,
+    deletion_token_hash = NULL,
+    encrypted_meta = NULL
+WHERE session_id = ANY($2::text[])
+  AND state = 'pending'
+`
+
+type MarkUploadSessionsAbortedParams struct {
+	NowAt      pgtype.Timestamptz
+	SessionIds []string
+}
+
+func (q *Queries) MarkUploadSessionsAborted(ctx context.Context, arg MarkUploadSessionsAbortedParams) (int64, error) {
+	result, err := q.db.Exec(ctx, markUploadSessionsAborted, arg.NowAt, arg.SessionIds)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const secretExistsByPublicID = `-- name: SecretExistsByPublicID :one

@@ -95,6 +95,19 @@ func (q *Queries) DeleteSecret(ctx context.Context, publicID string) (int64, err
 	return result.RowsAffected(), nil
 }
 
+const deleteSecretsByPublicIDs = `-- name: DeleteSecretsByPublicIDs :execrows
+DELETE FROM secrets
+WHERE public_id = ANY($1::text[])
+`
+
+func (q *Queries) DeleteSecretsByPublicIDs(ctx context.Context, publicIds []string) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteSecretsByPublicIDs, publicIds)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const getSecretByPublicID = `-- name: GetSecretByPublicID :one
 SELECT
     public_id,
@@ -137,67 +150,48 @@ func (q *Queries) GetSecretByPublicID(ctx context.Context, arg GetSecretByPublic
 	return i, err
 }
 
-const selectConsumedBurnAfterReadSecretsForCleanup = `-- name: SelectConsumedBurnAfterReadSecretsForCleanup :many
-SELECT s.public_id, s.storage_key
-FROM secrets AS s
-WHERE s.burn_after_read = true
-  AND s.retrieved_at IS NOT NULL
-  AND s.expires_at >= $1
-  AND NOT EXISTS (
-      SELECT 1
-      FROM retrieval_sessions AS rs
-      WHERE rs.public_id = s.public_id
-        AND rs.expires_at > $1
-  )
-FOR UPDATE OF s SKIP LOCKED
-`
-
-type SelectConsumedBurnAfterReadSecretsForCleanupRow struct {
-	PublicID   string
-	StorageKey string
-}
-
-func (q *Queries) SelectConsumedBurnAfterReadSecretsForCleanup(ctx context.Context, nowAt pgtype.Timestamptz) ([]SelectConsumedBurnAfterReadSecretsForCleanupRow, error) {
-	rows, err := q.db.Query(ctx, selectConsumedBurnAfterReadSecretsForCleanup, nowAt)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []SelectConsumedBurnAfterReadSecretsForCleanupRow{}
-	for rows.Next() {
-		var i SelectConsumedBurnAfterReadSecretsForCleanupRow
-		if err := rows.Scan(&i.PublicID, &i.StorageKey); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const selectExpiredSecretsForCleanup = `-- name: SelectExpiredSecretsForCleanup :many
+const selectSecretsForCleanup = `-- name: SelectSecretsForCleanup :many
 SELECT s.public_id, s.storage_key
 FROM secrets AS s
 WHERE s.expires_at < $1
+   OR (
+       s.burn_after_read = true
+       AND s.retrieved_at IS NOT NULL
+       AND NOT EXISTS (
+           SELECT 1
+           FROM retrieval_sessions AS rs
+           WHERE rs.public_id = s.public_id
+             AND rs.expires_at > $1
+       )
+   )
+ORDER BY s.expires_at
+LIMIT $2
 FOR UPDATE OF s SKIP LOCKED
 `
 
-type SelectExpiredSecretsForCleanupRow struct {
+type SelectSecretsForCleanupParams struct {
+	NowAt     pgtype.Timestamptz
+	BatchSize int32
+}
+
+type SelectSecretsForCleanupRow struct {
 	PublicID   string
 	StorageKey string
 }
 
-func (q *Queries) SelectExpiredSecretsForCleanup(ctx context.Context, nowAt pgtype.Timestamptz) ([]SelectExpiredSecretsForCleanupRow, error) {
-	rows, err := q.db.Query(ctx, selectExpiredSecretsForCleanup, nowAt)
+// Expired secrets and consumed burn-after-read secrets whose retrieval
+// sessions have all ended, oldest first, one batch at a time. Postgres plans
+// the OR as a BitmapOr over idx_secrets_expires_at and the partial
+// consumed-burn index, so the cost follows the rows due, not the table size.
+func (q *Queries) SelectSecretsForCleanup(ctx context.Context, arg SelectSecretsForCleanupParams) ([]SelectSecretsForCleanupRow, error) {
+	rows, err := q.db.Query(ctx, selectSecretsForCleanup, arg.NowAt, arg.BatchSize)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []SelectExpiredSecretsForCleanupRow{}
+	items := []SelectSecretsForCleanupRow{}
 	for rows.Next() {
-		var i SelectExpiredSecretsForCleanupRow
+		var i SelectSecretsForCleanupRow
 		if err := rows.Scan(&i.PublicID, &i.StorageKey); err != nil {
 			return nil, err
 		}

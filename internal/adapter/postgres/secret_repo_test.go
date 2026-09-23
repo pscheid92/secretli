@@ -3,6 +3,7 @@ package postgres_test
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -11,6 +12,9 @@ import (
 	"github.com/pscheid92/secretli/internal/domain"
 	tokencrypto "github.com/pscheid92/secretli/internal/platform/crypto"
 )
+
+// testBatchSize is larger than any test's backlog unless a test is about batching.
+const testBatchSize = 100
 
 func newTestSecret(publicID string, expiresAt time.Time) *domain.Secret {
 	return &domain.Secret{
@@ -293,13 +297,13 @@ func TestSecretRepo_DeleteExpired(t *testing.T) {
 	}
 
 	noop := func(string) error { return nil }
-	count, err := repo.DeleteExpired(ctx, time.Now(), noop)
+	count, err := repo.DeleteExpired(ctx, time.Now(), testBatchSize, noop)
 	if err != nil {
 		t.Fatalf("delete expired: %v", err)
 	}
 
-	if count != 2 {
-		t.Errorf("deleted count = %d, want 2", count)
+	if count.Removed != 2 {
+		t.Errorf("deleted count = %d, want 2", count.Removed)
 	}
 
 	// Valid secret should still exist
@@ -337,13 +341,13 @@ func TestSecretRepo_DeleteExpired_BurnAfterRead(t *testing.T) {
 	}
 
 	noop := func(string) error { return nil }
-	count, err := repo.DeleteExpired(ctx, time.Now(), noop)
+	count, err := repo.DeleteExpired(ctx, time.Now(), testBatchSize, noop)
 	if err != nil {
 		t.Fatalf("delete expired: %v", err)
 	}
 
-	if count != 1 {
-		t.Errorf("deleted count = %d, want 1", count)
+	if count.Removed != 1 {
+		t.Errorf("deleted count = %d, want 1", count.Removed)
 	}
 
 	// Regular retrieved secret should still exist
@@ -379,12 +383,12 @@ func TestSecretRepo_DeleteExpired_KeepsBurnedSecretWithActiveSession(t *testing.
 	}
 
 	noop := func(string) error { return nil }
-	count, err := repo.DeleteExpired(ctx, time.Now(), noop)
+	count, err := repo.DeleteExpired(ctx, time.Now(), testBatchSize, noop)
 	if err != nil {
 		t.Fatalf("delete expired: %v", err)
 	}
-	if count != 0 {
-		t.Errorf("deleted count = %d, want 0", count)
+	if count.Removed != 0 {
+		t.Errorf("deleted count = %d, want 0", count.Removed)
 	}
 
 	if _, err := pool.Exec(ctx, "UPDATE retrieval_sessions SET expires_at = $2 WHERE public_id = $1", "burn-active-session", time.Now().Add(-time.Minute)); err != nil {
@@ -398,12 +402,93 @@ func TestSecretRepo_DeleteExpired_KeepsBurnedSecretWithActiveSession(t *testing.
 		t.Errorf("deleted sessions = %d, want 1", deletedSessions)
 	}
 
-	count, err = repo.DeleteExpired(ctx, time.Now(), noop)
+	count, err = repo.DeleteExpired(ctx, time.Now(), testBatchSize, noop)
 	if err != nil {
 		t.Fatalf("delete expired after session cleanup: %v", err)
 	}
-	if count != 1 {
-		t.Errorf("deleted count after session cleanup = %d, want 1", count)
+	if count.Removed != 1 {
+		t.Errorf("deleted count after session cleanup = %d, want 1", count.Removed)
+	}
+}
+
+func TestSecretRepo_DeleteExpired_Batches(t *testing.T) {
+	pool := setupTestDB(t)
+	repo := pgadapter.NewSecretRepo(pool)
+	ctx := context.Background()
+
+	now := time.Now()
+	consumed := newTestSecret("batch-consumed", now.Add(time.Hour))
+	consumed.BurnAfterRead = true
+	for _, s := range []*domain.Secret{
+		newTestSecret("batch-exp-3h", now.Add(-3*time.Hour)),
+		newTestSecret("batch-exp-1h", now.Add(-1*time.Hour)),
+		newTestSecret("batch-exp-2h", now.Add(-2*time.Hour)),
+		consumed,
+		newTestSecret("batch-live", now.Add(time.Hour)),
+	} {
+		if err := repo.Create(ctx, s, now); err != nil {
+			t.Fatalf("create %s: %v", s.PublicID, err)
+		}
+	}
+	markRetrieved(t, pool, "batch-consumed")
+
+	var seen []string
+	record := func(storageKey string) error {
+		seen = append(seen, storageKey)
+		return nil
+	}
+
+	// Oldest first, never more than the limit per batch; expired and consumed
+	// burn-after-read secrets come from the same backlog.
+	for i, want := range []domain.CleanupBatch{{Found: 2, Removed: 2}, {Found: 2, Removed: 2}, {Found: 0, Removed: 0}} {
+		got, err := repo.DeleteExpired(ctx, now, 2, record)
+		if err != nil {
+			t.Fatalf("batch %d: %v", i+1, err)
+		}
+		if got != want {
+			t.Errorf("batch %d = %+v, want %+v", i+1, got, want)
+		}
+	}
+	wantOrder := []string{"secrets/batch-exp-3h", "secrets/batch-exp-2h", "secrets/batch-exp-1h", "secrets/batch-consumed"}
+	if strings.Join(seen, ",") != strings.Join(wantOrder, ",") {
+		t.Errorf("cleanup order = %v, want %v", seen, wantOrder)
+	}
+	if _, err := repo.GetByPublicID(ctx, "batch-live", now); err != nil {
+		t.Errorf("live secret should survive: %v", err)
+	}
+}
+
+func TestSecretRepo_DeleteExpired_SkipsRowsLockedElsewhere(t *testing.T) {
+	pool := setupTestDB(t)
+	repo := pgadapter.NewSecretRepo(pool)
+	ctx := context.Background()
+
+	for _, id := range []string{"locked-elsewhere", "free-to-delete"} {
+		if err := repo.Create(ctx, newTestSecret(id, time.Now().Add(-time.Hour)), time.Now()); err != nil {
+			t.Fatalf("create %s: %v", id, err)
+		}
+	}
+
+	// Another replica's cleanup (or a request) holds one row.
+	other, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin: %v", err)
+	}
+	defer func() { _ = other.Rollback(ctx) }()
+	if _, err := other.Exec(ctx, "SELECT 1 FROM secrets WHERE public_id = 'locked-elsewhere' FOR UPDATE"); err != nil {
+		t.Fatalf("lock row: %v", err)
+	}
+
+	var seen []string
+	got, err := repo.DeleteExpired(ctx, time.Now(), testBatchSize, func(storageKey string) error {
+		seen = append(seen, storageKey)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("delete expired: %v", err)
+	}
+	if got != (domain.CleanupBatch{Found: 1, Removed: 1}) || len(seen) != 1 || seen[0] != "secrets/free-to-delete" {
+		t.Errorf("batch = %+v, saw %v; want only the unlocked row", got, seen)
 	}
 }
 
@@ -429,24 +514,24 @@ func TestSecretRepo_DeleteExpired_HookError(t *testing.T) {
 		return nil
 	}
 
-	count, err := repo.DeleteExpired(ctx, time.Now(), failOne)
+	count, err := repo.DeleteExpired(ctx, time.Now(), testBatchSize, failOne)
 	if err != nil {
 		t.Fatalf("delete expired: %v", err)
 	}
 
-	if count != 1 {
-		t.Errorf("deleted count = %d, want 1", count)
+	if count.Removed != 1 {
+		t.Errorf("deleted count = %d, want 1", count.Removed)
 	}
 
 	// hook-err-001 should still exist (hook failed, row kept)
 	// We can't use GetByPublicID because it filters by expires_at.
 	// Instead, call DeleteExpired again with a noop — if it finds a row, it was kept.
 	noop := func(string) error { return nil }
-	count2, err := repo.DeleteExpired(ctx, time.Now(), noop)
+	count2, err := repo.DeleteExpired(ctx, time.Now(), testBatchSize, noop)
 	if err != nil {
 		t.Fatalf("second delete expired: %v", err)
 	}
-	if count2 != 1 {
-		t.Errorf("second pass count = %d, want 1 (the skipped row)", count2)
+	if count2.Removed != 1 {
+		t.Errorf("second pass count = %d, want 1 (the skipped row)", count2.Removed)
 	}
 }

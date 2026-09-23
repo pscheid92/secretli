@@ -145,51 +145,44 @@ func (r *SecretRepo) Delete(ctx context.Context, publicID string) error {
 	return nil
 }
 
-func (r *SecretRepo) DeleteExpired(ctx context.Context, now time.Time, beforeDelete func(storageKey string) error) (int64, error) {
+func (r *SecretRepo) DeleteExpired(ctx context.Context, now time.Time, limit int, beforeDelete func(storageKey string) error) (domain.CleanupBatch, error) {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
-		return 0, fmt.Errorf("begin tx: %w", err)
+		return domain.CleanupBatch{}, fmt.Errorf("begin tx: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
-
 	qtx := r.q.WithTx(tx)
 
-	expiredIDs, err := qtx.SelectExpiredSecretsForCleanup(ctx, timestamptz(now))
+	rows, err := qtx.SelectSecretsForCleanup(ctx, dbsqlc.SelectSecretsForCleanupParams{
+		NowAt:     timestamptz(now),
+		BatchSize: int32(limit), //nolint:gosec // small constant chosen by the caller
+	})
 	if err != nil {
-		return 0, fmt.Errorf("select expired: %w", err)
+		return domain.CleanupBatch{}, fmt.Errorf("select secrets for cleanup: %w", err)
 	}
 
-	consumedIDs, err := qtx.SelectConsumedBurnAfterReadSecretsForCleanup(ctx, timestamptz(now))
-	if err != nil {
-		return 0, fmt.Errorf("select consumed burn-after-read: %w", err)
-	}
-
-	type doomed struct{ publicID, storageKey string }
-	candidates := make([]doomed, 0, len(expiredIDs)+len(consumedIDs))
-	for _, row := range expiredIDs {
-		candidates = append(candidates, doomed{row.PublicID, row.StorageKey})
-	}
-	for _, row := range consumedIDs {
-		candidates = append(candidates, doomed{row.PublicID, row.StorageKey})
-	}
-
-	var deleted int64
-	for _, c := range candidates {
-		if err := beforeDelete(c.storageKey); err != nil {
-			slog.ErrorContext(ctx, "cleanup: beforeDelete failed, skipping", "public_id", c.publicID, "error", err)
+	// Only rows whose object is gone are deleted, in one statement: a failed
+	// statement aborts the whole transaction, so there is no deleting row by
+	// row and carrying on after an error.
+	removable := make([]string, 0, len(rows))
+	for _, row := range rows {
+		if err := beforeDelete(row.StorageKey); err != nil {
+			slog.ErrorContext(ctx, "cleanup: beforeDelete failed, skipping", "public_id", row.PublicID, "error", err)
 			continue
 		}
-		if _, err := qtx.DeleteSecret(ctx, c.publicID); err != nil {
-			slog.ErrorContext(ctx, "cleanup: delete row failed", "public_id", c.publicID, "error", err)
-			continue
-		}
-		deleted++
+		removable = append(removable, row.PublicID)
 	}
 
+	var removed int64
+	if len(removable) > 0 {
+		if removed, err = qtx.DeleteSecretsByPublicIDs(ctx, removable); err != nil {
+			return domain.CleanupBatch{}, fmt.Errorf("delete secrets: %w", err)
+		}
+	}
 	if err := tx.Commit(ctx); err != nil {
-		return 0, fmt.Errorf("commit tx: %w", err)
+		return domain.CleanupBatch{}, fmt.Errorf("commit tx: %w", err)
 	}
-	return deleted, nil
+	return domain.CleanupBatch{Found: len(rows), Removed: int(removed)}, nil
 }
 
 func (r *SecretRepo) DeleteExpiredRetrievalSessions(ctx context.Context, now time.Time) (int64, error) {
@@ -401,40 +394,46 @@ func (r *SecretRepo) ClearUploadParts(ctx context.Context, sessionID string) err
 	return nil
 }
 
-func (r *SecretRepo) AbortExpiredUploadSessions(ctx context.Context, now time.Time, beforeAbort func(session *domain.UploadSession) error) (int64, error) {
+func (r *SecretRepo) AbortExpiredUploadSessions(ctx context.Context, now time.Time, limit int, beforeAbort func(session *domain.UploadSession) error) (domain.CleanupBatch, error) {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
-		return 0, fmt.Errorf("begin expired upload session tx: %w", err)
+		return domain.CleanupBatch{}, fmt.Errorf("begin expired upload session tx: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 	qtx := r.q.WithTx(tx)
 
-	rows, err := qtx.ListExpiredUploadSessionsForUpdate(ctx, timestamptz(now))
+	rows, err := qtx.ListExpiredUploadSessionsForUpdate(ctx, dbsqlc.ListExpiredUploadSessionsForUpdateParams{
+		NowAt:     timestamptz(now),
+		BatchSize: int32(limit), //nolint:gosec // small constant chosen by the caller
+	})
 	if err != nil {
-		return 0, fmt.Errorf("select expired upload sessions: %w", err)
+		return domain.CleanupBatch{}, fmt.Errorf("select expired upload sessions: %w", err)
 	}
 
-	var aborted int64
+	abortable := make([]string, 0, len(rows))
 	for _, row := range rows {
 		session := uploadSessionFromRow(row)
 		if err := beforeAbort(session); err != nil {
 			slog.ErrorContext(ctx, "cleanup: abort multipart upload failed, skipping", "session_id", session.SessionID, "error", err)
 			continue
 		}
-		if _, err := qtx.MarkUploadSessionAborted(ctx, dbsqlc.MarkUploadSessionAbortedParams{
-			NowAt:     timestamptz(now),
-			SessionID: session.SessionID,
-		}); err != nil {
-			slog.ErrorContext(ctx, "cleanup: mark upload session aborted failed", "session_id", session.SessionID, "error", err)
-			continue
-		}
-		aborted++
+		abortable = append(abortable, session.SessionID)
 	}
 
-	if err := tx.Commit(ctx); err != nil {
-		return 0, fmt.Errorf("commit expired upload sessions: %w", err)
+	var aborted int64
+	if len(abortable) > 0 {
+		aborted, err = qtx.MarkUploadSessionsAborted(ctx, dbsqlc.MarkUploadSessionsAbortedParams{
+			NowAt:      timestamptz(now),
+			SessionIds: abortable,
+		})
+		if err != nil {
+			return domain.CleanupBatch{}, fmt.Errorf("mark upload sessions aborted: %w", err)
+		}
 	}
-	return aborted, nil
+	if err := tx.Commit(ctx); err != nil {
+		return domain.CleanupBatch{}, fmt.Errorf("commit expired upload sessions: %w", err)
+	}
+	return domain.CleanupBatch{Found: len(rows), Removed: int(aborted)}, nil
 }
 
 func (r *SecretRepo) DeleteFinishedUploadSessions(ctx context.Context, finishedBefore time.Time) (int64, error) {

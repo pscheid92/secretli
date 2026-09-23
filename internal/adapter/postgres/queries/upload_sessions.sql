@@ -50,6 +50,8 @@ SELECT *
 FROM upload_sessions
 WHERE state = 'pending'
   AND upload_expires_at < sqlc.arg(now_at)
+ORDER BY upload_expires_at
+LIMIT sqlc.arg(batch_size)
 FOR UPDATE SKIP LOCKED;
 
 -- name: MarkUploadSessionCompleted :exec
@@ -111,3 +113,14 @@ WHERE session_id = $1;
 DELETE FROM upload_sessions
 WHERE state <> 'pending'
   AND COALESCE(completed_at, aborted_at) < sqlc.arg(finished_before);
+
+-- name: MarkUploadSessionsAborted :execrows
+UPDATE upload_sessions
+SET state = 'aborted',
+    aborted_at = sqlc.arg(now_at),
+    metadata_token_hash = NULL,
+    blob_token_hash = NULL,
+    deletion_token_hash = NULL,
+    encrypted_meta = NULL
+WHERE session_id = ANY(sqlc.arg(session_ids)::text[])
+  AND state = 'pending';
