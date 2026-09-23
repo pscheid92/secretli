@@ -287,6 +287,36 @@ func TestMetricsAuth(t *testing.T) {
 	}
 }
 
+func TestSecurityHeadersKeepEverythingFirstParty(t *testing.T) {
+	e := echo.New()
+	e.Use(securityHeaders())
+	e.GET("/", func(c echo.Context) error { return c.NoContent(http.StatusOK) })
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+
+	// A zero-knowledge app must not let the browser contact third parties:
+	// every source in the policy stays on this origin.
+	csp := rec.Header().Get("Content-Security-Policy")
+	if csp == "" {
+		t.Fatal("Content-Security-Policy header missing")
+	}
+	for _, directive := range strings.Split(csp, ";") {
+		fields := strings.Fields(directive)
+		if len(fields) == 0 {
+			continue
+		}
+		for _, source := range fields[1:] {
+			if strings.Contains(source, "://") || source == "*" || source == "https:" || source == "http:" {
+				t.Errorf("CSP allows external source %q in %q", source, strings.TrimSpace(directive))
+			}
+		}
+	}
+
+	if got := rec.Header().Get("Referrer-Policy"); got != "no-referrer" {
+		t.Errorf("Referrer-Policy = %q, want no-referrer", got)
+	}
+}
+
 func TestCORSMiddlewareAllowsRangeAPIHeaders(t *testing.T) {
 	e := echo.New()
 	handler := corsMiddleware([]string{"https://app.example"})(func(c echo.Context) error {

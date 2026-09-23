@@ -112,7 +112,7 @@ func securityHeaders() echo.MiddlewareFunc {
 		XSSProtection:         "",
 		ContentTypeNosniff:    "nosniff",
 		XFrameOptions:         "DENY",
-		ContentSecurityPolicy: "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:",
+		ContentSecurityPolicy: "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data:",
 		ReferrerPolicy:        "no-referrer",
 	})
 }
