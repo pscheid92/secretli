@@ -137,23 +137,27 @@ func (m *mockSecretRepo) Delete(_ context.Context, publicID string) error {
 	return nil
 }
 
-func (m *mockSecretRepo) DeleteExpired(_ context.Context, now time.Time, beforeDelete func(string) error) (int64, error) {
+func (m *mockSecretRepo) DeleteExpired(_ context.Context, now time.Time, limit int, beforeDelete func(string) error) (domain.CleanupBatch, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	var count int64
+	var batch domain.CleanupBatch
 	for id, s := range m.secrets {
+		if batch.Found == limit {
+			break
+		}
 		expired := s.ExpiresAt.Before(now)
 		burnedAndRetrieved := s.BurnAfterRead && s.RetrievedAt != nil
 		if expired || burnedAndRetrieved {
-			if err := beforeDelete(s.PublicID); err != nil {
+			batch.Found++
+			if err := beforeDelete(s.StorageKey); err != nil {
 				continue
 			}
 			delete(m.secrets, id)
-			count++
+			batch.Removed++
 		}
 	}
-	return count, nil
+	return batch, nil
 }
 
 func (m *mockSecretRepo) DeleteExpiredRetrievalSessions(_ context.Context, now time.Time) (int64, error) {

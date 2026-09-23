@@ -3,6 +3,7 @@ package postgres_test
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -379,7 +380,7 @@ func TestUploadSessionRepo_AbortExpired(t *testing.T) {
 	}
 
 	var seen []string
-	count, err := repo.AbortExpiredUploadSessions(ctx, time.Now(), func(session *domain.UploadSession) error {
+	count, err := repo.AbortExpiredUploadSessions(ctx, time.Now(), testBatchSize, func(session *domain.UploadSession) error {
 		seen = append(seen, session.SessionID)
 		if session.StorageKey != expired.StorageKey {
 			t.Errorf("storage key = %q, want %q", session.StorageKey, expired.StorageKey)
@@ -389,8 +390,8 @@ func TestUploadSessionRepo_AbortExpired(t *testing.T) {
 	if err != nil {
 		t.Fatalf("abort expired: %v", err)
 	}
-	if count != 1 || len(seen) != 1 || seen[0] != "us-exp" {
-		t.Errorf("aborted count = %d, callback saw %v; want only us-exp", count, seen)
+	if count.Removed != 1 || len(seen) != 1 || seen[0] != "us-exp" {
+		t.Errorf("aborted = %+v, callback saw %v; want only us-exp", count, seen)
 	}
 	assertUploadSessionState(t, repo, "us-exp", domain.UploadSessionStateAborted)
 	assertUploadSessionState(t, repo, "us-live", domain.UploadSessionStatePending)
@@ -400,16 +401,56 @@ func TestUploadSessionRepo_AbortExpired(t *testing.T) {
 	if err := repo.CreateUploadSession(ctx, retry); err != nil {
 		t.Fatalf("create retry: %v", err)
 	}
-	count, err = repo.AbortExpiredUploadSessions(ctx, time.Now(), func(*domain.UploadSession) error {
+	count, err = repo.AbortExpiredUploadSessions(ctx, time.Now(), testBatchSize, func(*domain.UploadSession) error {
 		return errors.New("storage unavailable")
 	})
 	if err != nil {
 		t.Fatalf("abort expired with failing hook: %v", err)
 	}
-	if count != 0 {
-		t.Errorf("aborted count with failing hook = %d, want 0", count)
+	if count.Found != 1 || count.Removed != 0 {
+		t.Errorf("batch with failing hook = %+v, want 1 found and 0 aborted", count)
 	}
 	assertUploadSessionState(t, repo, "us-exp-retry", domain.UploadSessionStatePending)
+}
+
+func TestUploadSessionRepo_AbortExpiredInBatches(t *testing.T) {
+	pool := setupTestDB(t)
+	repo := pgadapter.NewSecretRepo(pool)
+	ctx := context.Background()
+
+	for _, s := range []*domain.UploadSession{
+		newTestUploadSession("us-batch-1h", "us-batch-1h-public", time.Now().Add(-1*time.Hour)),
+		newTestUploadSession("us-batch-3h", "us-batch-3h-public", time.Now().Add(-3*time.Hour)),
+		newTestUploadSession("us-batch-2h", "us-batch-2h-public", time.Now().Add(-2*time.Hour)),
+	} {
+		if err := repo.CreateUploadSession(ctx, s); err != nil {
+			t.Fatalf("create %s: %v", s.SessionID, err)
+		}
+	}
+
+	var seen []string
+	record := func(session *domain.UploadSession) error {
+		seen = append(seen, session.SessionID)
+		return nil
+	}
+	first, err := repo.AbortExpiredUploadSessions(ctx, time.Now(), 2, record)
+	if err != nil {
+		t.Fatalf("first batch: %v", err)
+	}
+	second, err := repo.AbortExpiredUploadSessions(ctx, time.Now(), 2, record)
+	if err != nil {
+		t.Fatalf("second batch: %v", err)
+	}
+
+	if first != (domain.CleanupBatch{Found: 2, Removed: 2}) || second != (domain.CleanupBatch{Found: 1, Removed: 1}) {
+		t.Errorf("batches = %+v, %+v; want 2 then 1", first, second)
+	}
+	if want := "us-batch-3h,us-batch-2h,us-batch-1h"; strings.Join(seen, ",") != want {
+		t.Errorf("abort order = %v, want oldest first (%s)", seen, want)
+	}
+	for _, id := range []string{"us-batch-1h", "us-batch-2h", "us-batch-3h"} {
+		assertUploadSessionState(t, repo, id, domain.UploadSessionStateAborted)
+	}
 }
 
 func TestUploadSessionRepo_DeleteFinished(t *testing.T) {

@@ -5,13 +5,27 @@ import (
 	"time"
 )
 
+// CleanupBatch is the outcome of one cleanup batch.
+type CleanupBatch struct {
+	// Found is how many rows were due, at most the batch limit.
+	Found int
+	// Removed is how many of them were cleaned up. The rest failed their
+	// storage callback and are left for a later cycle.
+	Removed int
+}
+
 type SecretRepo interface {
 	Create(ctx context.Context, secret *Secret, now time.Time) error
 	GetByPublicID(ctx context.Context, publicID string, now time.Time) (*Secret, error)
 	StartRetrievalSession(ctx context.Context, publicID, blobTokenHash, sessionTokenHash string, expiresAt, now time.Time) (*Secret, error)
 	GetByRetrievalSession(ctx context.Context, publicID, sessionTokenHash string, now time.Time) (*Secret, error)
 	Delete(ctx context.Context, publicID string) error
-	DeleteExpired(ctx context.Context, now time.Time, beforeDelete func(storageKey string) error) (int64, error)
+	// DeleteExpired deletes one batch of at most limit secrets that are
+	// expired, or burn-after-read and consumed with no retrieval session left,
+	// oldest first. beforeDelete runs for each row while it is locked; rows it
+	// fails for are kept. The batch commits on its own, so progress survives a
+	// later failure.
+	DeleteExpired(ctx context.Context, now time.Time, limit int, beforeDelete func(storageKey string) error) (CleanupBatch, error)
 	DeleteExpiredRetrievalSessions(ctx context.Context, now time.Time) (int64, error)
 }
 
@@ -47,13 +61,14 @@ type Repo interface {
 }
 
 type UploadSessionCleanupRepo interface {
-	// AbortExpiredUploadSessions marks expired pending sessions aborted. The
-	// callback runs before each row is updated. A pending session never has a
-	// secret pointing at its storage key (the secret is created in the same
-	// transaction that completes the session), so the callback may delete the
-	// session's object, e.g. one left by a crash between storage completion
-	// and the database commit.
-	AbortExpiredUploadSessions(ctx context.Context, now time.Time, beforeAbort func(session *UploadSession) error) (int64, error)
+	// AbortExpiredUploadSessions marks one batch of at most limit expired
+	// pending sessions aborted, oldest first. The callback runs for each row
+	// while it is locked; rows it fails for stay pending. A pending session
+	// never has a secret pointing at its storage key (the secret is created in
+	// the same transaction that completes the session), so the callback may
+	// delete the session's object, e.g. one left by a crash between storage
+	// completion and the database commit.
+	AbortExpiredUploadSessions(ctx context.Context, now time.Time, limit int, beforeAbort func(session *UploadSession) error) (CleanupBatch, error)
 	// DeleteFinishedUploadSessions purges completed and aborted session
 	// tombstones that finished before the given time.
 	DeleteFinishedUploadSessions(ctx context.Context, finishedBefore time.Time) (int64, error)
