@@ -111,6 +111,21 @@ async function encryptAndUploadParts(
   session: StartUploadSessionResponse,
 ): Promise<BundleManifest> {
   const uploader = new UploadQueue(MULTIPART_UPLOAD_CONCURRENCY, params.signal);
+  try {
+    return await encryptAndQueueParts(params, plan, session, uploader);
+  } finally {
+    // After a failure (including one while encrypting), parts still in flight
+    // are pointless; after success nothing is left running.
+    uploader.close();
+  }
+}
+
+async function encryptAndQueueParts(
+  params: MultipartBundleUploadParams,
+  plan: BundlePlan,
+  session: StartUploadSessionResponse,
+  uploader: UploadQueue,
+): Promise<BundleManifest> {
   let uploadedBytes = 0;
   let uploadedPartCount = 0;
 
@@ -300,7 +315,16 @@ class UploadQueue {
     if (cancel?.aborted) {
       this.controller.abort();
     }
-    cancel?.addEventListener("abort", () => this.controller.abort(), { once: true });
+    // Tied to the queue's own signal, so the listener goes away with it.
+    cancel?.addEventListener("abort", () => this.controller.abort(), {
+      once: true,
+      signal: this.controller.signal,
+    });
+  }
+
+  /** Aborts whatever is still running and detaches from the cancel signal. */
+  close() {
+    this.controller.abort();
   }
 
   async schedule(task: (signal: AbortSignal) => Promise<void>) {

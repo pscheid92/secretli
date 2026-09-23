@@ -289,6 +289,29 @@ describe("uploadMultipartBundle", () => {
     ).rejects.toMatchObject({ status: 400 });
   }, 10_000);
 
+  it("aborts the parts still in flight when encryption fails", async () => {
+    installFakeServer();
+    const file = patternedFile(13 * MIB);
+    // The file changes on disk after the first part was queued.
+    const slice = file.slice.bind(file);
+    file.slice = (start?: number, end?: number) =>
+      (start ?? 0) >= 8 * MIB ? new Blob([]) : slice(start, end);
+    let inFlightSignal: AbortSignal | undefined;
+    api.uploadSessionPart.mockImplementation(
+      (_session, _token, _partNumber, _offset, _bytes, _sha256, signal: AbortSignal) => {
+        inFlightSignal = signal;
+        return new Promise((_resolve, reject) => {
+          signal.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")));
+        });
+      },
+    );
+
+    await expect(uploadMultipartBundle(await baseParams([file]))).rejects.toThrow(
+      "bundle file changed during encryption",
+    );
+    expect(inFlightSignal?.aborted).toBe(true);
+  }, 30_000);
+
   it("aborts the server session on any failure", async () => {
     installFakeServer();
     api.completeUploadSession.mockRejectedValueOnce(

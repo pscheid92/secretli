@@ -73,7 +73,14 @@ type State =
 class BlobTokenRejectedError extends Error {}
 
 /** The retrieval session ran out before the share could be read. */
-class RetrievalSessionExpiredError extends Error {}
+class RetrievalSessionExpiredError extends Error {
+  readonly burnAfterRead: boolean;
+
+  constructor(burnAfterRead: boolean) {
+    super("retrieval session expired");
+    this.burnAfterRead = burnAfterRead;
+  }
+}
 
 /** Strips the share secret from the address bar so it does not linger in history. */
 function stripFragmentFromLocation() {
@@ -214,7 +221,7 @@ export default function RetrievePage() {
     } catch (err) {
       if (err instanceof ApiError && err.status === 403) {
         retrievalRef.current = null;
-        throw new RetrievalSessionExpiredError();
+        throw new RetrievalSessionExpiredError(session.burn_after_read);
       }
       throw err;
     }
@@ -246,6 +253,12 @@ export default function RetrievePage() {
     if (kept && kept.blobToken === blobToken) {
       return kept.session;
     }
+    // The server already accepted a token for this share, and a share has
+    // exactly one: any other token comes from a mistyped password. Asking the
+    // server would only get a 404 once a burn-after-read share is consumed.
+    if (kept) {
+      throw new BlobTokenRejectedError();
+    }
     try {
       const session = await startRetrievalSession(publicID, blobToken);
       retrievalRef.current = { blobToken, session };
@@ -268,7 +281,15 @@ export default function RetrievePage() {
       return;
     }
     if (err instanceof RetrievalSessionExpiredError) {
-      toast.error("The download window has expired. Please try again.");
+      if (err.burnAfterRead) {
+        // A new session would only get 404: the share was consumed.
+        setState({
+          stage: "error",
+          message: "The download window for this burn-after-read share has closed.",
+        });
+      } else {
+        toast.error("The download window has expired. Please try again.");
+      }
       return;
     }
     if (!(err instanceof ApiError)) {

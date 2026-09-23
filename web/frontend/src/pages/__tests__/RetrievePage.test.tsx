@@ -155,4 +155,40 @@ describe("RetrievePage", () => {
     expect(await screen.findByText(SECRET_TEXT, {}, AFTER_PASSWORD)).toBeTruthy();
     expect(api.startRetrievalSession).toHaveBeenCalledTimes(1);
   }, 45_000);
+
+  it("keeps the accepted session when a mistyped password follows it", async () => {
+    await publishTextShare({ burnAfterRead: true, password: "correct horse" });
+    failNextRangeRead(new ApiError(0, "Network error — please check your connection"));
+    render(<RetrievePage />);
+
+    await openPasswordPrompt();
+    await submitPassword("correct horse");
+    await waitFor(() => expect(toast.error).toHaveBeenCalled(), AFTER_PASSWORD);
+
+    // The burned share would answer a new session with 404; the typo must
+    // neither reach the server nor throw the kept session away.
+    await submitPassword("correct hose");
+    expect(
+      await screen.findByText("Wrong password. Please try again.", {}, AFTER_PASSWORD),
+    ).toBeTruthy();
+    expect(api.startRetrievalSession).toHaveBeenCalledTimes(1);
+
+    await submitPassword("correct horse");
+    expect(await screen.findByText(SECRET_TEXT, {}, AFTER_PASSWORD)).toBeTruthy();
+    expect(api.startRetrievalSession).toHaveBeenCalledTimes(1);
+  }, 60_000);
+
+  it("ends on an error page when a burn-after-read session expires", async () => {
+    await publishTextShare({ burnAfterRead: true });
+    failNextRangeRead(new ApiError(403, "invalid retrieval session"));
+    render(<RetrievePage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Reveal & Burn" }));
+
+    // Trying again could only get a 404, so do not invite it.
+    expect(
+      await screen.findByText("The download window for this burn-after-read share has closed."),
+    ).toBeTruthy();
+    expect(toast.error).not.toHaveBeenCalled();
+  });
 });

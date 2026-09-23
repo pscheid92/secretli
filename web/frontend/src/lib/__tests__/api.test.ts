@@ -152,6 +152,22 @@ describe("retrieval sessions", () => {
     expect(fetchSpy).toHaveBeenCalledTimes(3);
   });
 
+  it("retries a range request whose body was cut off", async () => {
+    const cutOff = new ReadableStream({
+      start(controller) {
+        controller.error(new TypeError("terminated"));
+      },
+    });
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(cutOff, { status: 206 }))
+      .mockResolvedValueOnce(new Response(new Uint8Array([4, 5, 6]), { status: 206 }));
+
+    const result = await retrieveSecretRange("pub-id", "session-token", 0, 2);
+    expect(result).toEqual(new Uint8Array([4, 5, 6]));
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+  });
+
   it("does not retry a range request that failed with a client error", async () => {
     const fetchSpy = vi
       .spyOn(globalThis, "fetch")
