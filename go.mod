@@ -4,15 +4,16 @@ go 1.27.0
 
 require (
 	github.com/aws/aws-sdk-go-v2 v1.47.0
-	github.com/aws/aws-sdk-go-v2/credentials v1.20.4
+	github.com/aws/aws-sdk-go-v2/credentials v1.20.5
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.113.1
-	github.com/aws/smithy-go v1.28.1
-	github.com/go-playground/validator/v10 v10.30.4
+	github.com/aws/smithy-go v1.28.2
+	github.com/go-playground/validator/v10 v10.30.5
 	github.com/jackc/pgx/v5 v5.11.0
 	github.com/jackc/tern/v2 v2.4.3
 	github.com/joho/godotenv v1.5.1
 	github.com/labstack/echo/v4 v4.15.4
 	github.com/prometheus/client_golang v1.24.1
+	github.com/prometheus/client_model v0.6.3
 	github.com/testcontainers/testcontainers-go v0.44.0
 	github.com/testcontainers/testcontainers-go/modules/postgres v0.44.0
 	go-simpler.org/env v0.12.0
@@ -81,7 +82,6 @@ require (
 	github.com/opencontainers/go-digest v1.0.0 // indirect
 	github.com/opencontainers/image-spec v1.1.1 // indirect
 	github.com/power-devops/perfstat v0.0.0-20260805114148-88456608a4f6 // indirect
-	github.com/prometheus/client_model v0.6.3 // indirect
 	github.com/prometheus/common v0.71.0 // indirect
 	github.com/prometheus/procfs v0.22.0 // indirect
 	github.com/shirou/gopsutil/v4 v4.26.8 // indirect
