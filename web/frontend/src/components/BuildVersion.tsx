@@ -28,7 +28,7 @@ export default function BuildVersion() {
           href={`https://github.com/pscheid92/secretli/commit/${version}`}
           target="_blank"
           rel="noreferrer"
-          className="transition-colors duration-150 hover:text-amber-500 dark:hover:text-amber-400"
+          className="transition-colors duration-150 hover:text-amber-700 dark:hover:text-amber-400"
         >
           Build {version.slice(0, 7)}
         </a>

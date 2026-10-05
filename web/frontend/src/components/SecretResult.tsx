@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { toast } from "sonner";
 import QRCode from "./QRCode";
 import SendWithCode from "./SendWithCode";
+import TextButton from "./ui/TextButton";
 
 interface SecretResultProps {
   url: string;
@@ -18,6 +19,7 @@ interface LinkFieldProps {
 }
 
 function LinkField({ label, value, onCopy, privateLink }: LinkFieldProps) {
+  const id = useId();
   return (
     <div
       className={`rounded-lg border bg-white dark:bg-zinc-900 ${
@@ -27,26 +29,15 @@ function LinkField({ label, value, onCopy, privateLink }: LinkFieldProps) {
       }`}
     >
       <div className="flex items-center justify-between gap-3 border-b border-inherit px-4 py-2">
-        <span
-          className={`text-xs font-medium ${
-            privateLink ? "text-zinc-500 dark:text-zinc-400" : "text-zinc-500 dark:text-zinc-400"
-          }`}
-        >
+        <label htmlFor={id} className="text-xs font-medium text-zinc-500 dark:text-zinc-400">
           {label}
-        </span>
-        <button
-          type="button"
-          onClick={onCopy}
-          className={`text-xs font-semibold transition-colors duration-150 ${
-            privateLink
-              ? "text-zinc-600 hover:text-zinc-900 dark:text-zinc-300 dark:hover:text-white"
-              : "text-amber-600 hover:text-amber-500 dark:text-amber-400 dark:hover:text-amber-300"
-          }`}
-        >
+        </label>
+        <TextButton tone={privateLink ? "muted" : "accent"} onClick={onCopy}>
           Copy
-        </button>
+        </TextButton>
       </div>
       <input
+        id={id}
         type="text"
         readOnly
         value={value}
@@ -103,20 +94,12 @@ export default function SecretResult({
         <LinkField label="Recipient link" value={url} onCopy={copyShareUrl} />
 
         <div className="flex justify-end gap-4">
-          <button
-            type="button"
-            onClick={() => setShowQR(!showQR)}
-            className="text-xs font-medium text-zinc-500 transition-colors duration-150 hover:text-amber-500 dark:text-zinc-400 dark:hover:text-amber-400"
-          >
+          <TextButton tone="muted" onClick={() => setShowQR(!showQR)}>
             {showQR ? "Hide QR code" : "Show QR code"}
-          </button>
-          <button
-            type="button"
-            onClick={() => setSendingCode(!sendingCode)}
-            className="text-xs font-medium text-zinc-500 transition-colors duration-150 hover:text-amber-500 dark:text-zinc-400 dark:hover:text-amber-400"
-          >
+          </TextButton>
+          <TextButton tone="muted" onClick={() => setSendingCode(!sendingCode)}>
             {sendingCode ? "Stop sending" : "Send with a code"}
-          </button>
+          </TextButton>
         </div>
 
         {sendingCode && <SendWithCode url={url} onClose={() => setSendingCode(false)} />}

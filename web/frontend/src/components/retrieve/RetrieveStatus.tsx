@@ -1,4 +1,5 @@
 import Spinner from "../Spinner";
+import { textButtonClass } from "../ui/styles";
 
 export function RetrieveLoading() {
   return (
@@ -29,17 +30,14 @@ export function RetrieveError({ message }: { message: string }) {
             />
           </svg>
           <div>
-            <p className="text-sm font-medium text-red-700 dark:text-red-400">
+            <h1 className="text-sm font-medium text-red-700 dark:text-red-400">
               Unable to open share
-            </p>
-            <p className="text-sm text-red-600 dark:text-red-500 mt-0.5">{message}</p>
+            </h1>
+            <p className="text-sm text-red-700 dark:text-red-400 mt-0.5">{message}</p>
           </div>
         </div>
       </div>
-      <a
-        href="/share"
-        className="text-xs text-zinc-500 dark:text-zinc-100 hover:text-amber-500 dark:hover:text-amber-400 transition-colors duration-150"
-      >
+      <a href="/share" className={textButtonClass("muted")}>
         ← Create a new share
       </a>
     </div>
@@ -51,17 +49,14 @@ export function ShareDeleted() {
     <div className="space-y-5">
       <div className="flex items-center gap-2.5">
         <div className="w-2 h-2 rounded-full bg-emerald-400" />
-        <span className="text-sm font-medium text-zinc-600 dark:text-zinc-100">Share deleted</span>
+        <h1 className="text-sm font-medium text-zinc-600 dark:text-zinc-100">Share deleted</h1>
       </div>
       <div className="rounded-lg border border-zinc-200 dark:border-zinc-500/50 px-4 py-4">
         <p className="text-sm text-zinc-600 dark:text-zinc-100">
           The share has been permanently destroyed.
         </p>
       </div>
-      <a
-        href="/"
-        className="text-xs text-zinc-500 dark:text-zinc-100 hover:text-amber-500 dark:hover:text-amber-400 transition-colors duration-150"
-      >
+      <a href="/" className={textButtonClass("muted")}>
         ← Create a new share
       </a>
     </div>

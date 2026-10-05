@@ -4,6 +4,8 @@ import { saveBlob } from "../../lib/download";
 import { formatSize } from "../../lib/format";
 import Spinner from "../Spinner";
 import TransferStatus, { type TransferProgress } from "../TransferStatus";
+import Button from "../ui/Button";
+import TextButton from "../ui/TextButton";
 import DeleteShareButton from "./DeleteShareButton";
 
 function secondsUntil(iso: string): number {
@@ -88,13 +90,9 @@ export default function BundleDownload({
                     {formatSize(file.size)}
                   </span>
                   {downloaded && (
-                    <button
-                      type="button"
-                      onClick={() => saveBlob(downloaded.blob, downloaded.file.name)}
-                      className="text-xs font-semibold text-amber-600 transition-colors duration-150 hover:text-amber-500 dark:text-amber-400 dark:hover:text-amber-300"
-                    >
+                    <TextButton onClick={() => saveBlob(downloaded.blob, downloaded.file.name)}>
                       Save
-                    </button>
+                    </TextButton>
                   )}
                 </span>
               </div>
@@ -135,7 +133,7 @@ export default function BundleDownload({
                     expired
                       ? "text-red-600 dark:text-red-400"
                       : secondsLeft < 120
-                        ? "text-amber-600 dark:text-amber-400"
+                        ? "text-amber-700 dark:text-amber-400"
                         : "text-zinc-900 dark:text-zinc-100"
                   }`}
                 >
@@ -171,12 +169,7 @@ export default function BundleDownload({
             Save buttons next to each file.
           </p>
         )}
-        <button
-          type="button"
-          onClick={onDownloadAll}
-          disabled={!canDownload}
-          className="flex w-full items-center justify-center gap-2 rounded-lg bg-amber-400 px-4 py-3 text-sm font-semibold text-zinc-950 transition-all duration-150 hover:bg-amber-300 focus:outline-none focus:ring-2 focus:ring-amber-400/50 disabled:cursor-not-allowed disabled:opacity-40"
-        >
+        <Button size="lg" block onClick={onDownloadAll} disabled={!canDownload}>
           {downloading && <Spinner size="sm" className="text-zinc-700" />}
           {downloading
             ? "Preparing..."
@@ -187,7 +180,7 @@ export default function BundleDownload({
               : isMulti
                 ? "Download Files"
                 : "Download File"}
-        </button>
+        </Button>
         {canDelete && <DeleteShareButton deleting={deleting} onDelete={onDelete} />}
       </aside>
     </div>

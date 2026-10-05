@@ -6,6 +6,7 @@ import {
   MAX_ENCRYPTED_UPLOAD_BYTES,
   MAX_UPLOAD_LABEL,
 } from "../lib/uploadLimits";
+import TextButton from "./ui/TextButton";
 
 interface FileUploadProps {
   onSelect: (files: File[]) => void;
@@ -18,28 +19,28 @@ function FileIcon({ name }: { name: string }) {
 
   if (ext === "pdf") {
     label = "PDF";
-    color = "text-red-400";
+    color = "text-red-700 dark:text-red-400";
   } else if (["jpg", "jpeg", "png", "gif", "webp", "svg", "bmp"].includes(ext)) {
     label = "IMG";
-    color = "text-blue-400";
+    color = "text-blue-700 dark:text-blue-400";
   } else if (["doc", "docx"].includes(ext)) {
     label = "DOC";
-    color = "text-blue-500";
+    color = "text-blue-700 dark:text-blue-400";
   } else if (["xls", "xlsx", "csv"].includes(ext)) {
     label = "XLS";
-    color = "text-green-500";
+    color = "text-green-700 dark:text-green-400";
   } else if (["zip", "tar", "gz", "rar", "7z"].includes(ext)) {
     label = "ZIP";
-    color = "text-amber-500";
+    color = "text-amber-700 dark:text-amber-400";
   } else if (["mp4", "mov", "avi", "mkv"].includes(ext)) {
     label = "VID";
-    color = "text-purple-400";
+    color = "text-purple-700 dark:text-purple-400";
   } else if (["mp3", "wav", "flac", "aac"].includes(ext)) {
     label = "AUD";
-    color = "text-pink-400";
+    color = "text-pink-700 dark:text-pink-400";
   } else {
     label = ext.toUpperCase().slice(0, 3) || "FILE";
-    color = "text-zinc-400";
+    color = "text-zinc-600 dark:text-zinc-400";
   }
 
   return (
@@ -159,7 +160,7 @@ export default function FileUpload({ onSelect }: FileUploadProps) {
             <div>
               <p className="text-sm text-zinc-600 dark:text-zinc-100">
                 Drop files here, or{" "}
-                <span className="text-amber-500 dark:text-amber-400">click to select</span>
+                <span className="text-amber-700 dark:text-amber-400">click to select</span>
               </p>
               <p className="text-xs text-zinc-500 dark:text-zinc-100 mt-1">
                 Max {MAX_UPLOAD_LABEL} total
@@ -252,19 +253,13 @@ export default function FileUpload({ onSelect }: FileUploadProps) {
 
           {/* Add more files */}
           <div className="mt-3 text-center">
-            <button
-              type="button"
-              onClick={() => inputRef.current?.click()}
-              className="text-xs text-amber-500 dark:text-amber-400 hover:text-amber-600 dark:hover:text-amber-300 transition-colors duration-150"
-            >
-              + Add more files
-            </button>
-            <span className="text-xs text-zinc-400 dark:text-zinc-500 ml-2">or drop here</span>
+            <TextButton onClick={() => inputRef.current?.click()}>+ Add more files</TextButton>
+            <span className="text-xs text-zinc-500 dark:text-zinc-400 ml-2">or drop here</span>
           </div>
         </div>
       )}
 
-      {error && <p className="mt-1.5 text-xs text-red-500 dark:text-red-400">{error}</p>}
+      {error && <p className="mt-1.5 text-xs text-red-700 dark:text-red-400">{error}</p>}
     </div>
   );
 }

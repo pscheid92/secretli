@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { expectAccessible } from "./axe";
 
 test.describe("Text secret sharing", () => {
   test("create secret and retrieve via share link", async ({ page }) => {
@@ -13,6 +14,8 @@ test.describe("Text secret sharing", () => {
       timeout: 10000,
     });
 
+    await expectAccessible(page);
+
     const shareInput = page.locator("input[readonly]").first();
     const shareUrl = await shareInput.inputValue();
     expect(shareUrl).toContain("/s#");
@@ -24,10 +27,12 @@ test.describe("Text secret sharing", () => {
     await page.goto(shareUrl);
 
     await expect(page.locator("h1")).toHaveText("Text Share", { timeout: 10000 });
+    await expectAccessible(page);
 
     await page.getByRole("button", { name: "Reveal Text" }).click();
 
     await expect(page.locator("h1")).toHaveText("Decrypted Text", { timeout: 10000 });
+    await expectAccessible(page);
 
     const decryptedText = await page.locator("pre").textContent();
     expect(decryptedText).toBe(secretText);
@@ -56,6 +61,7 @@ test.describe("Text secret sharing", () => {
     await page.getByRole("button", { name: "Unlock Share" }).click();
 
     await expect(page.locator("h1")).toHaveText("Unlock Share", { timeout: 10000 });
+    await expectAccessible(page);
 
     await page.fill('input[type="password"]', password);
     await page.click('button[type="submit"]');
@@ -88,6 +94,7 @@ test.describe("Text secret sharing", () => {
     await expect(page.locator("h1")).toHaveText("Decrypted Text", { timeout: 10000 });
 
     await page.getByRole("button", { name: "Delete share" }).click();
+    await expectAccessible(page);
     await page.getByRole("button", { name: "Delete permanently" }).click();
     await expect(page.getByRole("main").getByText("Share deleted")).toBeVisible({
       timeout: 10000,

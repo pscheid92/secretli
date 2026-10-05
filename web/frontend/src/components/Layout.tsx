@@ -1,7 +1,8 @@
-import { useState } from "react";
 import { Link, Outlet, useLocation } from "react-router";
+import { Toaster } from "sonner";
 import { useTheme } from "../hooks/useTheme";
 import BuildVersion from "./BuildVersion";
+import IconButton from "./ui/IconButton";
 
 function ThemeIcon({ theme }: { theme: string }) {
   if (theme === "dark") {
@@ -58,9 +59,16 @@ function ThemeIcon({ theme }: { theme: string }) {
   );
 }
 
+function navLinkClass(active: boolean): string {
+  return `inline-flex min-h-8 items-center rounded text-sm tracking-wide transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/60 ${
+    active
+      ? "text-amber-700 dark:text-amber-400"
+      : "text-zinc-700 hover:text-zinc-900 dark:text-zinc-100 dark:hover:text-white"
+  }`;
+}
+
 export default function Layout() {
   const { theme, cycle } = useTheme();
-  const [menuOpen, setMenuOpen] = useState(false);
   const location = useLocation();
 
   const isShareActive =
@@ -69,8 +77,15 @@ export default function Layout() {
 
   return (
     <div className="min-h-screen flex flex-col bg-zinc-50 dark:bg-zinc-950 text-zinc-800 dark:text-zinc-100">
+      {/* Toasts follow the theme chosen here, not just the system's. */}
+      <Toaster
+        theme={theme}
+        position="bottom-right"
+        closeButton
+        toastOptions={{ className: "font-sans" }}
+      />
       <header className="sticky top-0 z-50 border-b border-zinc-200 dark:border-zinc-500/50 bg-white/90 dark:bg-zinc-950/90 backdrop-blur-md">
-        <nav className="mx-auto flex max-w-6xl items-center justify-between px-4 py-4 sm:px-6">
+        <nav className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3 sm:px-6">
           <Link to="/" className="flex items-center gap-2 group">
             <span className="font-display text-sm font-semibold tracking-[0.2em] uppercase text-zinc-800 dark:text-zinc-100">
               Secretli
@@ -78,91 +93,26 @@ export default function Layout() {
             <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
           </Link>
 
-          {/* Desktop nav */}
-          <div className="hidden md:flex items-center gap-8">
+          <div className="flex items-center gap-5 sm:gap-8">
             <Link
               to="/share"
-              className={`text-sm tracking-wide transition-colors duration-150 ${
-                isShareActive
-                  ? "text-amber-500 dark:text-amber-400"
-                  : "text-zinc-700 dark:text-zinc-100 hover:text-zinc-900 dark:hover:text-white"
-              }`}
+              aria-current={isShareActive ? "page" : undefined}
+              className={navLinkClass(isShareActive)}
             >
               Share
             </Link>
             <Link
               to="/s"
-              className={`text-sm tracking-wide transition-colors duration-150 ${
-                isRetrieveActive
-                  ? "text-amber-500 dark:text-amber-400"
-                  : "text-zinc-700 dark:text-zinc-100 hover:text-zinc-900 dark:hover:text-white"
-              }`}
+              aria-current={isRetrieveActive ? "page" : undefined}
+              className={navLinkClass(isRetrieveActive)}
             >
               Retrieve
             </Link>
-            <button
-              type="button"
-              onClick={cycle}
-              title={`Theme: ${theme}`}
-              className="text-zinc-600 dark:text-zinc-100 hover:text-zinc-900 dark:hover:text-white transition-colors duration-150"
-            >
+            <IconButton label={`Switch theme (currently ${theme})`} onClick={cycle}>
               <ThemeIcon theme={theme} />
-            </button>
-          </div>
-
-          {/* Mobile */}
-          <div className="flex md:hidden items-center gap-3">
-            <button
-              type="button"
-              onClick={cycle}
-              title={`Theme: ${theme}`}
-              className="text-zinc-600 dark:text-zinc-100 hover:text-zinc-900 dark:hover:text-white transition-colors duration-150"
-            >
-              <ThemeIcon theme={theme} />
-            </button>
-            <button
-              type="button"
-              onClick={() => setMenuOpen(!menuOpen)}
-              aria-label={menuOpen ? "Close menu" : "Open menu"}
-              aria-expanded={menuOpen}
-              className="text-zinc-600 dark:text-zinc-100 hover:text-zinc-900 dark:hover:text-white transition-colors duration-150"
-            >
-              <svg
-                className="h-5 w-5"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-                strokeWidth={1.5}
-                aria-hidden="true"
-              >
-                {menuOpen ? (
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                ) : (
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h16" />
-                )}
-              </svg>
-            </button>
+            </IconButton>
           </div>
         </nav>
-
-        {menuOpen && (
-          <div className="md:hidden border-t border-zinc-200 dark:border-zinc-500/50 bg-white/90 dark:bg-zinc-950/90 backdrop-blur-md px-4 sm:px-6 py-3 space-y-0.5">
-            <Link
-              to="/share"
-              onClick={() => setMenuOpen(false)}
-              className="block rounded-md px-2 py-2.5 text-sm text-zinc-600 dark:text-zinc-100 hover:text-amber-500 dark:hover:text-amber-400 hover:bg-zinc-100 dark:hover:bg-zinc-900 transition-colors duration-150"
-            >
-              Share
-            </Link>
-            <Link
-              to="/s"
-              onClick={() => setMenuOpen(false)}
-              className="block rounded-md px-2 py-2.5 text-sm text-zinc-600 dark:text-zinc-100 hover:text-amber-500 dark:hover:text-amber-400 hover:bg-zinc-100 dark:hover:bg-zinc-900 transition-colors duration-150"
-            >
-              Retrieve
-            </Link>
-          </div>
-        )}
       </header>
 
       <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-8 sm:px-6 lg:py-10">

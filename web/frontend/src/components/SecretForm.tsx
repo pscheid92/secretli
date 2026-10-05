@@ -6,6 +6,7 @@ import ExpirationPicker from "./ExpirationPicker";
 import Spinner from "./Spinner";
 import Toggle from "./Toggle";
 import TransferStatus, { type TransferStep } from "./TransferStatus";
+import Button from "./ui/Button";
 
 export interface SecretFormData {
   text: string;
@@ -105,16 +106,17 @@ export default function SecretForm({ onSubmit, loading, stage }: SecretFormProps
             <textarea
               id="secret-text"
               {...register("text", { required: "Text is required" })}
+              aria-label="Secret text"
               placeholder="Type or paste text here..."
               rows={10}
               data-gramm="false"
               data-gramm_editor="false"
               data-enable-grammarly="false"
               data-1p-ignore
-              className="block h-64 w-full resize-none rounded-md border border-zinc-200 bg-zinc-50 px-4 py-3 text-sm text-zinc-900 placeholder:text-zinc-500 transition-colors duration-150 focus:border-amber-400 focus:outline-none focus:ring-1 focus:ring-amber-400/20 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100 dark:placeholder:text-zinc-500 dark:focus:border-amber-400"
+              className="block h-64 w-full resize-none rounded-md border border-zinc-200 bg-zinc-50 px-4 py-3 font-mono text-sm text-zinc-900 placeholder:text-zinc-500 transition-colors duration-150 focus:border-amber-400 focus:outline-none focus:ring-1 focus:ring-amber-400/20 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100 dark:placeholder:text-zinc-500 dark:focus:border-amber-400"
             />
             {errors.text && (
-              <p className="mt-2 text-xs text-red-500 dark:text-red-400">{errors.text.message}</p>
+              <p className="mt-2 text-xs text-red-700 dark:text-red-400">{errors.text.message}</p>
             )}
           </div>
         </section>
@@ -176,7 +178,7 @@ export default function SecretForm({ onSubmit, loading, stage }: SecretFormProps
                     className="w-full rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2.5 text-sm text-zinc-900 placeholder:text-zinc-500 transition-colors duration-150 focus:border-amber-400 focus:outline-none focus:ring-1 focus:ring-amber-400/20 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100 dark:placeholder:text-zinc-500 dark:focus:border-amber-400"
                   />
                   {errors.password && (
-                    <p className="mt-2 text-xs text-red-500 dark:text-red-400">
+                    <p className="mt-2 text-xs text-red-700 dark:text-red-400">
                       {errors.password.message}
                     </p>
                   )}
@@ -209,14 +211,10 @@ export default function SecretForm({ onSubmit, loading, stage }: SecretFormProps
           <TransferPreview />
         )}
 
-        <button
-          type="submit"
-          disabled={loading || !text.trim()}
-          className="flex w-full items-center justify-center gap-2 rounded-lg bg-amber-400 px-4 py-3 text-sm font-semibold text-zinc-950 transition-all duration-150 hover:bg-amber-300 focus:outline-none focus:ring-2 focus:ring-amber-400/50 disabled:cursor-not-allowed disabled:opacity-40"
-        >
+        <Button type="submit" size="lg" block disabled={loading || !text.trim()}>
           {loading && <Spinner size="sm" className="text-zinc-700" />}
           {loading ? "Working..." : "Create Secure Link"}
-        </button>
+        </Button>
       </aside>
     </form>
   );

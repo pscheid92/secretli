@@ -2,11 +2,12 @@ import { useState } from "react";
 import { toast } from "sonner";
 import { canScan } from "../../lib/qrScanner";
 import { parseShareLink } from "../../lib/shareLink";
+import Button from "../ui/Button";
+import { buttonClass } from "../ui/styles";
 import EnterCode from "./EnterCode";
 import QRScanner from "./QRScanner";
 
-const SECONDARY_BUTTON =
-  "flex w-full items-center justify-center gap-2 rounded-lg border border-zinc-200 px-4 py-3 text-sm font-medium text-zinc-700 transition-colors duration-150 hover:border-amber-400 hover:text-zinc-900 focus:outline-none focus:ring-2 focus:ring-amber-400/50 dark:border-zinc-500/50 dark:text-zinc-100 dark:hover:border-amber-400 dark:hover:text-white";
+const SECONDARY_BUTTON = buttonClass({ variant: "secondary", size: "lg", block: true });
 
 /** RetrievePage reloads when the fragment changes and opens the share. */
 function openShare(fragment: string) {
@@ -49,18 +50,16 @@ export default function LinkPrompt() {
         <input
           id="secret-link"
           type="text"
+          aria-label="Share link"
           value={linkInput}
           onChange={(e) => setLinkInput(e.target.value)}
           placeholder={`${window.location.origin}/s#...`}
           autoFocus
           className="w-full rounded-lg border border-zinc-200 dark:border-zinc-500/50 bg-white dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 px-4 py-3 text-sm font-mono placeholder:text-zinc-500 dark:placeholder:text-zinc-500 focus:outline-none focus:border-amber-400 dark:focus:border-amber-400 focus:ring-1 focus:ring-amber-400/20 transition-colors duration-150"
         />
-        <button
-          type="submit"
-          className="flex w-full items-center justify-center gap-2 rounded-lg bg-amber-400 px-4 py-3 text-sm font-medium text-zinc-900 hover:bg-amber-300 focus:outline-none focus:ring-2 focus:ring-amber-400/50 transition-all duration-150"
-        >
+        <Button type="submit" size="lg" block>
           Open Share
-        </button>
+        </Button>
       </form>
       {mode === "scan" && <QRScanner onScan={openShare} onCancel={() => setMode("choose")} />}
       {mode === "code" && <EnterCode onReceived={openShare} onCancel={() => setMode("choose")} />}

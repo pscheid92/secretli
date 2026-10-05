@@ -11,6 +11,7 @@ import {
 import ShareDetails from "../components/retrieve/ShareDetails";
 import TextResult from "../components/retrieve/TextResult";
 import type { TransferProgress } from "../components/TransferStatus";
+import { usePageTitle } from "../hooks/usePageTitle";
 import {
   ApiError,
   deleteSecret,
@@ -103,6 +104,7 @@ export default function RetrievePage() {
     initialHashRef.current ? { stage: "loading" } : { stage: "prompt" },
   );
   const [passwordLoading, setPasswordLoading] = useState(false);
+  usePageTitle("Open a share");
   const [revealing, setRevealing] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [downloadingBundle, setDownloadingBundle] = useState(false);

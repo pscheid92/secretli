@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import Spinner from "./Spinner";
+import Button from "./ui/Button";
 
 type State =
   | { stage: "starting" }
@@ -108,7 +109,7 @@ export default function SendWithCode({ url, onClose }: SendWithCodeProps) {
             href="https://www.eff.org/dice"
             target="_blank"
             rel="noreferrer"
-            className="underline hover:text-amber-500"
+            className="underline hover:text-amber-700 dark:hover:text-amber-400"
           >
             EFF short word list
           </a>{" "}
@@ -116,21 +117,13 @@ export default function SendWithCode({ url, onClose }: SendWithCodeProps) {
         </p>
         <div className="flex gap-2">
           {state.stage === "failed" && (
-            <button
-              type="button"
-              onClick={() => setAttempt((n) => n + 1)}
-              className="rounded-lg bg-amber-400 px-3 py-1.5 text-xs font-medium text-zinc-900 transition-colors duration-150 hover:bg-amber-300 focus:outline-none focus:ring-2 focus:ring-amber-400/50"
-            >
+            <Button size="sm" onClick={() => setAttempt((n) => n + 1)}>
               New code
-            </button>
+            </Button>
           )}
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-lg border border-zinc-200 px-3 py-1.5 text-xs font-medium text-zinc-700 transition-colors duration-150 hover:border-zinc-400 focus:outline-none focus:ring-2 focus:ring-amber-400/50 dark:border-zinc-500/50 dark:text-zinc-100"
-          >
+          <Button variant="secondary" size="sm" onClick={onClose}>
             {state.stage === "sent" ? "Done" : "Cancel"}
-          </button>
+          </Button>
         </div>
       </div>
     </div>
