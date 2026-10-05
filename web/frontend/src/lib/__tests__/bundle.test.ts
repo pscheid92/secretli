@@ -105,7 +105,9 @@ describe("encrypted bundles", () => {
     expect(decryptedBytes[0]).toBe(1);
     expect(decryptedBytes[DEFAULT_BUNDLE_CHUNK_SIZE]).toBe(2);
     expect(decryptedBytes[decryptedBytes.length - 1]).toBe(3);
-  });
+    // 16 MiB through pure-JS XChaCha20 both ways: well under a second locally,
+    // but past the 5 s default on a CI runner busy with the scrypt tests.
+  }, 30_000);
 
   it("uses the download-all coalescing option", async () => {
     const ranges: Array<[number, number]> = [];
