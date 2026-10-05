@@ -42,7 +42,7 @@ func (fullMockRepo) DeleteFinishedUploadSessions(_ context.Context, _ time.Time)
 func newTestApp(t *testing.T, cfg config.Config) *App {
 	t.Helper()
 	repo := fullMockRepo{mockSecretRepo: newMockRepo(), uploadMockRepo: newUploadMockRepo(), transferMockRepo: newTransferMockRepo()}
-	app, err := New(cfg, "test", nil, repo, newUploadMockStore(), prometheus.NewRegistry())
+	app, err := New(cfg, "test", nil, repo, newUploadMockStore(), nil, prometheus.NewRegistry())
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -69,7 +69,7 @@ func createSessionBody(t *testing.T, label string) []byte {
 
 func TestApp_RejectsInvalidTrustedProxies(t *testing.T) {
 	repo := fullMockRepo{mockSecretRepo: newMockRepo(), uploadMockRepo: newUploadMockRepo(), transferMockRepo: newTransferMockRepo()}
-	if _, err := New(config.Config{TrustedProxies: "nope"}, "test", nil, repo, newUploadMockStore(), prometheus.NewRegistry()); err == nil {
+	if _, err := New(config.Config{TrustedProxies: "nope"}, "test", nil, repo, newUploadMockStore(), nil, prometheus.NewRegistry()); err == nil {
 		t.Fatal("expected error for invalid TRUSTED_PROXIES")
 	}
 }

@@ -21,18 +21,39 @@ const (
 	// transferPollWait bounds one long-poll, well inside the gateway's
 	// request timeout.
 	transferPollWait = 25 * time.Second
-	// transferPollInterval is how often a long-poll re-reads the database,
-	// which works the same on every replica.
+	// transferPollInterval is how often a long-poll re-reads the database
+	// while change notifications are down.
 	transferPollInterval = 500 * time.Millisecond
+	// transferRecheckInterval bounds how long a lost notification can delay
+	// a long-poll while notifications work.
+	transferRecheckInterval = 5 * time.Second
 )
+
+// TransferEvents wakes long-polls when a transfer changes on any replica.
+type TransferEvents interface {
+	// Subscribe returns a channel that is signalled whenever the transfer
+	// changes, and a function that ends the subscription.
+	Subscribe(transferID string) (<-chan struct{}, func())
+	// Listening reports whether signals arrive right now.
+	Listening() bool
+}
+
+// noTransferEvents never signals, so long-polls poll the database.
+type noTransferEvents struct{}
+
+func (noTransferEvents) Subscribe(string) (<-chan struct{}, func()) { return nil, func() {} }
+
+func (noTransferEvents) Listening() bool { return false }
 
 // TransferHandler relays short-code transfers: two browsers exchange PAKE
 // shares, a confirmation tag and the sealed link through write-once
 // messages. It never sees the code or the link.
 type TransferHandler struct {
-	repo         domain.TransferRepo
-	pollWait     time.Duration
-	pollInterval time.Duration
+	repo            domain.TransferRepo
+	events          TransferEvents
+	pollWait        time.Duration
+	pollInterval    time.Duration
+	recheckInterval time.Duration
 }
 
 type claimTransferRequest struct {
@@ -43,8 +64,19 @@ type transferMessageRequest struct {
 	Data string `json:"data"`
 }
 
-func NewTransferHandler(repo domain.TransferRepo) *TransferHandler {
-	return &TransferHandler{repo: repo, pollWait: transferPollWait, pollInterval: transferPollInterval}
+// NewTransferHandler relays through repo. Without events, long-polls read
+// the database every pollInterval.
+func NewTransferHandler(repo domain.TransferRepo, events TransferEvents) *TransferHandler {
+	if events == nil {
+		events = noTransferEvents{}
+	}
+	return &TransferHandler{
+		repo:            repo,
+		events:          events,
+		pollWait:        transferPollWait,
+		pollInterval:    transferPollInterval,
+		recheckInterval: transferRecheckInterval,
+	}
 }
 
 func (h *TransferHandler) CreateTransfer(c echo.Context) error {
@@ -168,6 +200,10 @@ func (h *TransferHandler) GetMessage(c echo.Context) error {
 	}
 
 	ctx := c.Request().Context()
+	// Subscribed before the first read, so a write between the read and the
+	// wait still wakes this poll.
+	changed, unsubscribe := h.events.Subscribe(transfer.TransferID)
+	defer unsubscribe()
 	deadline := time.Now().Add(h.pollWait)
 	for {
 		msg, err := h.repo.GetTransferMessage(ctx, transfer.TransferID, other, phase)
@@ -192,11 +228,22 @@ func (h *TransferHandler) GetMessage(c echo.Context) error {
 			return c.NoContent(http.StatusNoContent)
 		}
 
+		// A notification wakes the poll. Without them it reads often; with
+		// them a slow re-check covers a notification that got lost. Expiry
+		// ends the wait too, so the gone answer isn't late.
+		interval := h.recheckInterval
+		if !h.events.Listening() {
+			interval = h.pollInterval
+		}
+		timer := time.NewTimer(min(interval, time.Until(deadline), time.Until(transfer.ExpiresAt)))
 		select {
 		case <-ctx.Done():
+			timer.Stop()
 			// The client went away; there is nobody to answer.
 			return nil
-		case <-time.After(h.pollInterval):
+		case <-changed:
+			timer.Stop()
+		case <-timer.C:
 		}
 	}
 }
