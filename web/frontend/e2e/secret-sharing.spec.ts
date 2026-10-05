@@ -17,6 +17,10 @@ test.describe("Text secret sharing", () => {
     const shareUrl = await shareInput.inputValue();
     expect(shareUrl).toContain("/s#");
 
+    // Open the link in a tab that already shows /s, as when it is pasted into
+    // the address bar there: only the fragment changes.
+    await page.goto("/s");
+    await expect(page.locator("h1")).toHaveText("Open a Share");
     await page.goto(shareUrl);
 
     await expect(page.locator("h1")).toHaveText("Text Share", { timeout: 10000 });

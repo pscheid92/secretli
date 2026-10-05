@@ -150,6 +150,18 @@ export default function RetrievePage() {
     fetchMetadata();
   }, [fetchMetadata]);
 
+  // A share link opened while this page is showing, from the address bar or
+  // by the prompt, only changes the fragment, which doesn't reload the page.
+  // Reload so the new share starts from scratch, with nothing of the
+  // previous one left on screen or in memory.
+  useEffect(() => {
+    function handleHashChange() {
+      if (window.location.hash.length > 1) window.location.reload();
+    }
+    window.addEventListener("hashchange", handleHashChange);
+    return () => window.removeEventListener("hashchange", handleHashChange);
+  }, []);
+
   async function handleReveal() {
     if (state.stage !== "confirm") return;
     const { identity, meta } = state;
