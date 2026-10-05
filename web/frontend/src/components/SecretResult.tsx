@@ -5,6 +5,7 @@ import QRCode from "./QRCode";
 import SendWithCode from "./SendWithCode";
 import Button from "./ui/Button";
 import { CopyIcon, KeyboardIcon, KeyIcon, QrCodeIcon, ShareIcon, WarningIcon } from "./ui/icons";
+import PageTitle from "./ui/PageTitle";
 import TextButton from "./ui/TextButton";
 
 interface SecretResultProps {
@@ -117,27 +118,12 @@ export default function SecretResult({
   const expires = new Date(expiresAt);
 
   return (
-    <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_320px] lg:items-start">
-      <section className="space-y-6 rounded-lg border border-zinc-200 bg-white p-5 dark:border-zinc-700 dark:bg-zinc-900">
-        <div className="space-y-2">
-          <div className="flex items-center gap-2">
-            <span className="h-2 w-2 rounded-full bg-emerald-400" />
-            <span className="text-sm font-medium text-emerald-700 dark:text-emerald-400">
-              Secure link created
-            </span>
-          </div>
-          <h1
-            ref={headingRef}
-            tabIndex={-1}
-            className="font-display text-2xl font-semibold text-zinc-800 focus:outline-none dark:text-zinc-100"
-          >
-            Share is ready
-          </h1>
-          <p className="text-sm text-zinc-600 dark:text-zinc-300">
-            Send this link to the recipient.
-          </p>
-        </div>
+    <div className="space-y-6">
+      <PageTitle ref={headingRef} tabIndex={-1} lead="Send this link to the recipient.">
+        Share is ready
+      </PageTitle>
 
+      <section className="space-y-6 rounded-lg border border-zinc-200 bg-white p-5 dark:border-zinc-700 dark:bg-zinc-900">
         <div className="space-y-3">
           <label
             htmlFor={linkId}
@@ -231,7 +217,7 @@ export default function SecretResult({
         </p>
       </section>
 
-      <aside className="space-y-4 lg:sticky lg:top-24">
+      <div className="space-y-4">
         <section className="rounded-lg border border-zinc-200 bg-white px-4 py-4 dark:border-zinc-700 dark:bg-zinc-900">
           <h2 className="text-xs font-semibold uppercase tracking-widest text-zinc-500 dark:text-zinc-400">
             Status
@@ -271,7 +257,7 @@ export default function SecretResult({
             </TextButton>
           </div>
         </section>
-      </aside>
+      </div>
     </div>
   );
 }

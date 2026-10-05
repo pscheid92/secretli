@@ -1,6 +1,8 @@
 import { useState } from "react";
 import Spinner from "../Spinner";
 import Button from "../ui/Button";
+import { TrashIcon } from "../ui/icons";
+import TextButton from "../ui/TextButton";
 
 interface DeleteShareButtonProps {
   deleting: boolean;
@@ -18,9 +20,10 @@ export default function DeleteShareButton({
 
   if (!confirming && !deleting) {
     return (
-      <Button variant="danger-outline" onClick={() => setConfirming(true)} disabled={disabled}>
+      <TextButton tone="danger" onClick={() => setConfirming(true)} disabled={disabled}>
+        <TrashIcon />
         Delete share
-      </Button>
+      </TextButton>
     );
   }
 
@@ -28,22 +31,17 @@ export default function DeleteShareButton({
     <div
       role="group"
       aria-label="Delete share"
-      className="space-y-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3 dark:border-red-900/40 dark:bg-red-900/10"
+      className="flex flex-wrap items-center gap-x-4 gap-y-2"
     >
-      <p className="text-sm text-red-700 dark:text-red-400">
+      <p className="min-w-60 flex-1 text-sm text-ink">
         Delete this share for everyone? Its links stop working, and this can't be undone.
       </p>
-      <div className="flex flex-wrap gap-2">
-        <Button variant="danger" onClick={onDelete} disabled={deleting || disabled}>
+      <div className="flex gap-1">
+        <Button variant="danger-outline" onClick={onDelete} disabled={deleting || disabled}>
           {deleting && <Spinner size="sm" />}
           {deleting ? "Deleting..." : "Delete permanently"}
         </Button>
-        <Button
-          variant="secondary"
-          onClick={() => setConfirming(false)}
-          disabled={deleting}
-          autoFocus
-        >
+        <Button variant="quiet" onClick={() => setConfirming(false)} disabled={deleting} autoFocus>
           Cancel
         </Button>
       </div>

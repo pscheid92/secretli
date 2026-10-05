@@ -134,3 +134,57 @@ export function EyeSlashIcon() {
     </Icon>
   );
 }
+
+export function LockIcon() {
+  return (
+    <Icon>
+      <rect x="4.75" y="10.25" width="14.5" height="10" rx="2.25" />
+      <path strokeLinecap="round" strokeLinejoin="round" d="M8 10.25V7.5a4 4 0 0 1 8 0v2.75" />
+    </Icon>
+  );
+}
+
+export function TrashIcon() {
+  return (
+    <Icon>
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="M4.75 7h14.5M9.75 7V4.75h4.5V7M6.5 7l.85 11.2A2.25 2.25 0 0 0 9.6 20.25h4.8a2.25 2.25 0 0 0 2.25-2.05L17.5 7M10.25 11v5.5M13.75 11v5.5"
+      />
+    </Icon>
+  );
+}
+
+export function SunIcon() {
+  return (
+    <Icon>
+      <circle cx="12" cy="12" r="4" />
+      <path
+        strokeLinecap="round"
+        d="M12 2.75v1.5M12 19.75v1.5M2.75 12h1.5M19.75 12h1.5M5.46 5.46l1.06 1.06M17.48 17.48l1.06 1.06M5.46 18.54l1.06-1.06M17.48 6.52l1.06-1.06"
+      />
+    </Icon>
+  );
+}
+
+export function MoonIcon() {
+  return (
+    <Icon>
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="M20.2 14.6A8.25 8.25 0 0 1 9.4 3.8a8.25 8.25 0 1 0 10.8 10.8z"
+      />
+    </Icon>
+  );
+}
+
+export function MonitorIcon() {
+  return (
+    <Icon>
+      <rect x="2.75" y="4.75" width="18.5" height="12.5" rx="2.25" />
+      <path strokeLinecap="round" d="M8.5 20.25h7M12 17.25v3" />
+    </Icon>
+  );
+}

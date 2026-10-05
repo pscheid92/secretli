@@ -4,69 +4,25 @@ import { useLeaveWarningActive } from "../hooks/useLeaveWarning";
 import { useTheme } from "../hooks/useTheme";
 import BuildVersion from "./BuildVersion";
 import IconButton from "./ui/IconButton";
+import { LockIcon, MonitorIcon, MoonIcon, SunIcon } from "./ui/icons";
+import { FOCUS } from "./ui/styles";
+
+/** One column for header, content and footer: 640 px of content plus gutters. */
+const COLUMN = "mx-auto w-full max-w-[43rem] px-5 sm:px-6";
 
 function ThemeIcon({ theme }: { theme: string }) {
-  if (theme === "dark") {
-    return (
-      <svg
-        className="h-4 w-4"
-        fill="none"
-        viewBox="0 0 24 24"
-        stroke="currentColor"
-        strokeWidth={1.5}
-        aria-hidden="true"
-      >
-        <path
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"
-        />
-      </svg>
-    );
-  }
-  if (theme === "light") {
-    return (
-      <svg
-        className="h-4 w-4"
-        fill="none"
-        viewBox="0 0 24 24"
-        stroke="currentColor"
-        strokeWidth={1.5}
-        aria-hidden="true"
-      >
-        <path
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z"
-        />
-      </svg>
-    );
-  }
-  return (
-    <svg
-      className="h-4 w-4"
-      fill="none"
-      viewBox="0 0 24 24"
-      stroke="currentColor"
-      strokeWidth={1.5}
-      aria-hidden="true"
-    >
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"
-      />
-    </svg>
-  );
+  if (theme === "dark") return <MoonIcon />;
+  if (theme === "light") return <SunIcon />;
+  return <MonitorIcon />;
 }
 
 function navLinkClass(active: boolean): string {
-  return `inline-flex min-h-8 items-center rounded text-sm tracking-wide transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/60 ${
-    active
-      ? "text-amber-700 dark:text-amber-400"
-      : "text-zinc-700 hover:text-zinc-900 dark:text-zinc-100 dark:hover:text-white"
+  return `inline-flex min-h-11 items-center rounded-[10px] px-3 text-sm font-medium transition-colors duration-150 ${FOCUS} ${
+    active ? "text-ink" : "text-muted hover:text-ink"
   }`;
 }
+
+const FOOTER_LINK = `inline-flex min-h-11 items-center rounded-md transition-colors duration-150 hover:text-ink ${FOCUS}`;
 
 export default function Layout() {
   const { theme, cycle } = useTheme();
@@ -78,7 +34,7 @@ export default function Layout() {
   const isOpenActive = location.pathname === "/s" || location.pathname === "/c";
 
   return (
-    <div className="min-h-screen flex flex-col bg-zinc-50 dark:bg-zinc-950 text-zinc-800 dark:text-zinc-100">
+    <div className="flex min-h-screen flex-col bg-bg text-body text-ink">
       {/* Toasts follow the theme chosen here, not just the system's. */}
       <Toaster
         theme={theme}
@@ -86,48 +42,67 @@ export default function Layout() {
         closeButton
         toastOptions={{ className: "font-sans" }}
       />
-      <header className="sticky top-0 z-50 border-b border-zinc-200 dark:border-zinc-500/50 bg-white/90 dark:bg-zinc-950/90 backdrop-blur-md">
-        <nav className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3 sm:px-6">
-          <Link to="/" reloadDocument={reloadDocument} className="flex items-center gap-2 group">
-            <span className="font-display text-sm font-semibold tracking-[0.2em] uppercase text-zinc-800 dark:text-zinc-100">
-              Secretli
-            </span>
-            <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
-          </Link>
+      <header className={`${COLUMN} flex items-center justify-between gap-4 pt-6`}>
+        <Link
+          to="/"
+          reloadDocument={reloadDocument}
+          className={`inline-flex min-h-11 items-center rounded-lg text-ink ${FOCUS}`}
+        >
+          <span className="inline-flex items-baseline gap-0.5 text-[19px] font-semibold tracking-[-0.035em]">
+            secretli
+            <span aria-hidden="true" className="h-1.5 w-1.5 rounded-full bg-accent" />
+          </span>
+        </Link>
 
-          <div className="flex items-center gap-5 sm:gap-8">
-            <Link
-              to="/share"
-              reloadDocument={reloadDocument}
-              aria-current={isShareActive ? "page" : undefined}
-              className={navLinkClass(isShareActive)}
-            >
-              Share
-            </Link>
-            <Link
-              to="/s"
-              reloadDocument={reloadDocument}
-              aria-current={isOpenActive ? "page" : undefined}
-              className={navLinkClass(isOpenActive)}
-            >
-              Open
-            </Link>
-            <IconButton label={`Switch theme (currently ${theme})`} onClick={cycle}>
-              <ThemeIcon theme={theme} />
-            </IconButton>
-          </div>
+        <nav aria-label="Main" className="flex items-center gap-0.5">
+          <Link
+            to="/share"
+            reloadDocument={reloadDocument}
+            aria-current={isShareActive ? "page" : undefined}
+            className={navLinkClass(isShareActive)}
+          >
+            Share
+          </Link>
+          <Link
+            to="/s"
+            reloadDocument={reloadDocument}
+            aria-current={isOpenActive ? "page" : undefined}
+            className={navLinkClass(isOpenActive)}
+          >
+            Open
+          </Link>
+          <IconButton
+            label={`Switch theme (currently ${theme})`}
+            onClick={cycle}
+            className="ml-1.5"
+          >
+            <ThemeIcon theme={theme} />
+          </IconButton>
         </nav>
       </header>
 
-      <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-8 sm:px-6 lg:py-10">
+      <main className={`${COLUMN} flex-1 pt-[clamp(2.5rem,7vw,6rem)] pb-18`}>
         <Outlet />
       </main>
 
-      <footer className="py-8 text-center">
-        <p className="text-xs tracking-[0.15em] uppercase text-zinc-600 dark:text-zinc-100">
-          Zero-knowledge secret sharing
-        </p>
-        <BuildVersion />
+      <footer
+        className={`${COLUMN} flex flex-wrap items-center justify-between gap-x-5 pt-5 pb-7 text-[13px] text-faint`}
+      >
+        <span className="inline-flex min-h-11 items-center gap-2">
+          <LockIcon />
+          End-to-end encrypted in your browser
+        </span>
+        <span className="flex items-center gap-4">
+          <a
+            href="https://github.com/pscheid92/secretli"
+            target="_blank"
+            rel="noreferrer"
+            className={FOOTER_LINK}
+          >
+            Source
+          </a>
+          <BuildVersion />
+        </span>
       </footer>
     </div>
   );

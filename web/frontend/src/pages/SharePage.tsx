@@ -3,6 +3,7 @@ import { toast } from "sonner";
 import SecretForm, { type SecretFormData } from "../components/SecretForm";
 import SecretResult from "../components/SecretResult";
 import ShareModeTabs from "../components/ShareModeTabs";
+import PageTitle from "../components/ui/PageTitle";
 import TextButton from "../components/ui/TextButton";
 import { usePageTitle } from "../hooks/usePageTitle";
 import { ApiError } from "../lib/api";
@@ -93,14 +94,12 @@ export default function SharePage() {
   }
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col gap-4 border-b border-zinc-200 pb-5 dark:border-zinc-800 md:flex-row md:items-end md:justify-between">
-        <h1 className="font-display text-2xl font-semibold text-zinc-800 dark:text-zinc-100">
-          Create Share
-        </h1>
-        <div className="w-full md:w-72">
-          <ShareModeTabs active="text" />
-        </div>
+    <div className="space-y-8">
+      <PageTitle lead="Encrypted in your browser, before anything leaves your device.">
+        Share a secret
+      </PageTitle>
+      <div className="max-w-sm">
+        <ShareModeTabs active="text" />
       </div>
       <SecretForm onSubmit={handleSubmit} loading={loading} stage={stage} />
     </div>

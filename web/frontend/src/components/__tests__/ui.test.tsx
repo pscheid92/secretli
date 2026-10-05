@@ -48,7 +48,7 @@ describe("shared buttons", () => {
     render(<Button className="mt-4">Reveal</Button>);
 
     const classes = screen.getByRole("button", { name: "Reveal" }).className;
-    expect(classes).toContain("bg-amber-400");
+    expect(classes).toContain("bg-accent");
     expect(classes).toContain("mt-4");
   });
 });

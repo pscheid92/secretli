@@ -4,6 +4,7 @@ import { canScan } from "../../lib/qrScanner";
 import { parseShareLink } from "../../lib/shareLink";
 import Button from "../ui/Button";
 import { CameraIcon, KeyboardIcon } from "../ui/icons";
+import PageTitle from "../ui/PageTitle";
 import EnterCode from "./EnterCode";
 import QRScanner from "./QRScanner";
 
@@ -47,17 +48,16 @@ export default function LinkPrompt({ initialMode = "choose" }: LinkPromptProps) 
   }
 
   return (
-    <div className="mx-auto max-w-2xl space-y-6">
-      <div>
-        <h1 className="font-display text-2xl font-semibold text-zinc-800 dark:text-zinc-100">
-          Open a Share
-        </h1>
-        <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-100">
-          {scanAvailable
+    <div className="space-y-6">
+      <PageTitle
+        lead={
+          scanAvailable
             ? "Paste a Secretli link, scan its QR code or enter a code to decrypt it in this browser."
-            : "Paste a Secretli link or enter a code to decrypt it in this browser."}
-        </p>
-      </div>
+            : "Paste a Secretli link or enter a code to decrypt it in this browser."
+        }
+      >
+        Open a Share
+      </PageTitle>
       <form onSubmit={handleSubmit} className="space-y-4">
         <input
           id="secret-link"

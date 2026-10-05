@@ -42,7 +42,7 @@ test.describe("QR code scanning", () => {
     await page.goto("/share");
     await page.fill("#secret-text", `QR secret ${Date.now()}`);
     await page.click('button[type="submit"]');
-    await expect(page.getByRole("main").getByText("Secure link created")).toBeVisible({
+    await expect(page.getByRole("heading", { name: "Share is ready" })).toBeVisible({
       timeout: 10000,
     });
     const shareUrl = await page.locator("input[readonly]").first().inputValue();

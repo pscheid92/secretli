@@ -4,6 +4,7 @@ import { formatRelativeTime, formatSize } from "../../lib/format";
 import SecretTypeIcon from "../SecretTypeIcon";
 import Spinner from "../Spinner";
 import Button from "../ui/Button";
+import PageTitle from "../ui/PageTitle";
 import BurnWarning from "./BurnWarning";
 import DeleteShareButton from "./DeleteShareButton";
 
@@ -55,17 +56,12 @@ export default function ShareDetails({
   const isBundle = clientMeta.type === "bundle";
 
   return (
-    <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_320px] lg:items-start">
-      <section className="space-y-5 rounded-lg border border-zinc-200 bg-white p-5 dark:border-zinc-700 dark:bg-zinc-900">
-        <div>
-          <h1 className="font-display text-2xl font-semibold text-zinc-800 dark:text-zinc-100">
-            {isBundle ? "File Share" : "Text Share"}
-          </h1>
-          <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-100">
-            Review the details before this browser decrypts the content.
-          </p>
-        </div>
+    <div className="space-y-6">
+      <PageTitle lead="Review the details before this browser decrypts the content.">
+        {isBundle ? "File Share" : "Text Share"}
+      </PageTitle>
 
+      <section className="space-y-5 rounded-lg border border-zinc-200 bg-white p-5 dark:border-zinc-700 dark:bg-zinc-900">
         <div className="divide-y divide-zinc-200 rounded-lg border border-zinc-200 dark:divide-zinc-700 dark:border-zinc-700">
           <div className="flex items-center gap-2.5 px-4 py-3">
             <SecretTypeIcon
@@ -101,7 +97,7 @@ export default function ShareDetails({
         )}
       </section>
 
-      <aside className="space-y-4 lg:sticky lg:top-24">
+      <div className="space-y-4">
         {serverMeta.burn_after_read && (
           <BurnWarning>
             {canDelete
@@ -125,7 +121,7 @@ export default function ShareDetails({
         {canDelete && (
           <DeleteShareButton deleting={deleting} disabled={revealing} onDelete={onDelete} />
         )}
-      </aside>
+      </div>
     </div>
   );
 }

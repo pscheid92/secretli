@@ -89,10 +89,7 @@ export default function SecretForm({ onSubmit, loading, stage }: SecretFormProps
   ];
 
   return (
-    <form
-      onSubmit={handleSubmit(onSubmit)}
-      className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_320px] lg:items-start"
-    >
+    <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
       <div className="space-y-5">
         <section className="rounded-lg border border-zinc-200 bg-white dark:border-zinc-700 dark:bg-zinc-900">
           <div className="border-b border-zinc-200 px-4 py-3 dark:border-zinc-700">
@@ -189,7 +186,7 @@ export default function SecretForm({ onSubmit, loading, stage }: SecretFormProps
         </section>
       </div>
 
-      <aside className="space-y-4 lg:sticky lg:top-24">
+      <div className="space-y-4">
         <section className="rounded-lg border border-zinc-200 bg-white px-4 py-4 dark:border-zinc-700 dark:bg-zinc-900">
           <h2 className="text-xs font-semibold uppercase tracking-widest text-zinc-500 dark:text-zinc-400">
             Share summary
@@ -215,7 +212,7 @@ export default function SecretForm({ onSubmit, loading, stage }: SecretFormProps
           {loading && <Spinner size="sm" className="text-zinc-700" />}
           {loading ? "Working..." : "Create Secure Link"}
         </Button>
-      </aside>
+      </div>
     </form>
   );
 }

@@ -34,7 +34,7 @@ test.describe("Accessibility", () => {
     await expectAccessible(page);
 
     await page.goto("/no-such-page");
-    await expect(page.locator("h1")).toHaveText("This page doesn't exist.");
+    await expect(page.locator("h1")).toHaveText("This page doesn't exist");
     await expectAccessible(page);
 
     await page.goto(`/s#${"A".repeat(42)}`);
