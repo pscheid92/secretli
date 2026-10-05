@@ -72,21 +72,7 @@ func expectNoSignal(t *testing.T, changed <-chan struct{}, after string) {
 	}
 }
 
-func putShare(t *testing.T, repo *pgadapter.SecretRepo, transferID, side string) {
-	t.Helper()
-	err := repo.PutTransferMessage(context.Background(), &domain.TransferMessage{
-		TransferID: transferID,
-		Side:       side,
-		Phase:      domain.TransferPhaseShare,
-		Data:       []byte("share"),
-		CreatedAt:  time.Now(),
-	})
-	if err != nil {
-		t.Fatalf("PutTransferMessage: %v", err)
-	}
-}
-
-func TestTransferEventsSignalStoredMessagesAndClosesOfTheirTransfer(t *testing.T) {
+func TestTransferEventsSignalEveryChangeOfTheirTransfer(t *testing.T) {
 	pool := setupTestDB(t)
 	repo := pgadapter.NewSecretRepo(pool)
 	events := startTransferEvents(t, pool)
@@ -96,15 +82,32 @@ func TestTransferEventsSignalStoredMessagesAndClosesOfTheirTransfer(t *testing.T
 	changed, unsubscribe := events.Subscribe(watched.TransferID)
 	defer unsubscribe()
 
-	putShare(t, repo, other.TransferID, domain.TransferSideSender)
-	expectNoSignal(t, changed, "a message for another transfer")
+	claimTestTransfer(t, repo, other, now)
+	answerTestTransfer(t, repo, other, now)
+	expectNoSignal(t, changed, "changes of another transfer")
 
-	putShare(t, repo, watched.TransferID, domain.TransferSideSender)
-	expectSignal(t, changed, "a stored message")
+	claimTestTransfer(t, repo, watched, now)
+	expectSignal(t, changed, "the claim")
+	answerTestTransfer(t, repo, watched, now)
+	expectSignal(t, changed, "the answer")
+	if stored, err := repo.DeliverTransfer(context.Background(), watched.TransferID, testDelivery, now); err != nil || !stored {
+		t.Fatalf("DeliverTransfer = %v, %v", stored, err)
+	}
+	expectSignal(t, changed, "the delivery")
+}
 
-	if err := repo.CloseTransfer(context.Background(), watched.TransferID, domain.TransferCloseDone, time.Now()); err != nil {
+func TestTransferEventsSignalAClose(t *testing.T) {
+	pool := setupTestDB(t)
+	repo := pgadapter.NewSecretRepo(pool)
+	events := startTransferEvents(t, pool)
+	transfer := createTestTransfer(t, repo, "closing", time.Now())
+	changed, unsubscribe := events.Subscribe(transfer.TransferID)
+	defer unsubscribe()
+
+	if err := repo.CloseTransfer(context.Background(), transfer.TransferID, domain.TransferCloseCancelled, time.Now()); err != nil {
 		t.Fatalf("CloseTransfer: %v", err)
 	}
+
 	expectSignal(t, changed, "closing the transfer")
 }
 

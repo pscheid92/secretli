@@ -1,6 +1,8 @@
 import {
   ApiError,
   abortUploadSession,
+  awaitTransferAnswer,
+  awaitTransferDelivery,
   claimTransfer,
   closeTransfer,
   completeUploadSession,
@@ -9,8 +11,8 @@ import {
   isTransientStatus,
   MAX_TRANSIENT_ATTEMPTS,
   openTransfer,
-  pollTransferMessage,
-  putTransferMessage,
+  postTransferAnswer,
+  postTransferDelivery,
   retrieveSecretRange,
   retryDelayMs,
   type StartUploadSessionParams,
@@ -380,13 +382,15 @@ describe("short-code transfers", () => {
       .spyOn(globalThis, "fetch")
       .mockImplementation(async () => new Response("{}", { status: 200 }));
 
-    await openTransfer();
+    await openTransfer("transfer-id", "offer");
     await claimTransfer(7);
-    await putTransferMessage("transfer-id", "token", "share", "data");
-    await pollTransferMessage("transfer-id", "token", "share");
-    await closeTransfer("transfer-id", "token", "done");
+    await postTransferAnswer("transfer-id", "token", { share: "s", confirmation: "c" });
+    await awaitTransferAnswer("transfer-id", "token");
+    await postTransferDelivery("transfer-id", "token", "sealed");
+    await awaitTransferDelivery("transfer-id", "token");
+    await closeTransfer("transfer-id", "token", "cancelled");
 
-    expect(fetchSpy).toHaveBeenCalledTimes(5);
+    expect(fetchSpy).toHaveBeenCalledTimes(7);
     for (const [, init] of fetchSpy.mock.calls) {
       expect(init?.cache).toBe("no-store");
     }

@@ -5,22 +5,27 @@
  */
 import {
   ApiError,
+  awaitTransferAnswer,
+  awaitTransferDelivery,
   claimTransfer,
   closeTransfer,
   isTransientStatus,
   MAX_TRANSIENT_ATTEMPTS,
   openTransfer,
-  pollTransferMessage,
-  putTransferMessage,
+  postTransferAnswer,
+  postTransferDelivery,
   retryDelayMs,
 } from "./api";
 import { base64UrlDecode, base64UrlEncode } from "./base64";
 import {
   CodeMismatchError,
+  createOffer,
+  type ReceiverRelay,
   receiveLink,
+  type SenderRelay,
   sendLink,
   TransferEndedError,
-  type TransferRelay,
+  type TransferParty,
 } from "./transfer";
 import { formatCode, parseCode, randomWords } from "./transferWords";
 
@@ -34,6 +39,9 @@ export class CodeFormatError extends Error {
     this.word = word;
   }
 }
+
+/** The session id is the transfer id, so it is as random as a share secret. */
+const SESSION_ID_BYTES = 32;
 
 function delay(ms: number, signal?: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -53,36 +61,84 @@ function endedError(err: unknown): TransferEndedError | null {
   return null;
 }
 
-/** One side's view of the relay, over HTTP long-polling. */
-export function httpTransferRelay(
+/**
+ * Runs a relay request until it yields a value: a long-poll answers null
+ * when its window passed, and a transient failure is retried. Writes are
+ * idempotent on the relay, so retrying them is safe too.
+ */
+async function untilDone<T>(attempt: () => Promise<T | null>, signal?: AbortSignal): Promise<T> {
+  let failures = 0;
+  for (;;) {
+    signal?.throwIfAborted();
+    try {
+      const value = await attempt();
+      failures = 0;
+      if (value !== null) return value;
+    } catch (err) {
+      const ended = endedError(err);
+      if (ended) throw ended;
+      const transient = err instanceof ApiError && isTransientStatus(err.status);
+      if (!transient || ++failures >= MAX_TRANSIENT_ATTEMPTS) throw err;
+      await delay(retryDelayMs(failures, err.retryAfter), signal);
+    }
+  }
+}
+
+/** Writes once, retrying transient failures. */
+async function write(post: () => Promise<void>, signal?: AbortSignal): Promise<void> {
+  await untilDone(async () => {
+    await post();
+    return true;
+  }, signal);
+}
+
+/** The sender's view of the relay, over HTTP long-polling. */
+export function httpSenderRelay(
   transferID: string,
   token: string,
   signal?: AbortSignal,
-): TransferRelay {
+): SenderRelay {
   return {
-    async put(phase, data) {
-      try {
-        await putTransferMessage(transferID, token, phase, base64UrlEncode(data), signal);
-      } catch (err) {
-        throw endedError(err) ?? err;
-      }
+    async awaitAnswer() {
+      const answer = await untilDone(() => awaitTransferAnswer(transferID, token, signal), signal);
+      return {
+        share: base64UrlDecode(answer.share),
+        confirmation: base64UrlDecode(answer.confirmation),
+      };
     },
-    async get(phase) {
-      let failures = 0;
-      for (;;) {
-        signal?.throwIfAborted();
-        try {
-          const data = await pollTransferMessage(transferID, token, phase, signal);
-          failures = 0;
-          if (data !== null) return base64UrlDecode(data);
-        } catch (err) {
-          const ended = endedError(err);
-          if (ended) throw ended;
-          const transient = err instanceof ApiError && isTransientStatus(err.status);
-          if (!transient || ++failures >= MAX_TRANSIENT_ATTEMPTS) throw err;
-          await delay(retryDelayMs(failures, err.retryAfter), signal);
-        }
-      }
+    deliver: (sealed) =>
+      write(() => postTransferDelivery(transferID, token, base64UrlEncode(sealed), signal), signal),
+    close: (reason) => closeTransfer(transferID, token, reason),
+  };
+}
+
+/** The receiver's view of the relay, over HTTP long-polling. */
+export function httpReceiverRelay(
+  transferID: string,
+  token: string,
+  signal?: AbortSignal,
+): ReceiverRelay {
+  return {
+    answer: (answer) =>
+      write(
+        () =>
+          postTransferAnswer(
+            transferID,
+            token,
+            {
+              share: base64UrlEncode(answer.share),
+              confirmation: base64UrlEncode(answer.confirmation),
+            },
+            signal,
+          ),
+        signal,
+      ),
+    async awaitDelivery() {
+      const sealed = await untilDone(
+        () => awaitTransferDelivery(transferID, token, signal),
+        signal,
+      );
+      return base64UrlDecode(sealed);
     },
     close: (reason) => closeTransfer(transferID, token, reason),
   };
@@ -99,25 +155,27 @@ export interface SendingTransfer {
 }
 
 /**
- * Whether the transfer is over on the relay already: handed over and closed,
- * closed as a mismatch by the protocol, or ended by the other side. Closing
- * it again would only send a misleading "cancelled".
+ * Whether the transfer is over on the relay already: delivered (which ends
+ * it), closed as a mismatch by the protocol, or ended by the other side.
+ * Closing it again would only send a misleading "cancelled".
  */
 function transferEnded(err?: unknown): boolean {
   return err === undefined || err instanceof CodeMismatchError || err instanceof TransferEndedError;
 }
 
 export async function startSending(link: string): Promise<SendingTransfer> {
-  const opened = await openTransfer();
-  const words = randomWords();
+  const sid = crypto.getRandomValues(new Uint8Array(SESSION_ID_BYTES));
+  const transferID = base64UrlEncode(sid);
+  const party: TransferParty = { words: randomWords(), sid, origin: window.location.origin };
+  // The offer depends on the session id, so the sender picks the id and
+  // creates the transfer with its offer in one request.
+  const offer = createOffer(party);
+  const opened = await openTransfer(transferID, base64UrlEncode(offer.share));
+
   const controller = new AbortController();
-  const relay = httpTransferRelay(opened.transfer_id, opened.sender_token, controller.signal);
+  const relay = httpSenderRelay(transferID, opened.sender_token, controller.signal);
   let ended = false;
-  const done = sendLink(
-    relay,
-    { words, sid: base64UrlDecode(opened.transfer_id), origin: window.location.origin },
-    link,
-  );
+  const done = sendLink(relay, party, offer, link);
   done.then(
     () => {
       ended = true;
@@ -129,13 +187,13 @@ export async function startSending(link: string): Promise<SendingTransfer> {
   );
 
   return {
-    code: formatCode(opened.nameplate, words),
+    code: formatCode(opened.nameplate, party.words),
     expiresAt: Date.parse(opened.expires_at),
     done,
     cancel() {
       if (ended || controller.signal.aborted) return;
       controller.abort();
-      closeTransfer(opened.transfer_id, opened.sender_token, "cancelled", true).catch(() => {});
+      closeTransfer(transferID, opened.sender_token, "cancelled", true).catch(() => {});
     },
   };
 }
@@ -152,13 +210,17 @@ export async function receiveWithCode(input: string, signal?: AbortSignal): Prom
   };
   // Tell the sender right away if the receiver gives up while waiting.
   signal?.addEventListener("abort", cancel, { once: true });
-  const relay = httpTransferRelay(claimed.transfer_id, claimed.receiver_token, signal);
+  const relay = httpReceiverRelay(claimed.transfer_id, claimed.receiver_token, signal);
   try {
-    return await receiveLink(relay, {
-      words: parsed.words,
-      sid: base64UrlDecode(claimed.transfer_id),
-      origin: window.location.origin,
-    });
+    return await receiveLink(
+      relay,
+      {
+        words: parsed.words,
+        sid: base64UrlDecode(claimed.transfer_id),
+        origin: window.location.origin,
+      },
+      base64UrlDecode(claimed.offer),
+    );
   } catch (err) {
     // Any other failure leaves the transfer claimed; release the sender now
     // instead of letting it wait for the expiry.

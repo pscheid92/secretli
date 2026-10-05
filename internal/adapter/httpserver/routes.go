@@ -86,12 +86,15 @@ func (a *App) registerRoutes() *metrics.SecretMetrics {
 	transferClaimGroup.Use(middleware.BodyLimit(smallRequestBodyLimit))
 	transferClaimGroup.POST("/claim", th.ClaimTransfer)
 
-	// A waiting side long-polls for up to 25 s per request.
-	transferMessageGroup := transfers.Group("")
-	transferMessageGroup.Use(rateLimiter(300, time.Minute))
-	transferMessageGroup.Use(middleware.BodyLimit(smallRequestBodyLimit))
-	transferMessageGroup.PUT("/:transferID/messages/:phase", th.PutMessage)
-	transferMessageGroup.GET("/:transferID/messages/:phase", th.GetMessage)
+	// The legs: each written once with POST and waited for with a GET
+	// long-poll of up to 25 s.
+	transferLegGroup := transfers.Group("")
+	transferLegGroup.Use(rateLimiter(300, time.Minute))
+	transferLegGroup.Use(middleware.BodyLimit(smallRequestBodyLimit))
+	transferLegGroup.POST("/:transferID/answer", th.PostAnswer)
+	transferLegGroup.GET("/:transferID/answer", th.AwaitAnswer)
+	transferLegGroup.POST("/:transferID/delivery", th.PostDelivery)
+	transferLegGroup.GET("/:transferID/delivery", th.AwaitDelivery)
 
 	transferCloseGroup := transfers.Group("")
 	transferCloseGroup.Use(rateLimiter(30, time.Minute))

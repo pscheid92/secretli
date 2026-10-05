@@ -4,7 +4,8 @@ import {
   CodeFormatError,
   describeReceiveError,
   describeSendError,
-  httpTransferRelay,
+  httpReceiverRelay,
+  httpSenderRelay,
   receiveWithCode,
   startSending,
 } from "../transferSession";
@@ -23,21 +24,24 @@ function json(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), { status });
 }
 
-describe("httpTransferRelay", () => {
+describe("HTTP relays", () => {
   afterEach(() => vi.restoreAllMocks());
 
-  it("keeps long-polling through empty windows until the message arrives", async () => {
+  it("keeps long-polling through empty windows until the answer arrives", async () => {
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(new Response(null, { status: 204 }))
       .mockResolvedValueOnce(new Response(null, { status: 204 }))
-      .mockResolvedValueOnce(json(200, { data: "AQID" }));
+      .mockResolvedValueOnce(json(200, { share: "AQID", confirmation: "BAUG" }));
 
-    const data = await httpTransferRelay(TRANSFER_ID, TOKEN).get("share");
+    const answer = await httpSenderRelay(TRANSFER_ID, TOKEN).awaitAnswer();
 
-    expect(data).toEqual(new Uint8Array([1, 2, 3]));
+    expect(answer).toEqual({
+      share: new Uint8Array([1, 2, 3]),
+      confirmation: new Uint8Array([4, 5, 6]),
+    });
     expect(fetchMock).toHaveBeenCalledTimes(3);
-    expect(fetchMock.mock.calls[0][0]).toBe(`/api/v1/transfers/${TRANSFER_ID}/messages/share`);
+    expect(fetchMock.mock.calls[0][0]).toBe(`/api/v1/transfers/${TRANSFER_ID}/answer`);
   });
 
   it("reports why the transfer ended", async () => {
@@ -45,7 +49,7 @@ describe("httpTransferRelay", () => {
       json(410, { error: "transfer has ended", details: { reason: "mismatch" } }),
     );
 
-    await expect(httpTransferRelay(TRANSFER_ID, TOKEN).get("payload")).rejects.toEqual(
+    await expect(httpReceiverRelay(TRANSFER_ID, TOKEN).awaitDelivery()).rejects.toEqual(
       new TransferEndedError("mismatch"),
     );
   });
@@ -54,31 +58,49 @@ describe("httpTransferRelay", () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(json(404, { error: "transfer not found" }));
 
     await expect(
-      httpTransferRelay(TRANSFER_ID, TOKEN).put("share", new Uint8Array([1])),
+      httpReceiverRelay(TRANSFER_ID, TOKEN).answer({
+        share: new Uint8Array([1]),
+        confirmation: new Uint8Array([2]),
+      }),
     ).rejects.toEqual(new TransferEndedError("expired"));
   });
 
   it("retries a transient failure while polling", async () => {
     vi.spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(json(503, { error: "unavailable" }))
-      .mockResolvedValueOnce(json(200, { data: "AQ" }));
+      .mockResolvedValueOnce(json(200, { sealed: "AQ" }));
 
-    await expect(httpTransferRelay(TRANSFER_ID, TOKEN).get("share")).resolves.toEqual(
+    await expect(httpReceiverRelay(TRANSFER_ID, TOKEN).awaitDelivery()).resolves.toEqual(
       new Uint8Array([1]),
     );
   });
 
-  it("sends messages as unpadded base64url with the bearer token", async () => {
+  it("retries a transient failure while writing, which the relay takes once", async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(json(503, { error: "unavailable" }))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }));
+
+    await httpSenderRelay(TRANSFER_ID, TOKEN).deliver(new Uint8Array([1]));
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls[1][0]).toBe(`/api/v1/transfers/${TRANSFER_ID}/delivery`);
+  });
+
+  it("sends the answer as unpadded base64url with the bearer token", async () => {
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
       .mockResolvedValue(new Response(null, { status: 204 }));
 
-    await httpTransferRelay(TRANSFER_ID, TOKEN).put("confirm", new Uint8Array([251, 255]));
+    await httpReceiverRelay(TRANSFER_ID, TOKEN).answer({
+      share: new Uint8Array([251, 255]),
+      confirmation: new Uint8Array([1]),
+    });
 
     const [, init] = fetchMock.mock.calls[0];
-    expect(init?.method).toBe("PUT");
+    expect(init?.method).toBe("POST");
     expect(new Headers(init?.headers).get("Authorization")).toBe(`Bearer ${TOKEN}`);
-    expect(JSON.parse(String(init?.body))).toEqual({ data: "-_8" });
+    expect(JSON.parse(String(init?.body))).toEqual({ share: "-_8", confirmation: "AQ" });
   });
 });
 
@@ -146,12 +168,12 @@ describe("closing a transfer", () => {
         return json(200, {
           transfer_id: TRANSFER_ID,
           receiver_token: TOKEN,
+          offer: "AQID",
           expires_at: "2026-10-05T10:00:00Z",
         });
       }
       return json(201, {
         nameplate: 3,
-        transfer_id: TRANSFER_ID,
         sender_token: TOKEN,
         expires_at: "2026-10-05T10:00:00Z",
       });

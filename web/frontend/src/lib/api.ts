@@ -333,13 +333,16 @@ export async function getVersion(): Promise<string> {
 }
 
 // --- Short-code transfers ---
+//
+// A transfer runs in three legs: the sender creates it with its PAKE share
+// (the offer), the receiver claims it and posts its answer, and the sender
+// posts the delivery. Each leg is written once with POST; the other side
+// waits for it with a GET long-poll that answers 204 when its window passed.
 
-export type TransferPhaseName = "share" | "confirm" | "payload";
-export type TransferCloseReasonName = "done" | "cancelled" | "mismatch";
+export type TransferCloseReasonName = "cancelled" | "mismatch";
 
 export interface OpenTransferResponse {
   readonly nameplate: number;
-  readonly transfer_id: string;
   readonly sender_token: string;
   readonly expires_at: string;
 }
@@ -347,21 +350,37 @@ export interface OpenTransferResponse {
 export interface ClaimTransferResponse {
   readonly transfer_id: string;
   readonly receiver_token: string;
+  /** The sender's PAKE share, unpadded base64url. */
+  readonly offer: string;
   readonly expires_at: string;
 }
 
+/** The receiver's PAKE share and confirmation tag, unpadded base64url. */
+export interface TransferAnswerBody {
+  readonly share: string;
+  readonly confirmation: string;
+}
+
 /**
- * Transfer requests skip the HTTP cache. Both sides write and long-poll the
- * same message URLs, and when both run in one browser, its cache makes a
- * request wait for the other tab's pending request on that URL: up to 20 s
- * per step.
+ * Transfer requests skip the HTTP cache. Both sides use the same leg URLs,
+ * and when both run in one browser, its cache makes a request wait for the
+ * other tab's pending request on that URL: up to 20 s per step.
  */
 function transferRequest<T>(url: string, init: RequestInit): Promise<T> {
   return request(url, { ...init, cache: "no-store" });
 }
 
-export function openTransfer(): Promise<OpenTransferResponse> {
-  return transferRequest("/api/v1/transfers", { method: "POST" });
+function bearer(token: string): Record<string, string> {
+  return { Authorization: `Bearer ${token}` };
+}
+
+/** Creates a transfer under the id the sender picked, with its offer. */
+export function openTransfer(transferID: string, offer: string): Promise<OpenTransferResponse> {
+  return transferRequest("/api/v1/transfers", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ transfer_id: transferID, offer }),
+  });
 }
 
 export function claimTransfer(nameplate: number): Promise<ClaimTransferResponse> {
@@ -372,40 +391,61 @@ export function claimTransfer(nameplate: number): Promise<ClaimTransferResponse>
   });
 }
 
-/** Stores this side's message; data is unpadded base64url. */
-export function putTransferMessage(
+export function postTransferAnswer(
   transferID: string,
   token: string,
-  phase: TransferPhaseName,
-  data: string,
+  answer: TransferAnswerBody,
   signal?: AbortSignal,
 ): Promise<void> {
-  return transferRequest(`/api/v1/transfers/${transferID}/messages/${phase}`, {
-    method: "PUT",
-    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ data }),
+  return transferRequest(`/api/v1/transfers/${transferID}/answer`, {
+    method: "POST",
+    headers: { ...bearer(token), "Content-Type": "application/json" },
+    body: JSON.stringify(answer),
     signal,
   });
 }
 
-/**
- * One long-poll for the other side's message. Resolves with its base64url
- * data, or null when the server's poll window passed without one.
- */
-export async function pollTransferMessage(
+/** One long-poll for the answer, or null when the window passed without it. */
+export async function awaitTransferAnswer(
   transferID: string,
   token: string,
-  phase: TransferPhaseName,
   signal?: AbortSignal,
-): Promise<string | null> {
-  const body = await transferRequest<{ data: string } | undefined>(
-    `/api/v1/transfers/${transferID}/messages/${phase}`,
-    { method: "GET", headers: { Authorization: `Bearer ${token}` }, signal },
+): Promise<TransferAnswerBody | null> {
+  const body = await transferRequest<TransferAnswerBody | undefined>(
+    `/api/v1/transfers/${transferID}/answer`,
+    { method: "GET", headers: bearer(token), signal },
   );
-  return body?.data ?? null;
+  return body ?? null;
 }
 
-/** Ends a transfer. keepalive lets the request finish while the page unloads. */
+export function postTransferDelivery(
+  transferID: string,
+  token: string,
+  sealed: string,
+  signal?: AbortSignal,
+): Promise<void> {
+  return transferRequest(`/api/v1/transfers/${transferID}/delivery`, {
+    method: "POST",
+    headers: { ...bearer(token), "Content-Type": "application/json" },
+    body: JSON.stringify({ sealed }),
+    signal,
+  });
+}
+
+/** One long-poll for the sealed link, or null when the window passed without it. */
+export async function awaitTransferDelivery(
+  transferID: string,
+  token: string,
+  signal?: AbortSignal,
+): Promise<string | null> {
+  const body = await transferRequest<{ sealed: string } | undefined>(
+    `/api/v1/transfers/${transferID}/delivery`,
+    { method: "GET", headers: bearer(token), signal },
+  );
+  return body?.sealed ?? null;
+}
+
+/** Ends a transfer early. keepalive lets the request finish while the page unloads. */
 export function closeTransfer(
   transferID: string,
   token: string,
@@ -414,7 +454,7 @@ export function closeTransfer(
 ): Promise<void> {
   return transferRequest(`/api/v1/transfers/${transferID}?reason=${reason}`, {
     method: "DELETE",
-    headers: { Authorization: `Bearer ${token}` },
+    headers: bearer(token),
     keepalive,
   });
 }
