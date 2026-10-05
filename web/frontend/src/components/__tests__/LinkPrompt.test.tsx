@@ -36,6 +36,15 @@ describe("LinkPrompt", () => {
     expect(window.location.hash).toBe("");
   });
 
+  it("offers entering a transfer code, also without a camera", () => {
+    render(<LinkPrompt />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Enter a code" }));
+
+    expect(screen.getByRole("region", { name: "Enter a code" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Enter a code" })).toBeNull();
+  });
+
   describe("QR scanning", () => {
     afterEach(() => {
       Reflect.deleteProperty(navigator, "mediaDevices");
