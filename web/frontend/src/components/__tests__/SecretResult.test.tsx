@@ -27,6 +27,7 @@ describe("SecretResult QR code", () => {
 
     const image = await screen.findByAltText("QR code for share link");
     expect(image.getAttribute("src")).toMatch(/^data:image\/svg\+xml;/);
+    expect(screen.getByText("Anyone who can see this code can open the share.")).toBeTruthy();
     expect(Element.prototype.scrollIntoView).toHaveBeenCalledWith({ block: "nearest" });
   });
 

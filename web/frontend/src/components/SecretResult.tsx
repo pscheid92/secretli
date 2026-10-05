@@ -121,6 +121,9 @@ export default function SecretResult({
             <div className="mx-auto aspect-square w-full max-w-[calc(100vh-10rem)]">
               <QRCode url={url} className="h-full w-full rounded-md" />
             </div>
+            <p className="mt-3 text-center text-xs text-zinc-500 dark:text-zinc-400">
+              Anyone who can see this code can open the share.
+            </p>
           </div>
         )}
 
