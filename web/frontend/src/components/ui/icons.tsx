@@ -188,3 +188,72 @@ export function MonitorIcon() {
     </Icon>
   );
 }
+
+export function PaperclipIcon() {
+  return (
+    <Icon>
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="M20.5 11.2l-8.1 8.1a5.25 5.25 0 0 1-7.4-7.4l8.4-8.4a3.5 3.5 0 0 1 5 5l-8.4 8.4a1.75 1.75 0 0 1-2.5-2.5l7.6-7.6"
+      />
+    </Icon>
+  );
+}
+
+export function ChevronDownIcon() {
+  return (
+    <Icon>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M6.5 9.5l5.5 5.5 5.5-5.5" />
+    </Icon>
+  );
+}
+
+export function CheckIcon() {
+  return (
+    <Icon>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M5 12.75l4.25 4.25L19 7.25" />
+    </Icon>
+  );
+}
+
+export function PlusIcon() {
+  return (
+    <Icon>
+      <path strokeLinecap="round" d="M12 5.5v13M5.5 12h13" />
+    </Icon>
+  );
+}
+
+export function CloseIcon() {
+  return (
+    <Icon>
+      <path strokeLinecap="round" d="M6.5 6.5l11 11M17.5 6.5l-11 11" />
+    </Icon>
+  );
+}
+
+export function FileIcon() {
+  return (
+    <Icon>
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="M13.75 3.75H7A2.25 2.25 0 0 0 4.75 6v12A2.25 2.25 0 0 0 7 20.25h10A2.25 2.25 0 0 0 19.25 18V9.25z"
+      />
+      <path strokeLinecap="round" strokeLinejoin="round" d="M13.75 3.75v5.5h5.5" />
+    </Icon>
+  );
+}
+
+export function ArrowLeftIcon() {
+  return (
+    <Icon>
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="M19.25 12H4.75M10.5 6.25L4.75 12l5.75 5.75"
+      />
+    </Icon>
+  );
+}

@@ -73,7 +73,7 @@ export default function BundleDownload({
       <PageTitle
         lead={`${manifest.files.length} ${isMulti ? "files" : "file"} · ${formatSize(totalSize)}`}
       >
-        {isMulti ? "Download Files" : "Download File"}
+        {isMulti ? "Here are your files" : "Here's your file"}
       </PageTitle>
 
       <section className="space-y-5 rounded-lg border border-zinc-200 bg-white p-5 dark:border-zinc-700 dark:bg-zinc-900">

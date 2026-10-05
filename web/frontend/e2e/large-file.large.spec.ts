@@ -58,23 +58,23 @@ test.describe("Large-file performance", () => {
     const totalStartedAt = performance.now();
     await sampleHeap("initial");
 
-    await page.goto("/file");
+    await page.goto("/share");
     await page.setInputFiles('input[type="file"]', sourcePath);
-    await expect(page.getByText(`${sizeMiB.toFixed(1)} MB / 1 GiB`)).toBeVisible({
+    await expect(page.getByText(new RegExp(`${sizeMiB.toFixed(1)} MB`))).toBeVisible({
       timeout: 10000,
     });
 
     const uploadStartedAt = performance.now();
     await page.click('button[type="submit"]');
-    await expect(page.getByRole("heading", { name: "Share is ready" })).toBeVisible({
+    await expect(page.getByRole("heading", { name: "Your link is ready" })).toBeVisible({
       timeout: TEST_TIMEOUT_MS,
     });
     const uploadMs = performance.now() - uploadStartedAt;
     await sampleHeap("after upload");
 
-    const shareUrl = await page.locator("input[readonly]").first().inputValue();
+    const shareUrl = (await page.getByTestId("share-link").textContent()) ?? "";
     await page.goto(shareUrl);
-    await expect(page.locator("h1")).toHaveText("File Share", { timeout: 10000 });
+    await expect(page.locator("h1")).toHaveText("Someone sent you a secret", { timeout: 10000 });
 
     const outputPath = testInfo.outputPath("downloaded", filename);
     const retrieveStartedAt = performance.now();
@@ -116,7 +116,7 @@ async function retrieveBundle(
 ): Promise<{ revealMs: number; downloadMs: number }> {
   const revealStartedAt = performance.now();
   await page.getByRole("button", { name: /Prepare Download/ }).click();
-  await expect(page.locator("h1")).toHaveText("Download File", { timeout: TEST_TIMEOUT_MS });
+  await expect(page.locator("h1")).toHaveText("Here's your file", { timeout: TEST_TIMEOUT_MS });
   const revealMs = performance.now() - revealStartedAt;
   await sampleHeap("after manifest");
 

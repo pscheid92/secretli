@@ -71,62 +71,61 @@ export default function SendWithCode({ url, onClose }: SendWithCodeProps) {
   }, [state.stage]);
 
   return (
-    <div className="space-y-4 rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-700 dark:bg-zinc-950">
-      <div role="status" className="space-y-3">
+    <div className="space-y-4.5 border-t border-line bg-sunken px-6 pt-6 pb-5">
+      <div role="status" className="space-y-4.5">
         {state.stage === "starting" && (
-          <p className="flex items-center gap-2 text-sm text-zinc-600 dark:text-zinc-300">
-            <Spinner size="sm" /> Getting a code…
+          <p className="flex items-center gap-3 text-body text-muted">
+            <Spinner size="sm" className="text-accent" /> Getting a code…
           </p>
         )}
         {state.stage === "waiting" && (
           <>
-            <p className="text-sm text-zinc-600 dark:text-zinc-300">
+            <p className="text-pretty text-body text-muted">
               On the other device, go to{" "}
-              <strong className="font-mono font-semibold text-zinc-900 dark:text-zinc-50">
-                {window.location.host}/c
-              </strong>{" "}
+              <span className="break-all font-mono text-sm text-ink">{window.location.host}/c</span>{" "}
               and type:
             </p>
-            <p className="break-all text-center font-mono text-3xl font-semibold tracking-wide text-zinc-900 dark:text-zinc-50">
+            <p className="break-all font-mono text-[clamp(1.75rem,3.4vw,2.375rem)] font-medium leading-[1.1] tracking-[-0.02em] text-ink">
               {state.code}
             </p>
-            <p className="flex items-center justify-center gap-2 text-xs text-zinc-500 dark:text-zinc-400">
-              <Spinner size="sm" /> Waiting for the other device · expires in{" "}
-              {formatRemaining(state.expiresAt - now)}
+            <p className="flex items-center gap-3 text-sm text-muted">
+              <span
+                aria-hidden="true"
+                className="h-2 w-2 shrink-0 rounded-full bg-accent ring-4 ring-ring"
+              />
+              Waiting for the other device · {formatRemaining(state.expiresAt - now)} left
             </p>
           </>
         )}
         {state.stage === "sent" && (
-          <p className="text-sm font-medium text-emerald-700 dark:text-emerald-400">
-            Sent. The other device is opening the share.
+          <p className="text-body font-medium text-ink">
+            Sent. The other device is opening the secret.
           </p>
         )}
-        {state.stage === "failed" && (
-          <p className="text-sm text-zinc-700 dark:text-zinc-200">{state.message}</p>
-        )}
+        {state.stage === "failed" && <p className="text-body text-ink">{state.message}</p>}
       </div>
 
-      <div className="flex items-center justify-between gap-3">
-        <p className="text-[11px] text-zinc-500 dark:text-zinc-400">
+      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+        <p className="text-xs text-faint">
           Code words from the{" "}
           <a
             href="https://www.eff.org/dice"
             target="_blank"
             rel="noreferrer"
-            className="underline hover:text-amber-700 dark:hover:text-amber-400"
+            className="underline underline-offset-2 transition-colors duration-150 hover:text-ink"
           >
             EFF short word list
           </a>{" "}
           (CC BY 3.0)
         </p>
-        <div className="flex gap-2">
+        <div className="-mr-3 flex gap-1">
           {state.stage === "failed" && (
             <Button size="sm" onClick={() => setAttempt((n) => n + 1)}>
               New code
             </Button>
           )}
-          <Button variant="secondary" size="sm" onClick={onClose}>
-            {state.stage === "sent" ? "Done" : "Cancel"}
+          <Button variant="quiet" size="sm" onClick={onClose}>
+            {state.stage === "sent" ? "Done" : "Stop"}
           </Button>
         </div>
       </div>

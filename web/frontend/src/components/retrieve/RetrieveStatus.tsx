@@ -6,17 +6,17 @@ export function RetrieveLoading() {
   return (
     <div className="flex flex-col items-center justify-center gap-3 py-20">
       <Spinner size="lg" className="text-accent" />
-      <p className="text-sm text-muted">Checking share...</p>
+      <p className="text-sm text-muted">Opening the link…</p>
     </div>
   );
 }
 
-export function RetrieveError({ message }: { message: string }) {
+export function RetrieveError({ title, message }: { title: string; message: string }) {
   return (
     <div className="space-y-8">
-      <PageTitle lead={message}>Unable to open share</PageTitle>
+      <PageTitle lead={message}>{title}</PageTitle>
       <a href="/share" className={textButtonClass("muted")}>
-        ← Create a new share
+        ← Share a secret of your own
       </a>
     </div>
   );
@@ -25,9 +25,9 @@ export function RetrieveError({ message }: { message: string }) {
 export function ShareDeleted() {
   return (
     <div className="space-y-8">
-      <PageTitle lead="The share has been permanently destroyed.">Share deleted</PageTitle>
+      <PageTitle lead="The link doesn't open anything any more.">Secret deleted</PageTitle>
       <a href="/" className={textButtonClass("muted")}>
-        ← Create a new share
+        ← Share another secret
       </a>
     </div>
   );

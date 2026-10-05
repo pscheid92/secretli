@@ -4,12 +4,16 @@ export function formatSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-/** How a share is protected, as its summary shows it. */
-export function formatProtection(password: boolean, burnAfterRead: boolean): string {
-  if (password && burnAfterRead) return "Password, burn after reading";
-  if (password) return "Password";
-  if (burnAfterRead) return "Burn after reading";
-  return "Standard";
+/** The moment a link dies, the way a person would say it: "tomorrow at 19:53". */
+export function formatExpiry(iso: string, now: Date = new Date()): string {
+  const date = new Date(iso);
+  const time = date.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+  const dayOf = (d: Date) => `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+  const tomorrow = new Date(now);
+  tomorrow.setDate(now.getDate() + 1);
+  if (dayOf(date) === dayOf(now)) return `today at ${time}`;
+  if (dayOf(date) === dayOf(tomorrow)) return `tomorrow at ${time}`;
+  return `on ${date.toLocaleDateString(undefined, { day: "numeric", month: "short" })} at ${time}`;
 }
 
 export function formatRelativeTime(iso: string): string {

@@ -29,8 +29,7 @@ export default function Layout() {
   const location = useLocation();
   const reloadDocument = useLeaveWarningActive();
 
-  const isShareActive =
-    location.pathname === "/" || location.pathname === "/share" || location.pathname === "/file";
+  const isShareActive = location.pathname === "/" || location.pathname === "/share";
   const isOpenActive = location.pathname === "/s" || location.pathname === "/c";
 
   return (

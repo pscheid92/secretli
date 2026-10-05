@@ -1,5 +1,11 @@
-import { expect, test } from "@playwright/test";
+import { expect, type Page, test } from "@playwright/test";
 import { expectAccessible } from "./axe";
+
+/** A link the result page shows; the owner link only once its section is open. */
+async function shownLink(page: Page, which: "share-link" | "owner-link"): Promise<string> {
+  if (which === "owner-link") await page.getByRole("button", { name: "Owner link" }).click();
+  return (await page.getByTestId(which).textContent()) ?? "";
+}
 
 test.describe("Text secret sharing", () => {
   test("create secret and retrieve via share link", async ({ page }) => {
@@ -10,28 +16,27 @@ test.describe("Text secret sharing", () => {
     await page.fill("#secret-text", secretText);
     await page.click('button[type="submit"]');
 
-    await expect(page.getByRole("heading", { name: "Share is ready" })).toBeVisible({
+    await expect(page.getByRole("heading", { name: "Your link is ready" })).toBeVisible({
       timeout: 10000,
     });
 
     await expectAccessible(page);
 
-    const shareInput = page.locator("input[readonly]").first();
-    const shareUrl = await shareInput.inputValue();
+    const shareUrl = await shownLink(page, "share-link");
     expect(shareUrl).toContain("/s#");
 
     // Open the link in a tab that already shows /s, as when it is pasted into
     // the address bar there: only the fragment changes.
     await page.goto("/s");
-    await expect(page.locator("h1")).toHaveText("Open a Share");
+    await expect(page.locator("h1")).toHaveText("Open a secret");
     await page.goto(shareUrl);
 
-    await expect(page.locator("h1")).toHaveText("Text Share", { timeout: 10000 });
+    await expect(page.locator("h1")).toHaveText("Someone sent you a secret", { timeout: 10000 });
     await expectAccessible(page);
 
-    await page.getByRole("button", { name: "Reveal Text" }).click();
+    await page.getByRole("button", { name: /^Reveal/ }).click();
 
-    await expect(page.locator("h1")).toHaveText("Decrypted Text", { timeout: 10000 });
+    await expect(page.locator("h1")).toHaveText("Here's your secret", { timeout: 10000 });
     await expectAccessible(page);
 
     const decryptedText = await page.locator("pre").textContent();
@@ -47,29 +52,30 @@ test.describe("Text secret sharing", () => {
     await page.goto("/share");
 
     await page.fill("#secret-text", secretText);
-    await page.getByRole("switch", { name: /Burn after reading/ }).click();
-    await page.getByRole("switch", { name: /Password protection/ }).click();
+    // Links open once unless told otherwise; the password is the one setting to turn on.
+    await page.getByRole("button", { name: "Password" }).click();
     await page.fill('input[type="password"]', password);
+    await expectAccessible(page);
     await page.click('button[type="submit"]');
 
-    await expect(page.getByRole("heading", { name: "Share is ready" })).toBeVisible({
+    await expect(page.getByRole("heading", { name: "Your link is ready" })).toBeVisible({
       timeout: 10000,
     });
 
-    const shareUrl = await page.locator("input[readonly]").first().inputValue();
+    const shareUrl = await shownLink(page, "share-link");
     await page.goto(shareUrl);
 
-    await expect(page.locator("h1")).toHaveText("Text Share", { timeout: 10000 });
+    await expect(page.locator("h1")).toHaveText("Someone sent you a secret", { timeout: 10000 });
 
     await page.getByRole("button", { name: "Unlock Share" }).click();
 
-    await expect(page.locator("h1")).toHaveText("Unlock Share", { timeout: 10000 });
+    await expect(page.locator("h1")).toHaveText("Enter the password", { timeout: 10000 });
     await expectAccessible(page);
 
     await page.fill('input[type="password"]', password);
     await page.click('button[type="submit"]');
 
-    await expect(page.locator("h1")).toHaveText("Decrypted Text", { timeout: 10000 });
+    await expect(page.locator("h1")).toHaveText("Here's your secret", { timeout: 10000 });
     const decryptedText = await page.locator("pre").textContent();
     expect(decryptedText).toBe(secretText);
 
@@ -97,29 +103,29 @@ test.describe("Text secret sharing", () => {
     await page.goto("/share");
     await page.fill("#secret-text", secretText);
     await page.click('button[type="submit"]');
-    await expect(page.getByRole("heading", { name: "Share is ready" })).toBeVisible({
+    await expect(page.getByRole("heading", { name: "Your link is ready" })).toBeVisible({
       timeout: 10000,
     });
 
-    const shareUrl = await page.locator("input[readonly]").first().inputValue();
-    const ownerUrl = await page.locator("input[readonly]").nth(1).inputValue();
+    const shareUrl = await shownLink(page, "share-link");
+    const ownerUrl = await shownLink(page, "owner-link");
     expect(ownerUrl).toContain("!");
+    await expectAccessible(page);
 
+    // Opening a one-time secret would use it up, so the owner deletes it unopened.
     await page.goto(ownerUrl);
-    await expect(page.locator("h1")).toHaveText("Text Share", { timeout: 10000 });
-    await page.getByRole("button", { name: "Reveal Text" }).click();
-    await expect(page.locator("h1")).toHaveText("Decrypted Text", { timeout: 10000 });
+    await expect(page.locator("h1")).toHaveText("Your secret", { timeout: 10000 });
 
     await page.getByRole("button", { name: "Delete share" }).click();
     await expectAccessible(page);
     await page.getByRole("button", { name: "Delete permanently" }).click();
-    await expect(page.getByRole("main").getByText("Share deleted")).toBeVisible({
+    await expect(page.getByRole("main").getByText("Secret deleted")).toBeVisible({
       timeout: 10000,
     });
 
     const recipientPage = await context.newPage();
     await recipientPage.goto(shareUrl);
-    await expect(recipientPage.getByText(/This share has expired or was deleted\./)).toBeVisible({
+    await expect(recipientPage.getByText(/It was opened already, or it expired\./)).toBeVisible({
       timeout: 10000,
     });
   });

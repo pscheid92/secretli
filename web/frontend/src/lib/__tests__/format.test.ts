@@ -1,16 +1,15 @@
-import { formatProtection } from "../format";
+import { formatExpiry } from "../format";
 
-describe("formatProtection", () => {
-  it("lists both protections when a share has both", () => {
-    expect(formatProtection(true, true)).toBe("Password, burn after reading");
+describe("formatExpiry", () => {
+  const now = new Date(2026, 9, 5, 19, 53);
+
+  it("says today, tomorrow or the date, with the time", () => {
+    expect(formatExpiry(new Date(2026, 9, 5, 23, 30).toISOString(), now)).toMatch(/^today at /);
+    expect(formatExpiry(new Date(2026, 9, 6, 0, 10).toISOString(), now)).toMatch(/^tomorrow at /);
+    expect(formatExpiry(new Date(2026, 9, 12, 19, 53).toISOString(), now)).toMatch(/^on .+ at /);
   });
 
-  it("names a single protection", () => {
-    expect(formatProtection(true, false)).toBe("Password");
-    expect(formatProtection(false, true)).toBe("Burn after reading");
-  });
-
-  it("calls an unprotected share standard", () => {
-    expect(formatProtection(false, false)).toBe("Standard");
+  it("does not mistake the same time a month later for today", () => {
+    expect(formatExpiry(new Date(2026, 10, 5, 19, 53).toISOString(), now)).toMatch(/^on /);
   });
 });

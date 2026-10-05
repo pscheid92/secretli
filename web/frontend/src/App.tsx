@@ -1,6 +1,5 @@
-import { BrowserRouter, Route, Routes } from "react-router";
+import { BrowserRouter, Navigate, Route, Routes } from "react-router";
 import Layout from "./components/Layout";
-import FilePage from "./pages/FilePage";
 import NotFoundPage from "./pages/NotFoundPage";
 import RetrievePage from "./pages/RetrievePage";
 import SharePage from "./pages/SharePage";
@@ -12,10 +11,11 @@ export default function App() {
         <Route element={<Layout />}>
           <Route index element={<SharePage />} />
           <Route path="share" element={<SharePage />} />
+          {/* Files are shared from the same page now; old links still land. */}
+          <Route path="file" element={<Navigate to="/share" replace />} />
           {/* Keyed: switching between /s and /c starts the page afresh. */}
           <Route path="s" element={<RetrievePage key="s" />} />
           <Route path="c" element={<RetrievePage key="c" />} />
-          <Route path="file" element={<FilePage />} />
           <Route path="*" element={<NotFoundPage />} />
         </Route>
       </Routes>

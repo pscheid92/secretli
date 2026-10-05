@@ -42,10 +42,10 @@ test.describe("QR code scanning", () => {
     await page.goto("/share");
     await page.fill("#secret-text", `QR secret ${Date.now()}`);
     await page.click('button[type="submit"]');
-    await expect(page.getByRole("heading", { name: "Share is ready" })).toBeVisible({
+    await expect(page.getByRole("heading", { name: "Your link is ready" })).toBeVisible({
       timeout: 10000,
     });
-    const shareUrl = await page.locator("input[readonly]").first().inputValue();
+    const shareUrl = (await page.getByTestId("share-link").textContent()) ?? "";
 
     // The receiver is a second browser whose only camera shows the QR code.
     // Headless Chromium also needs the fake permission UI, or getUserMedia
@@ -73,7 +73,9 @@ test.describe("QR code scanning", () => {
           if (decoder === "jsQR" || (await receiver.evaluate(() => "BarcodeDetector" in window))) {
             await receiver.getByRole("button", { name: "Scan QR code" }).click();
             // The share details decrypt only with the scanned key.
-            await expect(receiver.locator("h1")).toHaveText("Text Share", { timeout: 15000 });
+            await expect(receiver.locator("h1")).toHaveText("Someone sent you a secret", {
+              timeout: 15000,
+            });
           }
           await context.close();
         });
