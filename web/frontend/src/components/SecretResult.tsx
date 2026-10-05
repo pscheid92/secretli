@@ -1,7 +1,6 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import QRCode from "./QRCode";
-import QRCodeOverlay from "./QRCodeOverlay";
 
 interface SecretResultProps {
   url: string;
@@ -64,13 +63,12 @@ export default function SecretResult({
 }: SecretResultProps) {
   const ownerUrl = `${url}!${deletionToken}`;
   const [showQR, setShowQR] = useState(false);
-  const [showLargeQR, setShowLargeQR] = useState(false);
-  const largeQRButtonRef = useRef<HTMLButtonElement>(null);
+  const qrRef = useRef<HTMLDivElement>(null);
 
-  function closeLargeQR() {
-    setShowLargeQR(false);
-    largeQRButtonRef.current?.focus();
-  }
+  // On shorter screens the code reaches below the fold.
+  useEffect(() => {
+    if (showQR) qrRef.current?.scrollIntoView({ block: "nearest" });
+  }, [showQR]);
 
   async function copyShareUrl() {
     await navigator.clipboard.writeText(url);
@@ -102,7 +100,7 @@ export default function SecretResult({
 
         <LinkField label="Recipient link" value={url} onCopy={copyShareUrl} />
 
-        <div className="flex justify-end gap-4">
+        <div className="flex justify-end">
           <button
             type="button"
             onClick={() => setShowQR(!showQR)}
@@ -110,25 +108,21 @@ export default function SecretResult({
           >
             {showQR ? "Hide QR code" : "Show QR code"}
           </button>
-          <button
-            ref={largeQRButtonRef}
-            type="button"
-            onClick={() => setShowLargeQR(true)}
-            className="text-xs font-medium text-zinc-500 transition-colors duration-150 hover:text-amber-500 dark:text-zinc-400 dark:hover:text-amber-400"
-          >
-            Show large QR code
-          </button>
         </div>
 
         {showQR && (
-          <div className="flex justify-center rounded-lg border border-zinc-200 bg-white p-6 dark:border-zinc-700 dark:bg-zinc-950">
-            <div className="inline-block rounded-lg bg-white p-2">
-              <QRCode url={url} />
+          <div
+            ref={qrRef}
+            className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-700 dark:bg-zinc-950"
+          >
+            {/* As wide as the box, for a laptop webcam at arm's length, but
+                never taller than the window. The size is reserved before the
+                code renders, so scrolling lands in the right place. */}
+            <div className="mx-auto aspect-square w-full max-w-[calc(100vh-10rem)]">
+              <QRCode url={url} className="h-full w-full rounded-md" />
             </div>
           </div>
         )}
-
-        {showLargeQR && <QRCodeOverlay url={url} onClose={closeLargeQR} />}
 
         {burnAfterRead && (
           <div className="flex items-start gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 dark:border-amber-900/40 dark:bg-amber-900/10">

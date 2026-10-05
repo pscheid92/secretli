@@ -181,8 +181,8 @@ export default function QRScanner({ onScan, onCancel }: QRScannerProps) {
         <p className="text-zinc-700 dark:text-zinc-100">{message}</p>
         {slow && running && !done && (
           <p className="text-xs text-zinc-500 dark:text-zinc-400">
-            Having trouble? Use Show large QR code on the other device, turn up its brightness, and
-            hold it 30 to 50 cm from the camera.
+            Having trouble? Turn up the other screen's brightness, hold it 30 to 50 cm from the
+            camera, and tilt it to avoid glare.
           </p>
         )}
       </div>
