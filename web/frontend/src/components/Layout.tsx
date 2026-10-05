@@ -78,7 +78,12 @@ export default function Layout() {
   return (
     <div className="min-h-screen flex flex-col bg-zinc-50 dark:bg-zinc-950 text-zinc-800 dark:text-zinc-100">
       {/* Toasts follow the theme chosen here, not just the system's. */}
-      <Toaster theme={theme} position="bottom-right" closeButton />
+      <Toaster
+        theme={theme}
+        position="bottom-right"
+        closeButton
+        toastOptions={{ className: "font-sans" }}
+      />
       <header className="sticky top-0 z-50 border-b border-zinc-200 dark:border-zinc-500/50 bg-white/90 dark:bg-zinc-950/90 backdrop-blur-md">
         <nav className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3 sm:px-6">
           <Link to="/" className="flex items-center gap-2 group">

@@ -113,7 +113,7 @@ export default function SecretForm({ onSubmit, loading, stage }: SecretFormProps
               data-gramm_editor="false"
               data-enable-grammarly="false"
               data-1p-ignore
-              className="block h-64 w-full resize-none rounded-md border border-zinc-200 bg-zinc-50 px-4 py-3 text-sm text-zinc-900 placeholder:text-zinc-500 transition-colors duration-150 focus:border-amber-400 focus:outline-none focus:ring-1 focus:ring-amber-400/20 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100 dark:placeholder:text-zinc-500 dark:focus:border-amber-400"
+              className="block h-64 w-full resize-none rounded-md border border-zinc-200 bg-zinc-50 px-4 py-3 font-mono text-sm text-zinc-900 placeholder:text-zinc-500 transition-colors duration-150 focus:border-amber-400 focus:outline-none focus:ring-1 focus:ring-amber-400/20 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100 dark:placeholder:text-zinc-500 dark:focus:border-amber-400"
             />
             {errors.text && (
               <p className="mt-2 text-xs text-red-700 dark:text-red-400">{errors.text.message}</p>
