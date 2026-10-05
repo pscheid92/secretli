@@ -15,19 +15,22 @@ import (
 )
 
 type App struct {
-	echo       *echo.Echo
-	addr       string
-	pool       *pgxpool.Pool
-	secretRepo domain.Repo
-	fileStore  domain.MultipartFileStore
-	cfg        config.Config
-	version    string
-	reg        *prometheus.Registry
+	echo           *echo.Echo
+	addr           string
+	pool           *pgxpool.Pool
+	secretRepo     domain.Repo
+	fileStore      domain.MultipartFileStore
+	transferEvents TransferEvents
+	cfg            config.Config
+	version        string
+	reg            *prometheus.Registry
 
 	SecretMetrics *metrics.SecretMetrics
 }
 
-func New(cfg config.Config, version string, pool *pgxpool.Pool, secretRepo domain.Repo, fileStore domain.MultipartFileStore, reg *prometheus.Registry) (*App, error) {
+// New builds the app. transferEvents may be nil; transfer long-polls then
+// poll the database.
+func New(cfg config.Config, version string, pool *pgxpool.Pool, secretRepo domain.Repo, fileStore domain.MultipartFileStore, transferEvents TransferEvents, reg *prometheus.Registry) (*App, error) {
 	ipExtractor, err := newIPExtractor(cfg.TrustedProxies)
 	if err != nil {
 		return nil, fmt.Errorf("configure trusted proxies: %w", err)
@@ -47,14 +50,15 @@ func New(cfg config.Config, version string, pool *pgxpool.Pool, secretRepo domai
 	e.Server.IdleTimeout = 120 * time.Second
 
 	a := &App{
-		echo:       e,
-		addr:       fmt.Sprintf(":%s", cfg.Port),
-		pool:       pool,
-		secretRepo: secretRepo,
-		fileStore:  fileStore,
-		cfg:        cfg,
-		version:    version,
-		reg:        reg,
+		echo:           e,
+		addr:           fmt.Sprintf(":%s", cfg.Port),
+		pool:           pool,
+		secretRepo:     secretRepo,
+		fileStore:      fileStore,
+		transferEvents: transferEvents,
+		cfg:            cfg,
+		version:        version,
+		reg:            reg,
 	}
 
 	a.SecretMetrics = a.registerRoutes()

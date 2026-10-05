@@ -73,7 +73,7 @@ func (a *App) registerRoutes() *metrics.SecretMetrics {
 
 	// Short-code transfers. Guessing is bounded by one claim per transfer,
 	// not by these limits; they only keep the relay from being flooded.
-	th := NewTransferHandler(a.secretRepo)
+	th := NewTransferHandler(a.secretRepo, a.transferEvents)
 	transfers := e.Group("/api/v1/transfers")
 
 	transferCreateGroup := transfers.Group("")

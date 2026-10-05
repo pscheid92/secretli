@@ -150,12 +150,61 @@ type transferTestServer struct {
 	repo *transferMockRepo
 }
 
+// fakeTransferEvents stands in for the Postgres listener: a test signals a
+// transfer by hand, where a trigger would after a write.
+type fakeTransferEvents struct {
+	mu        sync.Mutex
+	listening bool
+	waiters   map[string][]chan struct{}
+}
+
+func (f *fakeTransferEvents) Subscribe(transferID string) (<-chan struct{}, func()) {
+	signal := make(chan struct{}, 1)
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.waiters == nil {
+		f.waiters = map[string][]chan struct{}{}
+	}
+	f.waiters[transferID] = append(f.waiters[transferID], signal)
+	return signal, func() {}
+}
+
+func (f *fakeTransferEvents) Listening() bool { return f.listening }
+
+func (f *fakeTransferEvents) signal(transferID string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, signal := range f.waiters[transferID] {
+		select {
+		case signal <- struct{}{}:
+		default:
+		}
+	}
+}
+
 func newTransferTestServer(t *testing.T) *transferTestServer {
 	t.Helper()
+	return newTransferTestServerWith(t, nil, 300*time.Millisecond)
+}
+
+// newTransferTestServerWith uses events and long-polls of pollWait. Polling
+// and re-checks take 10 ms, or 10 s when events listen: a poll that answers
+// quickly then was woken by a signal.
+func newTransferTestServerWith(t *testing.T, events *fakeTransferEvents, pollWait time.Duration) *transferTestServer {
+	t.Helper()
 	repo := newTransferMockRepo()
-	h := NewTransferHandler(repo)
-	h.pollWait = 300 * time.Millisecond
+	var h *TransferHandler
+	if events == nil {
+		h = NewTransferHandler(repo, nil)
+	} else {
+		h = NewTransferHandler(repo, events)
+	}
+	h.pollWait = pollWait
 	h.pollInterval = 10 * time.Millisecond
+	h.recheckInterval = 10 * time.Millisecond
+	if events != nil && events.listening {
+		h.recheckInterval = 10 * time.Second
+	}
 
 	e := echo.New()
 	e.HTTPErrorHandler = httpErrorHandler
@@ -413,6 +462,69 @@ func TestTransferLongPollReturnsOnceTheOtherSideWrites(t *testing.T) {
 	}
 }
 
+func TestTransferLongPollWakesOnANotification(t *testing.T) {
+	events := &fakeTransferEvents{listening: true}
+	s := newTransferTestServerWith(t, events, 20*time.Second)
+	sender := s.open(t)
+	receiver := s.claim(t, sender.Nameplate)
+
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		s.put(t, sender.TransferID, domain.TransferPhaseShare, receiver.ReceiverToken, []byte("woken"))
+		events.signal(sender.TransferID)
+	}()
+
+	start := time.Now()
+	if got := messageData(t, s.get(t, sender.TransferID, domain.TransferPhaseShare, sender.SenderToken)); string(got) != "woken" {
+		t.Errorf("read %q, want the share that was signalled", got)
+	}
+	if elapsed := time.Since(start); elapsed > 2*time.Second {
+		t.Errorf("answered after %v, want the notification to wake it", elapsed)
+	}
+}
+
+func TestTransferLongPollPollsWhileNotificationsAreDown(t *testing.T) {
+	events := &fakeTransferEvents{listening: false}
+	s := newTransferTestServerWith(t, events, 20*time.Second)
+	sender := s.open(t)
+	receiver := s.claim(t, sender.Nameplate)
+
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		// Written without a signal, as while the listener reconnects.
+		s.put(t, sender.TransferID, domain.TransferPhaseShare, receiver.ReceiverToken, []byte("polled"))
+	}()
+
+	start := time.Now()
+	if got := messageData(t, s.get(t, sender.TransferID, domain.TransferPhaseShare, sender.SenderToken)); string(got) != "polled" {
+		t.Errorf("read %q, want the share found by polling", got)
+	}
+	if elapsed := time.Since(start); elapsed > 2*time.Second {
+		t.Errorf("answered after %v, want polling to find it", elapsed)
+	}
+}
+
+func TestTransferLongPollEndsWhenTheTransferExpires(t *testing.T) {
+	events := &fakeTransferEvents{listening: true}
+	s := newTransferTestServerWith(t, events, 20*time.Second)
+	sender := s.open(t)
+	s.repo.mu.Lock()
+	transfer := s.repo.transfers[sender.TransferID]
+	transfer.ExpiresAt = time.Now().Add(100 * time.Millisecond)
+	s.repo.transfers[sender.TransferID] = transfer
+	s.repo.mu.Unlock()
+
+	start := time.Now()
+	rec := s.get(t, sender.TransferID, domain.TransferPhaseShare, sender.SenderToken)
+
+	if reason := goneReason(t, rec); reason != domain.TransferCloseExpired {
+		t.Errorf("reason = %q, want expired", reason)
+	}
+	if elapsed := time.Since(start); elapsed > 2*time.Second {
+		t.Errorf("answered after %v, want it right at expiry", elapsed)
+	}
+}
+
 func TestTransferLongPollTimesOutWithNoContent(t *testing.T) {
 	s := newTransferTestServer(t)
 	sender := s.open(t)
@@ -508,7 +620,7 @@ func TestTransferCreateReportsAFullRelay(t *testing.T) {
 
 func TestTransferRoutesAreRegistered(t *testing.T) {
 	repo := fullMockRepo{mockSecretRepo: newMockRepo(), uploadMockRepo: newUploadMockRepo(), transferMockRepo: newTransferMockRepo()}
-	app, err := New(config.Config{}, "test", nil, repo, newUploadMockStore(), prometheus.NewRegistry())
+	app, err := New(config.Config{}, "test", nil, repo, newUploadMockStore(), nil, prometheus.NewRegistry())
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}

@@ -53,8 +53,11 @@ func Run() error {
 		return fmt.Errorf("create S3 client: %w", err)
 	}
 
+	// Wakes transfer long-polls on this replica when another one writes.
+	transferEvents := postgres.NewTransferEvents(pool)
+
 	reg := metrics.NewRegistry()
-	app, err := httpserver.New(cfg, Version, pool, secretRepo, fileStore, reg)
+	app, err := httpserver.New(cfg, Version, pool, secretRepo, fileStore, transferEvents, reg)
 	if err != nil {
 		return fmt.Errorf("create HTTP server: %w", err)
 	}
@@ -66,7 +69,7 @@ func Run() error {
 		app.SecretMetrics,
 	)
 
-	return runGracefulShutdown(app, worker)
+	return runGracefulShutdown(app, worker, transferEvents)
 }
 
 func setupDatabase(cfg config.Config) (*pgxpool.Pool, error) {
@@ -115,7 +118,7 @@ func connectDatabase(ctx context.Context, databaseURL string) (*pgxpool.Pool, er
 	}
 }
 
-func runGracefulShutdown(app *httpserver.App, worker *cleanup.Worker) error {
+func runGracefulShutdown(app *httpserver.App, worker *cleanup.Worker, transferEvents *postgres.TransferEvents) error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
@@ -139,6 +142,11 @@ func runGracefulShutdown(app *httpserver.App, worker *cleanup.Worker) error {
 
 	g.Go(func() error {
 		worker.Run(ctx)
+		return nil
+	})
+
+	g.Go(func() error {
+		transferEvents.Run(ctx)
 		return nil
 	})
 
