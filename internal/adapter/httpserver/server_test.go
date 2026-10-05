@@ -18,11 +18,12 @@ import (
 	"github.com/pscheid92/secretli/internal/platform/config"
 )
 
-// fullMockRepo satisfies both domain.SecretRepo and domain.UploadSessionRepo
-// so the complete route table, including multipart uploads, is registered.
+// fullMockRepo satisfies domain.Repo so the complete route table, including
+// multipart uploads and transfers, is registered.
 type fullMockRepo struct {
 	*mockSecretRepo
 	*uploadMockRepo
+	*transferMockRepo
 }
 
 func (fullMockRepo) AbortExpiredUploadSessions(
@@ -40,7 +41,7 @@ func (fullMockRepo) DeleteFinishedUploadSessions(_ context.Context, _ time.Time)
 
 func newTestApp(t *testing.T, cfg config.Config) *App {
 	t.Helper()
-	repo := fullMockRepo{mockSecretRepo: newMockRepo(), uploadMockRepo: newUploadMockRepo()}
+	repo := fullMockRepo{mockSecretRepo: newMockRepo(), uploadMockRepo: newUploadMockRepo(), transferMockRepo: newTransferMockRepo()}
 	app, err := New(cfg, "test", nil, repo, newUploadMockStore(), prometheus.NewRegistry())
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -67,7 +68,7 @@ func createSessionBody(t *testing.T, label string) []byte {
 }
 
 func TestApp_RejectsInvalidTrustedProxies(t *testing.T) {
-	repo := fullMockRepo{mockSecretRepo: newMockRepo(), uploadMockRepo: newUploadMockRepo()}
+	repo := fullMockRepo{mockSecretRepo: newMockRepo(), uploadMockRepo: newUploadMockRepo(), transferMockRepo: newTransferMockRepo()}
 	if _, err := New(config.Config{TrustedProxies: "nope"}, "test", nil, repo, newUploadMockStore(), prometheus.NewRegistry()); err == nil {
 		t.Fatal("expected error for invalid TRUSTED_PROXIES")
 	}

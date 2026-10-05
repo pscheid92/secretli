@@ -30,6 +30,27 @@ type Secret struct {
 	StorageKey        string
 }
 
+type Transfer struct {
+	TransferID        string
+	Nameplate         int32
+	SenderTokenHash   string
+	ReceiverTokenHash pgtype.Text
+	State             string
+	CloseReason       pgtype.Text
+	CreatedAt         pgtype.Timestamptz
+	ExpiresAt         pgtype.Timestamptz
+	ClaimedAt         pgtype.Timestamptz
+	ClosedAt          pgtype.Timestamptz
+}
+
+type TransferMessage struct {
+	TransferID string
+	Side       string
+	Phase      string
+	Data       []byte
+	CreatedAt  pgtype.Timestamptz
+}
+
 type UploadPart struct {
 	SessionID  string
 	PartNumber int32

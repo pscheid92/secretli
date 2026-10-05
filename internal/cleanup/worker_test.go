@@ -34,6 +34,7 @@ type mockSecretRepo struct {
 	abortCalls       int
 
 	finishedBefore time.Time
+	transfersEnded time.Time
 }
 
 func (m *mockSecretRepo) DeleteExpired(_ context.Context, _ time.Time, limit int, beforeDelete func(string) error) (domain.CleanupBatch, error) {
@@ -74,6 +75,11 @@ func (m *mockSecretRepo) AbortExpiredUploadSessions(_ context.Context, _ time.Ti
 
 func (m *mockSecretRepo) DeleteFinishedUploadSessions(_ context.Context, finishedBefore time.Time) (int64, error) {
 	m.finishedBefore = finishedBefore
+	return 0, nil
+}
+
+func (m *mockSecretRepo) DeleteEndedTransfers(_ context.Context, endedBefore time.Time) (int64, error) {
+	m.transfersEnded = endedBefore
 	return 0, nil
 }
 
@@ -147,6 +153,19 @@ func TestRunCycle_PurgesFinishedUploadSessions(t *testing.T) {
 
 	if repo.finishedBefore.Before(before.Add(-finishedUploadRetention)) || repo.finishedBefore.After(after.Add(-finishedUploadRetention)) {
 		t.Errorf("finished sessions purged before %v, want %v before the cycle", repo.finishedBefore, finishedUploadRetention)
+	}
+}
+
+func TestRunCycle_DeletesEndedTransfersAfterRetention(t *testing.T) {
+	repo := &mockSecretRepo{}
+	w := NewWorker(time.Minute, repo, &mockFileStore{}, testMetrics())
+
+	before := time.Now()
+	w.runCycle(context.Background())
+	after := time.Now()
+
+	if repo.transfersEnded.Before(before.Add(-endedTransferRetention)) || repo.transfersEnded.After(after.Add(-endedTransferRetention)) {
+		t.Errorf("transfers deleted if ended before %v, want %v before the cycle", repo.transfersEnded, endedTransferRetention)
 	}
 }
 
