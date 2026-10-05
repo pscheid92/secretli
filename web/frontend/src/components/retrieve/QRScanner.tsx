@@ -151,19 +151,16 @@ export default function QRScanner({ onScan, onCancel }: QRScannerProps) {
 
   let message: string;
   if (failure) message = FAILURE_MESSAGES[failure];
-  else if (done) message = "Opening the share…";
+  else if (done) message = "Opening the secret…";
   else if (!running) message = "Scanning paused while this tab was in the background.";
   else if (!ready) message = "Starting the camera…";
   else if (hint) message = hint;
   else message = "Point the camera at the QR code on the other screen.";
 
   return (
-    <section
-      aria-label="QR code scanner"
-      className="space-y-3 rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-500/50 dark:bg-zinc-900"
-    >
+    <div className="space-y-6">
       {failure === null && (
-        <div className="relative aspect-video overflow-hidden rounded-md bg-zinc-950">
+        <div className="relative aspect-video overflow-hidden rounded-[20px] bg-[#0a0a0b] ring-1 ring-line">
           <video
             ref={videoRef}
             muted
@@ -172,27 +169,31 @@ export default function QRScanner({ onScan, onCancel }: QRScannerProps) {
             className={`h-full w-full object-cover ${mirrored ? "-scale-x-100" : ""}`}
           />
           {running && !ready && (
-            <div className="absolute inset-0 flex items-center justify-center text-zinc-400">
+            <div className="absolute inset-0 flex items-center justify-center text-[#8a8a93]">
               <Spinner size="lg" />
             </div>
           )}
         </div>
       )}
-      <div role="status" className="space-y-1 text-sm">
-        <p className="text-zinc-700 dark:text-zinc-100">{message}</p>
+      <div role="status" className="space-y-1.5">
+        <p className="text-body text-muted">{message}</p>
         {slow && running && !done && (
-          <p className="text-xs text-zinc-500 dark:text-zinc-400">
+          <p className="text-[13px] text-faint">
             Having trouble? Turn up the other screen's brightness, hold it 30 to 50 cm from the
             camera, and tilt it to avoid glare.
           </p>
         )}
       </div>
-      <div className="flex justify-end gap-3">
-        {!running && !done && <Button onClick={restart}>{failure ? "Try again" : "Resume"}</Button>}
-        <Button variant="secondary" onClick={onCancel}>
+      <div className="flex gap-1">
+        {!running && !done && (
+          <Button size="lg" onClick={restart}>
+            {failure ? "Try again" : "Resume"}
+          </Button>
+        )}
+        <Button variant="quiet" size="lg" onClick={onCancel}>
           Cancel
         </Button>
       </div>
-    </section>
+    </div>
   );
 }

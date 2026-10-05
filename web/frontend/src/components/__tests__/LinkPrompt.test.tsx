@@ -7,8 +7,8 @@ vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
 const SECRET = "AbCdEfGhIjKlMnOpQrStUvWxYz0123456789-_AbCdE";
 
 function submitLink(text: string) {
-  fireEvent.change(screen.getByRole("textbox"), { target: { value: text } });
-  fireEvent.click(screen.getByRole("button", { name: "Open Share" }));
+  fireEvent.change(screen.getByLabelText("Link"), { target: { value: text } });
+  fireEvent.click(screen.getByRole("button", { name: "Open" }));
 }
 
 describe("LinkPrompt", () => {
@@ -32,7 +32,7 @@ describe("LinkPrompt", () => {
   it("opens a pasted share link right away", () => {
     render(<LinkPrompt />);
 
-    fireEvent.paste(screen.getByRole("textbox"), {
+    fireEvent.paste(screen.getByLabelText("Link"), {
       clipboardData: { getData: () => `${window.location.origin}/s#${SECRET}` },
     });
 
@@ -42,7 +42,7 @@ describe("LinkPrompt", () => {
   it("leaves other pasted text in the field", () => {
     render(<LinkPrompt />);
 
-    fireEvent.paste(screen.getByRole("textbox"), {
+    fireEvent.paste(screen.getByLabelText("Link"), {
       clipboardData: { getData: () => "https://other.example/login" },
     });
 
@@ -53,8 +53,8 @@ describe("LinkPrompt", () => {
   it("starts with code entry ready when opened at /c", () => {
     render(<LinkPrompt initialMode="code" />);
 
-    expect(screen.getByRole("region", { name: "Enter a code" })).toBeTruthy();
-    expect(document.activeElement).toBe(screen.getByLabelText(/Type the code/));
+    expect(screen.getByRole("heading", { name: "Enter the code" })).toBeTruthy();
+    expect(document.activeElement).toBe(screen.getByLabelText("Number"));
   });
 
   it("refuses a share link for another host and names that host", () => {
@@ -77,13 +77,17 @@ describe("LinkPrompt", () => {
     expect(window.location.hash).toBe("");
   });
 
-  it("offers entering a transfer code, also without a camera", () => {
+  it("offers entering a transfer code, also without a camera, and a way back", () => {
     render(<LinkPrompt />);
 
-    fireEvent.click(screen.getByRole("button", { name: "Enter a code" }));
+    fireEvent.click(screen.getByRole("button", { name: "Enter a code from another device" }));
 
-    expect(screen.getByRole("region", { name: "Enter a code" })).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "Enter a code" })).toBeNull();
+    expect(screen.getByRole("heading", { name: "Enter the code" })).toBeTruthy();
+    expect(screen.queryByLabelText("Link")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+
+    expect(screen.getByRole("heading", { name: "Open a secret" })).toBeTruthy();
   });
 
   describe("QR scanning", () => {
@@ -95,7 +99,7 @@ describe("LinkPrompt", () => {
     it("is not offered without camera access", () => {
       render(<LinkPrompt />);
 
-      expect(screen.queryByRole("button", { name: "Scan QR code" })).toBeNull();
+      expect(screen.queryByRole("button", { name: "Scan a QR code" })).toBeNull();
     });
 
     it("opens the scanner when camera access is available", () => {
@@ -107,9 +111,9 @@ describe("LinkPrompt", () => {
       });
       render(<LinkPrompt />);
 
-      fireEvent.click(screen.getByRole("button", { name: "Scan QR code" }));
+      fireEvent.click(screen.getByRole("button", { name: "Scan a QR code" }));
 
-      expect(screen.getByRole("region", { name: "QR code scanner" })).toBeTruthy();
+      expect(screen.getByRole("heading", { name: "Scan the QR code" })).toBeTruthy();
       expect(screen.getByText("Starting the camera…")).toBeTruthy();
     });
   });

@@ -33,11 +33,11 @@ test.describe("Accessibility", () => {
     await page.goto("/s");
     await expectAccessible(page);
 
-    await page.getByRole("button", { name: "Enter a code" }).click();
+    await page.getByRole("button", { name: "Enter a code from another device" }).click();
     await expectAccessible(page);
 
     await page.goto("/c");
-    await expect(page.getByLabel(/Type the code/)).toBeFocused();
+    await expect(page.getByLabel("Number")).toBeFocused();
     await expectAccessible(page);
 
     await page.goto("/no-such-page");

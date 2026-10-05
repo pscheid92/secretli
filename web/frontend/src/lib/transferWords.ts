@@ -1335,7 +1335,7 @@ export function formatCode(nameplate: number, words: readonly [string, string]):
 }
 
 /** A full word, or the word a typed prefix of at least three letters completes to. */
-function resolveWord(typed: string): string | null {
+export function completeWord(typed: string): string | null {
   if (WORD_SET.has(typed)) return typed;
   if (typed.length < 3) return null;
   const word = WORD_BY_PREFIX.get(typed.slice(0, 3));
@@ -1359,7 +1359,7 @@ export function parseCode(input: string): ParsedCode {
 
   const words: string[] = [];
   for (const typed of parts.slice(1)) {
-    const word = resolveWord(typed);
+    const word = completeWord(typed);
     if (!word) return { ok: false, error: "unknown-word", word: typed };
     words.push(word);
   }
