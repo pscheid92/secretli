@@ -107,14 +107,27 @@ func requestLogger() echo.MiddlewareFunc {
 	})
 }
 
+// permissionsPolicy lets the QR scanner use the camera on this origin only and
+// turns off the other powerful features Secretli never needs.
+const permissionsPolicy = "camera=(self), microphone=(), geolocation=()"
+
 func securityHeaders() echo.MiddlewareFunc {
-	return middleware.SecureWithConfig(middleware.SecureConfig{
+	secure := middleware.SecureWithConfig(middleware.SecureConfig{
 		XSSProtection:         "",
 		ContentTypeNosniff:    "nosniff",
 		XFrameOptions:         "DENY",
 		ContentSecurityPolicy: "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data:",
 		ReferrerPolicy:        "no-referrer",
 	})
+
+	// Echo's SecureConfig has no Permissions-Policy field.
+	return func(next echo.HandlerFunc) echo.HandlerFunc {
+		handler := secure(next)
+		return func(c echo.Context) error {
+			c.Response().Header().Set("Permissions-Policy", permissionsPolicy)
+			return handler(c)
+		}
+	}
 }
 
 func corsMiddleware(origins []string) echo.MiddlewareFunc {

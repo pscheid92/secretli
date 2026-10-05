@@ -317,6 +317,20 @@ func TestSecurityHeadersKeepEverythingFirstParty(t *testing.T) {
 	}
 }
 
+func TestSecurityHeadersLimitCameraToThisOrigin(t *testing.T) {
+	e := echo.New()
+	e.Use(securityHeaders())
+	e.GET("/", func(c echo.Context) error { return c.NoContent(http.StatusOK) })
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+
+	// The QR scanner needs the camera; nothing else on the page or in a frame does.
+	want := "camera=(self), microphone=(), geolocation=()"
+	if got := rec.Header().Get("Permissions-Policy"); got != want {
+		t.Errorf("Permissions-Policy = %q, want %q", got, want)
+	}
+}
+
 func TestCORSMiddlewareAllowsRangeAPIHeaders(t *testing.T) {
 	e := echo.New()
 	handler := corsMiddleware([]string{"https://app.example"})(func(c echo.Context) error {
