@@ -18,6 +18,9 @@ const (
 	// session's tombstone is kept, so a client retrying complete or abort
 	// still gets a consistent answer.
 	finishedUploadRetention = time.Hour
+	// endedTransferRetention keeps an ended transfer briefly, so the other
+	// side's next poll learns why it ended instead of finding nothing.
+	endedTransferRetention = time.Minute
 	// batchSize bounds how many rows one cleanup transaction locks while it
 	// makes storage calls. Each batch commits, so a large backlog (after an
 	// outage, say) is worked off across batches and cycles instead of in one
@@ -31,6 +34,7 @@ type Repo interface {
 	DeleteExpiredRetrievalSessions(ctx context.Context, now time.Time) (int64, error)
 	AbortExpiredUploadSessions(ctx context.Context, now time.Time, limit int, beforeAbort func(session *domain.UploadSession) error) (domain.CleanupBatch, error)
 	DeleteFinishedUploadSessions(ctx context.Context, finishedBefore time.Time) (int64, error)
+	DeleteEndedTransfers(ctx context.Context, endedBefore time.Time) (int64, error)
 }
 
 type Worker struct {
@@ -102,6 +106,13 @@ func (w *Worker) runCycle(ctx context.Context) {
 		w.metrics.CleanupErrors.Inc()
 	} else if count > 0 {
 		slog.InfoContext(ctx, "cleanup: deleted finished upload sessions", "count", count)
+	}
+
+	if count, err := w.secretRepo.DeleteEndedTransfers(ctx, now.Add(-endedTransferRetention)); err != nil {
+		slog.ErrorContext(ctx, "cleanup: ended transfer cleanup failed", "error", err)
+		w.metrics.CleanupErrors.Inc()
+	} else if count > 0 {
+		slog.InfoContext(ctx, "cleanup: deleted ended transfers", "count", count)
 	}
 
 	beforeDelete := func(storageKey string) error {

@@ -9,11 +9,13 @@ import (
 type ErrorType string
 
 const (
-	BadRequest ErrorType = "bad_request"
-	NotFound   ErrorType = "not_found"
-	Conflict   ErrorType = "conflict"
-	Forbidden  ErrorType = "forbidden"
-	Internal   ErrorType = "internal"
+	BadRequest  ErrorType = "bad_request"
+	NotFound    ErrorType = "not_found"
+	Conflict    ErrorType = "conflict"
+	Forbidden   ErrorType = "forbidden"
+	Gone        ErrorType = "gone"
+	Unavailable ErrorType = "unavailable"
+	Internal    ErrorType = "internal"
 )
 
 type Error struct {
@@ -44,6 +46,10 @@ func (e *Error) HTTPStatus() int {
 		return http.StatusConflict
 	case Forbidden:
 		return http.StatusForbidden
+	case Gone:
+		return http.StatusGone
+	case Unavailable:
+		return http.StatusServiceUnavailable
 	default:
 		return http.StatusInternalServerError
 	}
@@ -72,6 +78,16 @@ func ForbiddenError(msg string) *Error {
 
 func ConflictError(msg string) *Error {
 	return &Error{Type: Conflict, Message: msg}
+}
+
+// GoneError reports a resource that existed but has ended; context details
+// tell the client why.
+func GoneError(msg string, context map[string]any) *Error {
+	return &Error{Type: Gone, Message: msg, Context: context}
+}
+
+func UnavailableError(msg string) *Error {
+	return &Error{Type: Unavailable, Message: msg}
 }
 
 func InternalError(msg string, cause error) *Error {
