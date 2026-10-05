@@ -14,7 +14,7 @@ import TransferStatus, {
 import { ApiError } from "../lib/api";
 import { KeySet } from "../lib/encryption";
 import { formatExpiration } from "../lib/expiration";
-import { formatSize } from "../lib/format";
+import { formatProtection, formatSize } from "../lib/format";
 import { UploadCancelledError, uploadMultipartBundle } from "../lib/multipartBundleUpload";
 import {
   fitsBundleManifestLimit,
@@ -339,7 +339,7 @@ export default function FilePage() {
               <SummaryMetric label="Expires" value={formatExpiration(expiration)} />
               <SummaryMetric
                 label="Protection"
-                value={password ? "Password" : burnAfterRead ? "Burn" : "Standard"}
+                value={formatProtection(password.length > 0, burnAfterRead)}
               />
             </div>
           </section>

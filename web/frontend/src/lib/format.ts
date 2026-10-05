@@ -4,6 +4,14 @@ export function formatSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+/** How a share is protected, as its summary shows it. */
+export function formatProtection(password: boolean, burnAfterRead: boolean): string {
+  if (password && burnAfterRead) return "Password, burn after reading";
+  if (password) return "Password";
+  if (burnAfterRead) return "Burn after reading";
+  return "Standard";
+}
+
 export function formatRelativeTime(iso: string): string {
   const now = Date.now();
   const target = new Date(iso).getTime();
