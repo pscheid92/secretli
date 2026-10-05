@@ -33,6 +33,13 @@ import {
 import { saveFilesSequentially } from "../lib/download";
 import { KeySet, type SecretMeta } from "../lib/encryption";
 import { formatSize } from "../lib/format";
+import { isShareFragment } from "../lib/shareLink";
+
+/** The server has no share for this link; it cannot tell why. */
+const SHARE_GONE =
+  "This share has expired or was deleted. A one-time share also stops working once it has been opened.";
+/** The fragment is not a share link, typically because it was cut off when copied. */
+const DAMAGED_LINK = "This link is incomplete or damaged. Check that you copied all of it.";
 
 /**
  * Everything derived from the URL fragment. The base key set is derived once
@@ -115,6 +122,10 @@ export default function RetrievePage() {
       return;
     }
     stripFragmentFromLocation();
+    if (!isShareFragment(hash)) {
+      setState({ stage: "error", message: DAMAGED_LINK });
+      return;
+    }
 
     const delimiterIndex = hash.indexOf("!");
     const shareSecret = delimiterIndex >= 0 ? hash.slice(0, delimiterIndex) : hash;
@@ -134,9 +145,9 @@ export default function RetrievePage() {
     } catch (err) {
       if (err instanceof ApiError) {
         if (err.status === 404) {
-          setState({ stage: "error", message: "This share has expired or does not exist." });
+          setState({ stage: "error", message: SHARE_GONE });
         } else if (err.status === 403) {
-          setState({ stage: "error", message: "Invalid metadata token." });
+          setState({ stage: "error", message: DAMAGED_LINK });
         } else {
           setState({ stage: "error", message: err.message });
         }
@@ -309,7 +320,7 @@ export default function RetrievePage() {
       return;
     }
     if (err.status === 404) {
-      setState({ stage: "error", message: "This share has expired or does not exist." });
+      setState({ stage: "error", message: SHARE_GONE });
     } else if (err.status === 429) {
       toast.error("Too many attempts. Please wait a minute and try again.");
     } else if (err.status === 0) {

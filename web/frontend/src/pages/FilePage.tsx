@@ -287,7 +287,7 @@ export default function FilePage() {
                       setValue("burnAfterRead", !burnAfterRead, { shouldValidate: true })
                     }
                     label="Burn after reading"
-                    description="Consumed when the recipient starts download"
+                    description="Can be opened only once"
                   />
                 </div>
                 <div className="px-3 py-3">

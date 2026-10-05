@@ -145,7 +145,7 @@ export default function SecretForm({ onSubmit, loading, stage }: SecretFormProps
                     setValue("burnAfterRead", !burnAfterRead, { shouldValidate: true })
                   }
                   label="Burn after reading"
-                  description="Consumed when the recipient starts reveal"
+                  description="Can be opened only once"
                 />
               </div>
               <div className="px-3 py-3">

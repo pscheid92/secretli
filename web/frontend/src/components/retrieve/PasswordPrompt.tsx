@@ -67,7 +67,8 @@ export default function PasswordPrompt({
         )}
         {burnAfterRead && (
           <BurnWarning>
-            Submitting the password starts retrieval and permanently consumes this share.
+            This share can be opened only once. A wrong password doesn't use it up, but the right
+            one does: after that the link stops working.
           </BurnWarning>
         )}
         <button
