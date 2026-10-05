@@ -1,12 +1,20 @@
 import { ApiError } from "../api";
-import { CodeMismatchError, TransferEndedError } from "../transfer";
+import { CodeMismatchError, receiveLink, sendLink, TransferEndedError } from "../transfer";
 import {
   CodeFormatError,
   describeReceiveError,
   describeSendError,
   httpTransferRelay,
   receiveWithCode,
+  startSending,
 } from "../transferSession";
+
+// The protocol runs are stubbed; these tests are about the relay around them.
+vi.mock("../transfer", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../transfer")>()),
+  sendLink: vi.fn(),
+  receiveLink: vi.fn(),
+}));
 
 const TRANSFER_ID = "t".repeat(43);
 const TOKEN = "k".repeat(43);
@@ -117,5 +125,120 @@ describe("error messages", () => {
     [new ApiError(429, "slow down"), "Too many attempts. Wait a minute and try again."],
   ])("tells the receiver about %s", (err, message) => {
     expect(describeReceiveError(err)).toBe(message);
+  });
+});
+
+describe("closing a transfer", () => {
+  const LINK = "https://secretli.example/s#key";
+
+  /** A fake relay that opens and claims transfers and records every close. */
+  function fakeRelay() {
+    const closes: string[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url = String(input);
+      if (init?.method === "DELETE") {
+        closes.push(
+          `${new URL(url, "http://x").searchParams.get("reason")}${init.keepalive ? " (keepalive)" : ""}`,
+        );
+        return new Response(null, { status: 204 });
+      }
+      if (url.endsWith("/claim")) {
+        return json(200, {
+          transfer_id: TRANSFER_ID,
+          receiver_token: TOKEN,
+          expires_at: "2026-10-05T10:00:00Z",
+        });
+      }
+      return json(201, {
+        nameplate: 3,
+        transfer_id: TRANSFER_ID,
+        sender_token: TOKEN,
+        expires_at: "2026-10-05T10:00:00Z",
+      });
+    });
+    return closes;
+  }
+
+  afterEach(() => vi.restoreAllMocks());
+
+  it("does not cancel a transfer the sender already handed over", async () => {
+    const closes = fakeRelay();
+    vi.mocked(sendLink).mockResolvedValue();
+
+    const transfer = await startSending(LINK);
+    await transfer.done;
+    transfer.cancel();
+
+    expect(closes).toEqual([]);
+  });
+
+  it("does not cancel after a mismatch, which the protocol closed itself", async () => {
+    const closes = fakeRelay();
+    vi.mocked(sendLink).mockRejectedValue(new CodeMismatchError());
+
+    const transfer = await startSending(LINK);
+    await expect(transfer.done).rejects.toBeInstanceOf(CodeMismatchError);
+    transfer.cancel();
+
+    expect(closes).toEqual([]);
+  });
+
+  it("cancels a transfer still waiting for the other side, also while the page unloads", async () => {
+    const closes = fakeRelay();
+    vi.mocked(sendLink).mockReturnValue(new Promise(() => {}));
+
+    const transfer = await startSending(LINK);
+    transfer.cancel();
+    transfer.cancel();
+
+    expect(closes).toEqual(["cancelled (keepalive)"]);
+  });
+
+  it("does not cancel after the receiver got the link", async () => {
+    const closes = fakeRelay();
+    vi.mocked(receiveLink).mockResolvedValue(LINK);
+    const controller = new AbortController();
+
+    await expect(receiveWithCode("7-acid-rocket", controller.signal)).resolves.toBe(LINK);
+    controller.abort();
+
+    expect(closes).toEqual([]);
+  });
+
+  it("cancels when the receiver gives up while waiting", async () => {
+    const closes = fakeRelay();
+    let started = () => {};
+    const running = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    vi.mocked(receiveLink).mockImplementation(() => {
+      started();
+      return new Promise(() => {});
+    });
+    const controller = new AbortController();
+
+    void receiveWithCode("7-acid-rocket", controller.signal);
+    await running;
+    controller.abort();
+
+    expect(closes).toEqual(["cancelled (keepalive)"]);
+  });
+
+  it("releases the sender when receiving fails unexpectedly", async () => {
+    const closes = fakeRelay();
+    vi.mocked(receiveLink).mockRejectedValue(new Error("network"));
+
+    await expect(receiveWithCode("7-acid-rocket")).rejects.toThrow("network");
+
+    expect(closes).toEqual(["cancelled (keepalive)"]);
+  });
+
+  it("does not cancel a transfer the sender already ended", async () => {
+    const closes = fakeRelay();
+    vi.mocked(receiveLink).mockRejectedValue(new CodeMismatchError());
+
+    await expect(receiveWithCode("7-acid-rocket")).rejects.toBeInstanceOf(CodeMismatchError);
+
+    expect(closes).toEqual([]);
   });
 });
