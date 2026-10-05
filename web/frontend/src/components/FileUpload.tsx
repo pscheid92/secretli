@@ -192,7 +192,7 @@ export default function FileUpload({ onSelect }: FileUploadProps) {
               <div
                 // biome-ignore lint/suspicious/noArrayIndexKey: rows are stateless and the index disambiguates files sharing name and size
                 key={`${f.name}-${f.size}-${i}`}
-                className="group grid grid-cols-[1fr_auto_1.5rem] items-center gap-3 px-3 py-2 text-xs transition-colors duration-100 hover:bg-zinc-50 dark:hover:bg-zinc-800/50"
+                className="grid grid-cols-[1fr_auto_1.5rem] items-center gap-3 px-3 py-2 text-xs transition-colors duration-100 hover:bg-zinc-50 dark:hover:bg-zinc-800/50"
               >
                 <span className="flex min-w-0 items-center gap-2">
                   <FileIcon name={f.name} />
@@ -212,7 +212,7 @@ export default function FileUpload({ onSelect }: FileUploadProps) {
                     e.stopPropagation();
                     removeFile(i);
                   }}
-                  className="rounded p-0.5 text-zinc-400 opacity-0 transition-colors duration-150 hover:bg-red-400/10 hover:text-red-400 focus:opacity-100 group-hover:opacity-100"
+                  className="flex h-6 w-6 items-center justify-center rounded text-zinc-500 transition-colors duration-150 hover:bg-red-400/10 hover:text-red-500 dark:text-zinc-400 dark:hover:text-red-400"
                   aria-label={`Remove ${f.name}`}
                 >
                   <svg
