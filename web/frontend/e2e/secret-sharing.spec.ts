@@ -88,6 +88,7 @@ test.describe("Text secret sharing", () => {
     await expect(page.locator("h1")).toHaveText("Decrypted Text", { timeout: 10000 });
 
     await page.getByRole("button", { name: "Delete share" }).click();
+    await page.getByRole("button", { name: "Delete permanently" }).click();
     await expect(page.getByRole("main").getByText("Share deleted")).toBeVisible({
       timeout: 10000,
     });
