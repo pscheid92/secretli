@@ -86,25 +86,29 @@ func requestLogger() echo.MiddlewareFunc {
 		LogError:    true,
 		HandleError: true,
 		LogValuesFunc: func(c echo.Context, v middleware.RequestLoggerValues) error {
-			if v.Error != nil {
-				slog.ErrorContext(c.Request().Context(), "request",
-					"method", v.Method,
-					"path", v.URIPath,
-					"status", v.Status,
-					"duration_ms", v.Latency.Milliseconds(),
-					"error", v.Error,
-				)
-			} else {
-				slog.InfoContext(c.Request().Context(), "request",
-					"method", v.Method,
-					"path", v.URIPath,
-					"status", v.Status,
-					"duration_ms", v.Latency.Milliseconds(),
-				)
+			attrs := []any{
+				"method", v.Method,
+				"path", v.URIPath,
+				"status", v.Status,
+				"duration_ms", v.Latency.Milliseconds(),
 			}
+			if v.Error != nil {
+				attrs = append(attrs, "error", v.Error)
+			}
+			slog.Log(c.Request().Context(), requestLogLevel(v.Status), "request", attrs...)
 			return nil
 		},
 	})
+}
+
+// requestLogLevel keeps ERROR for server faults. A 4xx is a client mistake or
+// an expected outcome, such as a transfer the other side ended or a claim
+// already taken, so it is logged at INFO together with its error.
+func requestLogLevel(status int) slog.Level {
+	if status >= http.StatusInternalServerError {
+		return slog.LevelError
+	}
+	return slog.LevelInfo
 }
 
 // permissionsPolicy lets the QR scanner use the camera on this origin only and

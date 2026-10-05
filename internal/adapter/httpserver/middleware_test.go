@@ -1,9 +1,11 @@
 package httpserver
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"io/fs"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -458,4 +460,57 @@ func TestSpaHandler(t *testing.T) {
 			t.Error("expected fallback to index.html with non-empty body")
 		}
 	})
+}
+
+func TestRequestLoggerKeepsErrorLevelForServerFaults(t *testing.T) {
+	var logs bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, nil)))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+
+	e := echo.New()
+	e.HTTPErrorHandler = httpErrorHandler
+	e.Use(requestLogger())
+	e.GET("/ok", func(c echo.Context) error { return c.NoContent(http.StatusOK) })
+	e.GET("/gone", func(echo.Context) error {
+		return apperrors.GoneError("transfer has ended", map[string]any{"reason": "cancelled"})
+	})
+	e.GET("/conflict", func(echo.Context) error { return apperrors.ConflictError("transfer already claimed") })
+	e.GET("/broken", func(echo.Context) error { return apperrors.InternalError("failed", errors.New("db down")) })
+
+	want := map[string]struct {
+		level    string
+		hasError bool
+	}{
+		"/ok":       {"INFO", false},
+		"/gone":     {"INFO", true},
+		"/conflict": {"INFO", true},
+		"/broken":   {"ERROR", true},
+	}
+	for path := range want {
+		e.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, path, nil))
+	}
+
+	for _, line := range strings.Split(strings.TrimSpace(logs.String()), "\n") {
+		var entry map[string]any
+		if err := json.Unmarshal([]byte(line), &entry); err != nil {
+			t.Fatalf("decode log line %q: %v", line, err)
+		}
+		if entry["msg"] != "request" {
+			continue
+		}
+		path, _ := entry["path"].(string)
+		expected, ok := want[path]
+		if !ok {
+			continue
+		}
+		_, hasError := entry["error"]
+		if entry["level"] != expected.level || hasError != expected.hasError {
+			t.Errorf("%s: level %v, error logged %v; want %s, %v", path, entry["level"], hasError, expected.level, expected.hasError)
+		}
+		delete(want, path)
+	}
+	if len(want) > 0 {
+		t.Errorf("no request log for %v", want)
+	}
 }
