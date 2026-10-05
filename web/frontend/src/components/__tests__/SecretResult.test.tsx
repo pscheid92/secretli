@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import SecretResult from "../SecretResult";
 
 const SHARE_URL = "https://secretli.example/s#AbCdEfGhIjKlMnOpQrStUvWxYz0123456789-_AbCdE";
@@ -12,37 +12,32 @@ function renderResult() {
       deletionToken="ZyXwVuTsRqPoNmLkJiHgFeDcBa9876543210_-ZyXwV"
     />,
   );
-  return screen.getByRole("button", { name: "Show large QR code" });
 }
 
-describe("SecretResult large QR code", () => {
-  it("shows the recipient link as a large SVG QR code", async () => {
-    fireEvent.click(renderResult());
+describe("SecretResult QR code", () => {
+  beforeEach(() => {
+    // jsdom does not implement scrolling.
+    Element.prototype.scrollIntoView = vi.fn();
+  });
 
-    const dialog = screen.getByRole("dialog", { name: "Large QR code" });
-    const image = await within(dialog).findByAltText("QR code for share link");
+  it("shows the recipient link as an SVG QR code across the box and scrolls to it", async () => {
+    renderResult();
+
+    fireEvent.click(screen.getByRole("button", { name: "Show QR code" }));
+
+    const image = await screen.findByAltText("QR code for share link");
     expect(image.getAttribute("src")).toMatch(/^data:image\/svg\+xml;/);
-    expect(document.activeElement).toBe(within(dialog).getByRole("button", { name: "Close" }));
+    expect(screen.getByText("Anyone who can see this code can open the share.")).toBeTruthy();
+    expect(Element.prototype.scrollIntoView).toHaveBeenCalledWith({ block: "nearest" });
   });
 
-  it("closes on Escape and returns focus to the trigger", () => {
-    const trigger = renderResult();
-    fireEvent.click(trigger);
+  it("hides the code again", async () => {
+    renderResult();
+    fireEvent.click(screen.getByRole("button", { name: "Show QR code" }));
+    await screen.findByAltText("QR code for share link");
 
-    fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
+    fireEvent.click(screen.getByRole("button", { name: "Hide QR code" }));
 
-    expect(screen.queryByRole("dialog")).toBeNull();
-    expect(document.activeElement).toBe(trigger);
-  });
-
-  it("closes on a click outside the code but not on the code's caption", () => {
-    fireEvent.click(renderResult());
-    const dialog = screen.getByRole("dialog");
-
-    fireEvent.click(within(dialog).getByText(/Anyone who can see it/));
-    expect(screen.queryByRole("dialog")).not.toBeNull();
-
-    fireEvent.click(dialog);
-    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.queryByAltText("QR code for share link")).toBeNull();
   });
 });
