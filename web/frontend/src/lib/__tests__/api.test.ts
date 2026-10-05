@@ -1,11 +1,16 @@
 import {
   ApiError,
   abortUploadSession,
+  claimTransfer,
+  closeTransfer,
   completeUploadSession,
   deleteSecret,
   getSecretMetadata,
   isTransientStatus,
   MAX_TRANSIENT_ATTEMPTS,
+  openTransfer,
+  pollTransferMessage,
+  putTransferMessage,
   retrieveSecretRange,
   retryDelayMs,
   type StartUploadSessionParams,
@@ -362,6 +367,29 @@ describe("deleteSecret", () => {
     expectHeader(call[1], "X-Metadata-Token", "meta-tok");
     expectHeader(call[1], "X-Deletion-Token", "del-tok");
     expectHeader(call[1], "X-Request-ID");
+  });
+});
+
+describe("short-code transfers", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("skips the HTTP cache on every relay request", async () => {
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(async () => new Response("{}", { status: 200 }));
+
+    await openTransfer();
+    await claimTransfer(7);
+    await putTransferMessage("transfer-id", "token", "share", "data");
+    await pollTransferMessage("transfer-id", "token", "share");
+    await closeTransfer("transfer-id", "token", "done");
+
+    expect(fetchSpy).toHaveBeenCalledTimes(5);
+    for (const [, init] of fetchSpy.mock.calls) {
+      expect(init?.cache).toBe("no-store");
+    }
   });
 });
 

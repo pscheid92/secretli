@@ -4,6 +4,11 @@
  */
 const SHARE_FRAGMENT = /^[A-Za-z0-9_-]{43}(![A-Za-z0-9_-]{43})?$/;
 
+/** Whether a URL fragment (without `#`) has the shape of a share link's. */
+export function isShareFragment(fragment: string): boolean {
+  return SHARE_FRAGMENT.test(fragment);
+}
+
 export type ShareLinkResult =
   | { readonly kind: "share"; readonly fragment: string }
   | { readonly kind: "other-host"; readonly host: string }
@@ -27,7 +32,7 @@ export function parseShareLink(text: string, origin: string): ShareLinkResult {
   }
 
   const fragment = url.hash.slice(1);
-  if (url.pathname !== "/s" || !SHARE_FRAGMENT.test(fragment)) {
+  if (url.pathname !== "/s" || !isShareFragment(fragment)) {
     return { kind: "invalid" };
   }
 

@@ -17,6 +17,10 @@ test.describe("Text secret sharing", () => {
     const shareUrl = await shareInput.inputValue();
     expect(shareUrl).toContain("/s#");
 
+    // Open the link in a tab that already shows /s, as when it is pasted into
+    // the address bar there: only the fragment changes.
+    await page.goto("/s");
+    await expect(page.locator("h1")).toHaveText("Open a Share");
     await page.goto(shareUrl);
 
     await expect(page.locator("h1")).toHaveText("Text Share", { timeout: 10000 });
@@ -84,13 +88,14 @@ test.describe("Text secret sharing", () => {
     await expect(page.locator("h1")).toHaveText("Decrypted Text", { timeout: 10000 });
 
     await page.getByRole("button", { name: "Delete share" }).click();
+    await page.getByRole("button", { name: "Delete permanently" }).click();
     await expect(page.getByRole("main").getByText("Share deleted")).toBeVisible({
       timeout: 10000,
     });
 
     const recipientPage = await context.newPage();
     await recipientPage.goto(shareUrl);
-    await expect(recipientPage.getByText("This share has expired or does not exist.")).toBeVisible({
+    await expect(recipientPage.getByText(/This share has expired or was deleted\./)).toBeVisible({
       timeout: 10000,
     });
   });

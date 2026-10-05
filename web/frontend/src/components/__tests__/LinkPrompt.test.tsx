@@ -16,6 +16,19 @@ describe("LinkPrompt", () => {
     vi.mocked(toast.error).mockClear();
   });
 
+  afterEach(() => {
+    window.history.replaceState(null, "", "/s");
+  });
+
+  it("opens a share link for this site by putting its fragment in the address", () => {
+    render(<LinkPrompt />);
+
+    submitLink(`${window.location.origin}/s#${SECRET}`);
+
+    expect(toast.error).not.toHaveBeenCalled();
+    expect(window.location.hash).toBe(`#${SECRET}`);
+  });
+
   it("refuses a share link for another host and names that host", () => {
     render(<LinkPrompt />);
 

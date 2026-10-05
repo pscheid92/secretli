@@ -149,7 +149,7 @@ test.describe("File bundle sharing", () => {
 
     const secondPage = await context.newPage();
     await secondPage.goto(shareUrl);
-    await expect(secondPage.getByText("This share has expired or does not exist.")).toBeVisible({
+    await expect(secondPage.getByText(/This share has expired or was deleted\./)).toBeVisible({
       timeout: 10000,
     });
   });
@@ -169,13 +169,14 @@ test.describe("File bundle sharing", () => {
     await expect(page.locator("h1")).toHaveText("Download File", { timeout: 10000 });
 
     await page.getByRole("button", { name: "Delete share" }).click();
+    await page.getByRole("button", { name: "Delete permanently" }).click();
     await expect(page.getByRole("main").getByText("Share deleted")).toBeVisible({
       timeout: 10000,
     });
 
     const recipientPage = await context.newPage();
     await recipientPage.goto(shareUrl);
-    await expect(recipientPage.getByText("This share has expired or does not exist.")).toBeVisible({
+    await expect(recipientPage.getByText(/This share has expired or was deleted\./)).toBeVisible({
       timeout: 10000,
     });
   });

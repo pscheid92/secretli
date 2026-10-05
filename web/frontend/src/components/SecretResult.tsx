@@ -155,8 +155,8 @@ export default function SecretResult({
               />
             </svg>
             <p className="text-xs leading-relaxed text-amber-700 dark:text-amber-400">
-              This share is consumed when the recipient starts reveal or download. If their download
-              is interrupted after that, the link may not work again.
+              This link can be opened only once. It stops working as soon as the recipient reveals
+              or downloads the content.
             </p>
           </div>
         )}

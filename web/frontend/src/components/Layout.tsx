@@ -123,6 +123,8 @@ export default function Layout() {
             <button
               type="button"
               onClick={() => setMenuOpen(!menuOpen)}
+              aria-label={menuOpen ? "Close menu" : "Open menu"}
+              aria-expanded={menuOpen}
               className="text-zinc-600 dark:text-zinc-100 hover:text-zinc-900 dark:hover:text-white transition-colors duration-150"
             >
               <svg

@@ -103,8 +103,9 @@ export default function ShareDetails({
       <aside className="space-y-4 lg:sticky lg:top-24">
         {serverMeta.burn_after_read && (
           <BurnWarning>
-            This share will be permanently consumed when reveal starts. If the download is
-            interrupted after that, the link may not work again.
+            {isBundle
+              ? "These files can be downloaded only once. Once you start, the link stops working, so keep this page open until the download finishes."
+              : "This share can be opened only once. Once you reveal it, the link stops working, so copy what you need."}
           </BurnWarning>
         )}
         <section className="rounded-lg border border-zinc-200 bg-white px-4 py-4 dark:border-zinc-700 dark:bg-zinc-900">

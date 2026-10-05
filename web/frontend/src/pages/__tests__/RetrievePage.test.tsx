@@ -178,6 +178,33 @@ describe("RetrievePage", () => {
     expect(api.startRetrievalSession).toHaveBeenCalledTimes(1);
   }, 60_000);
 
+  it("says a link is damaged instead of asking the server about it", async () => {
+    // Cut off while copying: one character short.
+    window.location.hash = `#${"A".repeat(42)}`;
+    render(<RetrievePage />);
+
+    expect(
+      await screen.findByText(
+        "This link is incomplete or damaged. Check that you copied all of it.",
+      ),
+    ).toBeTruthy();
+    expect(api.getSecretMetadata).not.toHaveBeenCalled();
+  });
+
+  it("names every reason a share can be gone, including a one-time share already opened", async () => {
+    await publishTextShare();
+    api.getSecretMetadata.mockImplementation(async () => {
+      throw new ApiError(404, "secret not found");
+    });
+    render(<RetrievePage />);
+
+    expect(
+      await screen.findByText(
+        "This share has expired or was deleted. A one-time share also stops working once it has been opened.",
+      ),
+    ).toBeTruthy();
+  });
+
   it("ends on an error page when a burn-after-read session expires", async () => {
     await publishTextShare({ burnAfterRead: true });
     failNextRangeRead(new ApiError(403, "invalid retrieval session"));

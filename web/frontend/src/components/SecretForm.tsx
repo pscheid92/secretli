@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Controller, useForm } from "react-hook-form";
 import { formatExpiration } from "../lib/expiration";
-import { formatSize } from "../lib/format";
+import { formatProtection, formatSize } from "../lib/format";
 import ExpirationPicker from "./ExpirationPicker";
 import Spinner from "./Spinner";
 import Toggle from "./Toggle";
@@ -145,7 +145,7 @@ export default function SecretForm({ onSubmit, loading, stage }: SecretFormProps
                     setValue("burnAfterRead", !burnAfterRead, { shouldValidate: true })
                   }
                   label="Burn after reading"
-                  description="Consumed when the recipient starts reveal"
+                  description="Can be opened only once"
                 />
               </div>
               <div className="px-3 py-3">
@@ -198,7 +198,7 @@ export default function SecretForm({ onSubmit, loading, stage }: SecretFormProps
             <SummaryMetric label="Expires" value={formatExpiration(expiration)} />
             <SummaryMetric
               label="Protection"
-              value={password ? "Password" : burnAfterRead ? "Burn" : "Standard"}
+              value={formatProtection(password.length > 0, burnAfterRead)}
             />
           </div>
         </section>

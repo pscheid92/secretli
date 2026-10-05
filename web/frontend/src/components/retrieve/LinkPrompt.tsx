@@ -8,9 +8,9 @@ import QRScanner from "./QRScanner";
 const SECONDARY_BUTTON =
   "flex w-full items-center justify-center gap-2 rounded-lg border border-zinc-200 px-4 py-3 text-sm font-medium text-zinc-700 transition-colors duration-150 hover:border-amber-400 hover:text-zinc-900 focus:outline-none focus:ring-2 focus:ring-amber-400/50 dark:border-zinc-500/50 dark:text-zinc-100 dark:hover:border-amber-400 dark:hover:text-white";
 
+/** RetrievePage reloads when the fragment changes and opens the share. */
 function openShare(fragment: string) {
-  window.location.href = `${window.location.pathname}#${fragment}`;
-  window.location.reload();
+  window.location.hash = fragment;
 }
 
 /** Landing state when the page is opened without a share fragment. */

@@ -350,12 +350,22 @@ export interface ClaimTransferResponse {
   readonly expires_at: string;
 }
 
+/**
+ * Transfer requests skip the HTTP cache. Both sides write and long-poll the
+ * same message URLs, and when both run in one browser, its cache makes a
+ * request wait for the other tab's pending request on that URL: up to 20 s
+ * per step.
+ */
+function transferRequest<T>(url: string, init: RequestInit): Promise<T> {
+  return request(url, { ...init, cache: "no-store" });
+}
+
 export function openTransfer(): Promise<OpenTransferResponse> {
-  return request("/api/v1/transfers", { method: "POST" });
+  return transferRequest("/api/v1/transfers", { method: "POST" });
 }
 
 export function claimTransfer(nameplate: number): Promise<ClaimTransferResponse> {
-  return request("/api/v1/transfers/claim", {
+  return transferRequest("/api/v1/transfers/claim", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ nameplate }),
@@ -370,7 +380,7 @@ export function putTransferMessage(
   data: string,
   signal?: AbortSignal,
 ): Promise<void> {
-  return request(`/api/v1/transfers/${transferID}/messages/${phase}`, {
+  return transferRequest(`/api/v1/transfers/${transferID}/messages/${phase}`, {
     method: "PUT",
     headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
     body: JSON.stringify({ data }),
@@ -388,7 +398,7 @@ export async function pollTransferMessage(
   phase: TransferPhaseName,
   signal?: AbortSignal,
 ): Promise<string | null> {
-  const body = await request<{ data: string } | undefined>(
+  const body = await transferRequest<{ data: string } | undefined>(
     `/api/v1/transfers/${transferID}/messages/${phase}`,
     { method: "GET", headers: { Authorization: `Bearer ${token}` }, signal },
   );
@@ -402,7 +412,7 @@ export function closeTransfer(
   reason: TransferCloseReasonName,
   keepalive = false,
 ): Promise<void> {
-  return request(`/api/v1/transfers/${transferID}?reason=${reason}`, {
+  return transferRequest(`/api/v1/transfers/${transferID}?reason=${reason}`, {
     method: "DELETE",
     headers: { Authorization: `Bearer ${token}` },
     keepalive,
