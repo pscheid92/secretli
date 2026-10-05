@@ -39,8 +39,8 @@ export default function PasswordPrompt({
 
   return (
     <div className="space-y-6">
-      <PageTitle lead="Enter the password to decrypt the protected content.">
-        Unlock Share
+      <PageTitle lead="The sender gave it to you separately from the link.">
+        Enter the password
       </PageTitle>
       <form
         onSubmit={handleSubmit(async (data) => {

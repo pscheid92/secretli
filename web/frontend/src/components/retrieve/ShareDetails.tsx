@@ -57,9 +57,15 @@ export default function ShareDetails({
 
   return (
     <div className="space-y-6">
-      <PageTitle lead="Review the details before this browser decrypts the content.">
-        {isBundle ? "File Share" : "Text Share"}
-      </PageTitle>
+      {canDelete ? (
+        <PageTitle lead="This is your owner link. You can open the secret, or delete it for everyone.">
+          Your secret
+        </PageTitle>
+      ) : (
+        <PageTitle lead="Review the details before this browser decrypts it.">
+          Someone sent you a secret
+        </PageTitle>
+      )}
 
       <section className="space-y-5 rounded-lg border border-zinc-200 bg-white p-5 dark:border-zinc-700 dark:bg-zinc-900">
         <div className="divide-y divide-zinc-200 rounded-lg border border-zinc-200 dark:divide-zinc-700 dark:border-zinc-700">
@@ -103,7 +109,7 @@ export default function ShareDetails({
             {canDelete
               ? // The owner link of a one-time share: revealing it here would
                 // take it away from the recipient.
-                "This is your owner link, and nobody has opened the share yet. Revealing it here uses it up: your recipient won't be able to open it. To remove it instead, use Delete share."
+                "Nobody has opened it yet. Revealing it here uses it up: your recipient won't be able to open it. To remove it instead, use Delete share."
               : isBundle
                 ? "These files can be downloaded only once. Once you start, the link stops working, so keep this page open until the download finishes."
                 : "This share can be opened only once. Once you reveal it, the link stops working, so copy what you need."}

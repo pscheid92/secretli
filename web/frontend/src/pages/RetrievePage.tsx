@@ -36,11 +36,22 @@ import { KeySet, type SecretMeta } from "../lib/encryption";
 import { formatSize } from "../lib/format";
 import { isShareFragment } from "../lib/shareLink";
 
-/** The server has no share for this link; it cannot tell why. */
-const SHARE_GONE =
-  "This share has expired or was deleted. A one-time share also stops working once it has been opened.";
+/** The server has no secret for this link; it cannot tell why. */
+const GONE = {
+  title: "This secret is gone",
+  message:
+    "It was opened already, or it expired. Nothing is left on the server, so ask the sender for a new link if you still need it.",
+};
 /** The fragment is not a share link, typically because it was cut off when copied. */
-const DAMAGED_LINK = "This link is incomplete or damaged. Check that you copied all of it.";
+const DAMAGED = {
+  title: "This link is damaged",
+  message: "This link is incomplete or damaged. Check that you copied all of it.",
+};
+
+/** An error page for everything the other titles don't cover. */
+function failed(message: string): State {
+  return { stage: "error", title: "Something went wrong", message };
+}
 
 /**
  * Everything derived from the URL fragment. The base key set is derived once
@@ -75,7 +86,7 @@ type State =
       burnAfterRead: boolean;
     }
   | { stage: "deleted" }
-  | { stage: "error"; message: string };
+  | { stage: "error"; title: string; message: string };
 
 /** The server did not accept the blob token: the link or password is wrong. */
 class BlobTokenRejectedError extends Error {}
@@ -104,7 +115,7 @@ export default function RetrievePage() {
     initialHashRef.current ? { stage: "loading" } : { stage: "prompt" },
   );
   const [passwordLoading, setPasswordLoading] = useState(false);
-  usePageTitle("Open a share");
+  usePageTitle("Open a secret");
   const [revealing, setRevealing] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [downloadingBundle, setDownloadingBundle] = useState(false);
@@ -125,7 +136,7 @@ export default function RetrievePage() {
     }
     stripFragmentFromLocation();
     if (!isShareFragment(hash)) {
-      setState({ stage: "error", message: DAMAGED_LINK });
+      setState({ stage: "error", ...DAMAGED });
       return;
     }
 
@@ -147,14 +158,14 @@ export default function RetrievePage() {
     } catch (err) {
       if (err instanceof ApiError) {
         if (err.status === 404) {
-          setState({ stage: "error", message: SHARE_GONE });
+          setState({ stage: "error", ...GONE });
         } else if (err.status === 403) {
-          setState({ stage: "error", message: DAMAGED_LINK });
+          setState({ stage: "error", ...DAMAGED });
         } else {
-          setState({ stage: "error", message: err.message });
+          setState(failed(err.message));
         }
       } else {
-        setState({ stage: "error", message: "An unexpected error occurred." });
+        setState(failed("An unexpected error occurred."));
       }
     }
   }, []);
@@ -219,7 +230,11 @@ export default function RetrievePage() {
 
   async function reveal(identity: ShareIdentity, blobKeySet: KeySet, clientMeta: SecretMeta) {
     if (clientMeta.type !== "text" && clientMeta.type !== "bundle") {
-      setState({ stage: "error", message: "This link uses an unsupported format." });
+      setState({
+        stage: "error",
+        title: "This link can't be opened here",
+        message: "It uses a format this version of Secretli doesn't understand.",
+      });
       return;
     }
 
@@ -302,7 +317,11 @@ export default function RetrievePage() {
    */
   function handleRevealError(err: unknown) {
     if (err instanceof BlobTokenRejectedError) {
-      setState({ stage: "error", message: "This link cannot unlock the share." });
+      setState({
+        stage: "error",
+        title: "This link can't open the secret",
+        message: "It doesn't fit the secret it points to. Ask the sender to send it again.",
+      });
       return;
     }
     if (err instanceof RetrievalSessionExpiredError) {
@@ -310,7 +329,9 @@ export default function RetrievePage() {
         // A new session would only get 404: the share was consumed.
         setState({
           stage: "error",
-          message: "The download window for this burn-after-read share has closed.",
+          title: "The download window closed",
+          message:
+            "This one-time secret was opened, and the time to download it has passed. It can't be opened again.",
         });
       } else {
         toast.error("The download window has expired. Please try again.");
@@ -318,11 +339,11 @@ export default function RetrievePage() {
       return;
     }
     if (!(err instanceof ApiError)) {
-      setState({ stage: "error", message: "An unexpected error occurred." });
+      setState(failed("An unexpected error occurred."));
       return;
     }
     if (err.status === 404) {
-      setState({ stage: "error", message: SHARE_GONE });
+      setState({ stage: "error", ...GONE });
     } else if (err.status === 429) {
       toast.error("Too many attempts. Please wait a minute and try again.");
     } else if (err.status === 0) {
@@ -330,7 +351,7 @@ export default function RetrievePage() {
     } else if (isTransientStatus(err.status)) {
       toast.error("The server could not complete the request. Please try again.");
     } else {
-      setState({ stage: "error", message: err.message });
+      setState(failed(err.message));
     }
   }
 
@@ -342,9 +363,9 @@ export default function RetrievePage() {
       const encoded = identity.baseKeySet.getEncoded();
       await deleteSecret(encoded.publicID, encoded.metadataToken, identity.deletionToken);
       setState({ stage: "deleted" });
-      toast.success("Share deleted");
+      toast.success("Secret deleted");
     } catch (err) {
-      toast.error(err instanceof ApiError ? err.message : "Failed to delete share.");
+      toast.error(err instanceof ApiError ? err.message : "Failed to delete the secret.");
     } finally {
       setDeleting(false);
     }
@@ -402,7 +423,7 @@ export default function RetrievePage() {
     case "loading":
       return <RetrieveLoading />;
     case "error":
-      return <RetrieveError message={state.message} />;
+      return <RetrieveError title={state.title} message={state.message} />;
     case "deleted":
       return <ShareDeleted />;
     case "confirm":
@@ -431,7 +452,8 @@ export default function RetrievePage() {
         <TextResult
           text={state.text}
           burnAfterRead={state.burnAfterRead}
-          canDelete={Boolean(state.identity.deletionToken)}
+          // Revealing a one-time secret already deleted it from the server.
+          canDelete={Boolean(state.identity.deletionToken) && !state.burnAfterRead}
           deleting={deleting}
           onDelete={() => handleDelete(state.identity)}
         />
@@ -445,7 +467,7 @@ export default function RetrievePage() {
           downloading={downloadingBundle}
           progress={downloadProgress}
           downloadedFiles={downloadedFiles}
-          canDelete={Boolean(state.identity.deletionToken)}
+          canDelete={Boolean(state.identity.deletionToken) && !state.burnAfterRead}
           deleting={deleting}
           onDownloadAll={downloadAll}
           onDelete={() => handleDelete(state.identity)}

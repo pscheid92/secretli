@@ -47,8 +47,8 @@ export default function TextResult({
 
   return (
     <div className="space-y-6">
-      <PageTitle lead="Decrypted in this browser. Copy the content below.">
-        Decrypted Text
+      <PageTitle lead="Decrypted in this browser. Copy what you need.">
+        Here's your secret
       </PageTitle>
 
       <section className="space-y-5 rounded-lg border border-zinc-200 bg-white p-5 dark:border-zinc-700 dark:bg-zinc-900">

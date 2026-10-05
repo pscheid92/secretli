@@ -11,18 +11,19 @@ interface TestFile {
 async function createFileSecret(
   page: Page,
   files: TestFile[],
-  options: { password?: string; burnAfterRead?: boolean } = {},
+  options: { password?: string } = {},
 ): Promise<string> {
   const { shareUrl } = await createFileSecretLinks(page, files, options);
   return shareUrl;
 }
 
+/** Links open once by default, so every bundle made here is one-time. */
 async function createFileSecretLinks(
   page: Page,
   files: TestFile[],
-  options: { password?: string; burnAfterRead?: boolean } = {},
+  options: { password?: string } = {},
 ): Promise<{ shareUrl: string; ownerUrl: string }> {
-  await page.goto("/file");
+  await page.goto("/share");
   await page.setInputFiles(
     'input[type="file"]',
     files.map((file) => ({
@@ -32,32 +33,31 @@ async function createFileSecretLinks(
     })),
   );
 
-  if (options.burnAfterRead) {
-    await page.getByRole("switch", { name: /Burn after reading/ }).click();
-  }
   if (options.password) {
-    await page.getByRole("switch", { name: /Password protection/ }).click();
+    await page.getByRole("button", { name: "Password" }).click();
     await page.fill('input[type="password"]', options.password);
   }
 
   await page.click('button[type="submit"]');
-  await expect(page.getByRole("heading", { name: "Share is ready" })).toBeVisible({
+  await expect(page.getByRole("heading", { name: "Your link is ready" })).toBeVisible({
     timeout: 10000,
   });
 
-  return {
-    shareUrl: await page.locator("input[readonly]").first().inputValue(),
-    ownerUrl: await page.locator("input[readonly]").nth(1).inputValue(),
-  };
+  const shareUrl = (await page.getByTestId("share-link").textContent()) ?? "";
+  await page.getByRole("button", { name: "Owner link" }).click();
+  const ownerUrl = (await page.getByTestId("owner-link").textContent()) ?? "";
+  return { shareUrl, ownerUrl };
 }
 
 async function revealBundle(page: Page, shareUrl: string, password?: string) {
   await page.goto(shareUrl);
-  await expect(page.locator("h1")).toHaveText("File Share", { timeout: 10000 });
+  await expect(page.locator("h1")).toHaveText(/Someone sent you a secret|Your secret/, {
+    timeout: 10000,
+  });
 
   if (password) {
     await page.getByRole("button", { name: "Unlock Share" }).click();
-    await expect(page.locator("h1")).toHaveText("Unlock Share", { timeout: 10000 });
+    await expect(page.locator("h1")).toHaveText("Enter the password", { timeout: 10000 });
     await page.fill('input[type="password"]', password);
     await page.click('button[type="submit"]');
   } else {
@@ -98,7 +98,7 @@ test.describe("File bundle sharing", () => {
     const shareUrl = await createFileSecret(page, [file]);
     await revealBundle(page, shareUrl);
 
-    await expect(page.locator("h1")).toHaveText("Download File", { timeout: 10000 });
+    await expect(page.locator("h1")).toHaveText("Here's your file", { timeout: 10000 });
     await expect(page.getByTestId("bundle-file-0").getByText(file.name)).toBeVisible();
     await expectAccessible(page);
 
@@ -113,7 +113,7 @@ test.describe("File bundle sharing", () => {
 
     const shareUrl = await createFileSecret(page, files);
     await revealBundle(page, shareUrl);
-    await expect(page.locator("h1")).toHaveText("Download Files", { timeout: 10000 });
+    await expect(page.locator("h1")).toHaveText("Here are your files", { timeout: 10000 });
     await expect(page.getByText("all-alpha.txt")).toBeVisible();
     await expect(page.getByText("all-bravo.txt")).toBeVisible();
 
@@ -131,27 +131,24 @@ test.describe("File bundle sharing", () => {
     const shareUrl = await createFileSecret(page, [file], { password });
     await revealBundle(page, shareUrl, password);
 
-    await expect(page.locator("h1")).toHaveText("Download File", { timeout: 10000 });
+    await expect(page.locator("h1")).toHaveText("Here's your file", { timeout: 10000 });
     await downloadBundleFiles(page, [file], (filename) => testInfo.outputPath(filename));
   });
 
-  test("burn-after-read bundle cannot start a second retrieval session", async ({
-    page,
-    context,
-  }) => {
+  test("a one-time bundle cannot start a second retrieval session", async ({ page, context }) => {
     const file = {
       name: "burn.txt",
       mimeType: "text/plain",
       contents: "burn once",
     };
 
-    const shareUrl = await createFileSecret(page, [file], { burnAfterRead: true });
+    const shareUrl = await createFileSecret(page, [file]);
     await revealBundle(page, shareUrl);
-    await expect(page.locator("h1")).toHaveText("Download File", { timeout: 10000 });
+    await expect(page.locator("h1")).toHaveText("Here's your file", { timeout: 10000 });
 
     const secondPage = await context.newPage();
     await secondPage.goto(shareUrl);
-    await expect(secondPage.getByText(/This share has expired or was deleted\./)).toBeVisible({
+    await expect(secondPage.getByText(/It was opened already, or it expired\./)).toBeVisible({
       timeout: 10000,
     });
   });
@@ -167,18 +164,19 @@ test.describe("File bundle sharing", () => {
     };
 
     const { shareUrl, ownerUrl } = await createFileSecretLinks(page, [file]);
-    await revealBundle(page, ownerUrl);
-    await expect(page.locator("h1")).toHaveText("Download File", { timeout: 10000 });
+    // Opening a one-time bundle would use it up, so the owner deletes it unopened.
+    await page.goto(ownerUrl);
+    await expect(page.locator("h1")).toHaveText("Your secret", { timeout: 10000 });
 
     await page.getByRole("button", { name: "Delete share" }).click();
     await page.getByRole("button", { name: "Delete permanently" }).click();
-    await expect(page.getByRole("main").getByText("Share deleted")).toBeVisible({
+    await expect(page.getByRole("main").getByText("Secret deleted")).toBeVisible({
       timeout: 10000,
     });
 
     const recipientPage = await context.newPage();
     await recipientPage.goto(shareUrl);
-    await expect(recipientPage.getByText(/This share has expired or was deleted\./)).toBeVisible({
+    await expect(recipientPage.getByText(/It was opened already, or it expired\./)).toBeVisible({
       timeout: 10000,
     });
   });

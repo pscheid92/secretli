@@ -43,10 +43,10 @@ describe("SendWithCode", () => {
     expect(startSending).toHaveBeenCalledWith("https://secretli.example/s#key");
     // The short address that opens code entry on the other device.
     expect(screen.getByText(`${window.location.host}/c`)).toBeTruthy();
-    expect(screen.getByText(/expires in 10:00/)).toBeTruthy();
+    expect(screen.getByText(/10:00 left/)).toBeTruthy();
 
     await act(async () => done.resolve());
-    await screen.findByText("Sent. The other device is opening the share.");
+    await screen.findByText("Sent. The other device is opening the secret.");
   });
 
   it("explains a failure and starts again with a new code", async () => {
@@ -71,7 +71,7 @@ describe("SendWithCode", () => {
     );
     await screen.findByText("7-acid-rocket");
 
-    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    fireEvent.click(screen.getByRole("button", { name: "Stop" }));
     expect(onClose).toHaveBeenCalled();
     unmount();
 

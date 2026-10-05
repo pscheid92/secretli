@@ -52,11 +52,11 @@ export default function LinkPrompt({ initialMode = "choose" }: LinkPromptProps) 
       <PageTitle
         lead={
           scanAvailable
-            ? "Paste a Secretli link, scan its QR code or enter a code to decrypt it in this browser."
-            : "Paste a Secretli link or enter a code to decrypt it in this browser."
+            ? "Paste the link you were sent, scan its QR code, or type a code from the other device."
+            : "Paste the link you were sent, or type a code from the other device."
         }
       >
-        Open a Share
+        Open a secret
       </PageTitle>
       <form onSubmit={handleSubmit} className="space-y-4">
         <input

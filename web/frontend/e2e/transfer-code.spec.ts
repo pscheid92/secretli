@@ -25,7 +25,7 @@ test.describe("Short-code transfer", () => {
     await sender.goto("/share");
     await sender.fill("#secret-text", secretText);
     await sender.click('button[type="submit"]');
-    await expect(sender.getByRole("heading", { name: "Share is ready" })).toBeVisible({
+    await expect(sender.getByRole("heading", { name: "Your link is ready" })).toBeVisible({
       timeout: 10000,
     });
     await sender.getByRole("button", { name: "Send with a code" }).click();
@@ -60,11 +60,13 @@ test.describe("Short-code transfer", () => {
         await codeField.fill(code);
         await receiver.getByRole("button", { name: "Receive share" }).click();
 
-        await expect(receiver.locator("h1")).toHaveText("Text Share", { timeout: 15000 });
+        await expect(receiver.locator("h1")).toHaveText("Someone sent you a secret", {
+          timeout: 15000,
+        });
         await expect(
-          sender.getByText("Sent. The other device is opening the share."),
+          sender.getByText("Sent. The other device is opening the secret."),
         ).toBeVisible();
-        await receiver.getByRole("button", { name: "Reveal Text" }).click();
+        await receiver.getByRole("button", { name: /^Reveal/ }).click();
         await expect(receiver.locator("pre")).toHaveText(secretText, { timeout: 10000 });
       });
     } finally {

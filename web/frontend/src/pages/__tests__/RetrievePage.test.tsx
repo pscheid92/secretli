@@ -224,11 +224,8 @@ describe("RetrievePage", () => {
     });
     render(<RetrievePage />);
 
-    expect(
-      await screen.findByText(
-        "This share has expired or was deleted. A one-time share also stops working once it has been opened.",
-      ),
-    ).toBeTruthy();
+    expect(await screen.findByRole("heading", { name: "This secret is gone" })).toBeTruthy();
+    expect(screen.getByText(/It was opened already, or it expired\./)).toBeTruthy();
   });
 
   it("ends on an error page when a burn-after-read session expires", async () => {
@@ -239,9 +236,7 @@ describe("RetrievePage", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Reveal & Burn" }));
 
     // Trying again could only get a 404, so do not invite it.
-    expect(
-      await screen.findByText("The download window for this burn-after-read share has closed."),
-    ).toBeTruthy();
+    expect(await screen.findByRole("heading", { name: "The download window closed" })).toBeTruthy();
     expect(toast.error).not.toHaveBeenCalled();
   });
 });
