@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Link, Outlet, useLocation } from "react-router";
 import { useTheme } from "../hooks/useTheme";
+import BuildVersion from "./BuildVersion";
 
 function ThemeIcon({ theme }: { theme: string }) {
   if (theme === "dark") {
@@ -170,6 +171,7 @@ export default function Layout() {
         <p className="text-xs tracking-[0.15em] uppercase text-zinc-600 dark:text-zinc-100">
           Zero-knowledge secret sharing
         </p>
+        <BuildVersion />
       </footer>
     </div>
   );
