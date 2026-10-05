@@ -5,6 +5,10 @@ import { BUNDLE_RECORD_OVERHEAD_BYTES, KeySet } from "../encryption";
 // as long as encryption and decryption agree.
 const recordAad = new TextEncoder().encode("record:0:0:8");
 
+// Password tests run the real scrypt derivation: well under a second locally,
+// but up to and past the 5 s default on a busy CI runner.
+const SCRYPT_TESTS = { timeout: 30_000 };
+
 describe("KeySet", () => {
   describe("generateRandom", () => {
     it("creates a keyset with non-empty encoded fields", async () => {
@@ -156,7 +160,7 @@ describe("KeySet", () => {
     });
   });
 
-  describe("fromShareSecret with password", () => {
+  describe("fromShareSecret with password", SCRYPT_TESTS, () => {
     // Pinned to what existing links derive: any change to the password key
     // derivation would lock every password-protected share out.
     it("derives the same keys as before for a known share secret and password", async () => {
@@ -222,7 +226,7 @@ describe("KeySet", () => {
     });
   });
 
-  describe("password-protected workflow", () => {
+  describe("password-protected workflow", SCRYPT_TESTS, () => {
     it("metadata encrypted with base key, data with password key", async () => {
       const keySet = await KeySet.generateRandom();
       const shareSecret = keySet.getEncoded().shareSecret;
