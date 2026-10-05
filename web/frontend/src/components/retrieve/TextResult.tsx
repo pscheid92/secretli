@@ -1,4 +1,5 @@
 import { toast } from "sonner";
+import TextButton from "../ui/TextButton";
 import DeleteShareButton from "./DeleteShareButton";
 
 interface TextResultProps {
@@ -31,13 +32,7 @@ export default function TextResult({ text, canDelete, deleting, onDelete }: Text
             <span className="text-xs uppercase tracking-widest text-zinc-500 dark:text-zinc-400">
               Plaintext
             </span>
-            <button
-              type="button"
-              onClick={copy}
-              className="text-xs font-semibold text-amber-600 transition-colors duration-150 hover:text-amber-500 dark:text-amber-400 dark:hover:text-amber-300"
-            >
-              Copy
-            </button>
+            <TextButton onClick={copy}>Copy</TextButton>
           </div>
           <pre className="min-h-40 whitespace-pre-wrap break-words bg-white px-4 py-4 text-sm leading-relaxed text-zinc-800 dark:bg-zinc-950 dark:text-zinc-100">
             {text}

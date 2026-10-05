@@ -1,3 +1,5 @@
+import { formatExpiration } from "../lib/expiration";
+
 const OPTIONS = [
   { value: "5m", label: "5m" },
   { value: "10m", label: "10m" },
@@ -17,13 +19,16 @@ interface ExpirationPickerProps {
 
 export default function ExpirationPicker({ value, onChange }: ExpirationPickerProps) {
   return (
-    <div className="flex flex-wrap gap-1.5">
+    <div role="group" aria-label="Expires in" className="flex flex-wrap gap-1.5">
       {OPTIONS.map((opt) => (
         <button
           key={opt.value}
           type="button"
           onClick={() => onChange(opt.value)}
-          className={`px-3 py-1.5 rounded-md text-xs font-semibold tracking-wide transition-all duration-150 focus:outline-none focus:ring-2 focus:ring-amber-400/30 ${
+          aria-pressed={value === opt.value}
+          // "5m" would be read as "5 meters".
+          aria-label={formatExpiration(opt.value)}
+          className={`px-3 py-1.5 rounded-md text-xs font-semibold tracking-wide transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/60 ${
             value === opt.value
               ? "border border-transparent bg-amber-400 text-zinc-900"
               : "border border-zinc-200 dark:border-zinc-500/50 text-zinc-600 dark:text-zinc-100 hover:border-zinc-400 dark:hover:border-zinc-500 hover:text-zinc-800 dark:hover:text-white"

@@ -10,6 +10,7 @@ import {
 } from "../../lib/qrScanner";
 import { parseShareLink } from "../../lib/shareLink";
 import Spinner from "../Spinner";
+import Button from "../ui/Button";
 
 /** How long to scan before suggesting ways to get a better read. */
 export const SLOW_SCAN_MS = 20_000;
@@ -187,22 +188,10 @@ export default function QRScanner({ onScan, onCancel }: QRScannerProps) {
         )}
       </div>
       <div className="flex justify-end gap-3">
-        {!running && !done && (
-          <button
-            type="button"
-            onClick={restart}
-            className="rounded-lg bg-amber-400 px-4 py-2 text-sm font-medium text-zinc-900 transition-colors duration-150 hover:bg-amber-300 focus:outline-none focus:ring-2 focus:ring-amber-400/50"
-          >
-            {failure ? "Try again" : "Resume"}
-          </button>
-        )}
-        <button
-          type="button"
-          onClick={onCancel}
-          className="rounded-lg border border-zinc-200 px-4 py-2 text-sm font-medium text-zinc-700 transition-colors duration-150 hover:border-zinc-400 hover:text-zinc-900 focus:outline-none focus:ring-2 focus:ring-amber-400/50 dark:border-zinc-500/50 dark:text-zinc-100 dark:hover:text-white"
-        >
+        {!running && !done && <Button onClick={restart}>{failure ? "Try again" : "Resume"}</Button>}
+        <Button variant="secondary" onClick={onCancel}>
           Cancel
-        </button>
+        </Button>
       </div>
     </section>
   );

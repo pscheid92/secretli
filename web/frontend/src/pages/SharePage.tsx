@@ -3,6 +3,8 @@ import { toast } from "sonner";
 import SecretForm, { type SecretFormData } from "../components/SecretForm";
 import SecretResult from "../components/SecretResult";
 import ShareModeTabs from "../components/ShareModeTabs";
+import TextButton from "../components/ui/TextButton";
+import { usePageTitle } from "../hooks/usePageTitle";
 import { ApiError } from "../lib/api";
 import { KeySet } from "../lib/encryption";
 import { uploadMultipartBundle } from "../lib/multipartBundleUpload";
@@ -22,6 +24,7 @@ export default function SharePage() {
   const [loading, setLoading] = useState(false);
   const [stage, setStage] = useState<"idle" | "encrypting" | "uploading">("idle");
   const [result, setResult] = useState<ShareResult | null>(null);
+  usePageTitle(result ? "Share ready" : "Share text");
 
   async function handleSubmit(data: SecretFormData) {
     setLoading(true);
@@ -80,13 +83,9 @@ export default function SharePage() {
           burnAfterRead={result.burnAfterRead}
           deletionToken={result.deletionToken}
         />
-        <button
-          type="button"
-          onClick={() => setResult(null)}
-          className="text-xs text-zinc-500 dark:text-zinc-100 hover:text-amber-500 dark:hover:text-amber-400 transition-colors duration-150"
-        >
+        <TextButton tone="muted" onClick={() => setResult(null)}>
           ← Create another share
-        </button>
+        </TextButton>
       </div>
     );
   }

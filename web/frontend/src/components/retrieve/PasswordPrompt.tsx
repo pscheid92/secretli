@@ -1,6 +1,7 @@
 import { useForm } from "react-hook-form";
 import type { SecretMeta } from "../../lib/encryption";
 import Spinner from "../Spinner";
+import Button from "../ui/Button";
 import BurnWarning from "./BurnWarning";
 
 interface PasswordPromptProps {
@@ -53,6 +54,7 @@ export default function PasswordPrompt({
         <input
           type="password"
           {...register("password", { required: "Password is required" })}
+          aria-label="Password"
           placeholder="Enter password..."
           autoFocus
           autoComplete="off"
@@ -63,7 +65,7 @@ export default function PasswordPrompt({
           className="w-full rounded-lg border border-zinc-200 dark:border-zinc-500/50 bg-white dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 px-4 py-3 text-sm placeholder:text-zinc-500 dark:placeholder:text-zinc-500 focus:outline-none focus:border-amber-400 dark:focus:border-amber-400 focus:ring-1 focus:ring-amber-400/20 transition-colors duration-150"
         />
         {errors.password && (
-          <p className="text-xs text-red-500 dark:text-red-400">{errors.password.message}</p>
+          <p className="text-xs text-red-700 dark:text-red-400">{errors.password.message}</p>
         )}
         {burnAfterRead && (
           <BurnWarning>
@@ -71,14 +73,10 @@ export default function PasswordPrompt({
             one does: after that the link stops working.
           </BurnWarning>
         )}
-        <button
-          type="submit"
-          disabled={loading}
-          className="flex w-full items-center justify-center gap-2 rounded-lg bg-amber-400 px-4 py-3 text-sm font-medium text-zinc-900 hover:bg-amber-300 focus:outline-none focus:ring-2 focus:ring-amber-400/50 disabled:opacity-40 disabled:cursor-not-allowed transition-all duration-150"
-        >
+        <Button type="submit" size="lg" block disabled={loading}>
           {loading && <Spinner size="sm" className="text-zinc-700" />}
           {loading ? "Decrypting..." : submitLabel}
-        </button>
+        </Button>
       </form>
     </div>
   );

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { parseShareLink } from "../../lib/shareLink";
 import Spinner from "../Spinner";
+import Button from "../ui/Button";
 
 interface EnterCodeProps {
   /** Called with the fragment of the share link the code delivered. */
@@ -77,20 +78,12 @@ export default function EnterCode({ onReceived, onCancel }: EnterCodeProps) {
           )}
         </div>
         <div className="flex justify-end gap-3">
-          <button
-            type="button"
-            onClick={onCancel}
-            className="rounded-lg border border-zinc-200 px-4 py-2 text-sm font-medium text-zinc-700 transition-colors duration-150 hover:border-zinc-400 hover:text-zinc-900 focus:outline-none focus:ring-2 focus:ring-amber-400/50 dark:border-zinc-500/50 dark:text-zinc-100 dark:hover:text-white"
-          >
+          <Button variant="secondary" onClick={onCancel}>
             Cancel
-          </button>
-          <button
-            type="submit"
-            disabled={status.busy || code.trim() === ""}
-            className="rounded-lg bg-amber-400 px-4 py-2 text-sm font-medium text-zinc-900 transition-colors duration-150 hover:bg-amber-300 focus:outline-none focus:ring-2 focus:ring-amber-400/50 disabled:cursor-not-allowed disabled:opacity-50"
-          >
+          </Button>
+          <Button type="submit" disabled={status.busy || code.trim() === ""}>
             Receive share
-          </button>
+          </Button>
         </div>
       </form>
     </section>

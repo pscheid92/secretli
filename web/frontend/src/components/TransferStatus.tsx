@@ -1,4 +1,5 @@
 import Spinner from "./Spinner";
+import TextButton from "./ui/TextButton";
 
 export interface TransferStep {
   label: string;
@@ -33,13 +34,9 @@ export default function TransferStatus({
         <Spinner size="sm" className="text-amber-500" />
         <span className="text-sm font-medium text-zinc-800 dark:text-zinc-100">{title}</span>
         {onCancel && (
-          <button
-            type="button"
-            onClick={onCancel}
-            className="ml-auto text-xs font-semibold text-zinc-600 transition-colors duration-150 hover:text-red-600 dark:text-zinc-300 dark:hover:text-red-400"
-          >
+          <TextButton tone="danger" onClick={onCancel} className="ml-auto">
             {cancelLabel}
-          </button>
+          </TextButton>
         )}
       </div>
       {progress && percent !== null && (

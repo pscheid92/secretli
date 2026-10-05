@@ -6,6 +6,10 @@
   --font-display: "Syne", system-ui, sans-serif;
   --font-mono: "IBM Plex Mono", "Fira Code", ui-monospace, monospace;
   --font-sans: "IBM Plex Mono", "Fira Code", ui-monospace, monospace;
+  /* Tailwind's own zinc-50, written in sRGB. Chrome reports the default as
+     oklch(0.985 0 none), which axe cannot parse, so it would skip every
+     contrast check against the page background. */
+  --color-zinc-50: #fafafa;
 }
 
 @layer base {

@@ -3,6 +3,7 @@ import type { SecretMeta } from "../../lib/encryption";
 import { formatRelativeTime, formatSize } from "../../lib/format";
 import SecretTypeIcon from "../SecretTypeIcon";
 import Spinner from "../Spinner";
+import Button from "../ui/Button";
 import BurnWarning from "./BurnWarning";
 import DeleteShareButton from "./DeleteShareButton";
 
@@ -13,7 +14,7 @@ function MetaRow({ label, value, accent }: { label: string; value: string; accen
       <span
         className={
           accent
-            ? "text-amber-600 dark:text-amber-400 font-medium"
+            ? "text-amber-700 dark:text-amber-400 font-medium"
             : "text-zinc-600 dark:text-zinc-100"
         }
       >
@@ -112,15 +113,10 @@ export default function ShareDetails({
           <h2 className="text-xs font-semibold uppercase tracking-widest text-zinc-500 dark:text-zinc-400">
             Next step
           </h2>
-          <button
-            type="button"
-            onClick={onReveal}
-            disabled={revealing}
-            className="mt-4 flex w-full items-center justify-center gap-2 rounded-lg bg-amber-400 px-4 py-3 text-sm font-semibold text-zinc-950 transition-all duration-150 hover:bg-amber-300 focus:outline-none focus:ring-2 focus:ring-amber-400/50 disabled:cursor-not-allowed disabled:opacity-40"
-          >
+          <Button size="lg" block onClick={onReveal} disabled={revealing} className="mt-4">
             {revealing && <Spinner size="sm" className="text-zinc-700" />}
             {revealing ? "Decrypting..." : revealLabel(clientMeta, serverMeta.burn_after_read)}
-          </button>
+          </Button>
         </section>
         {canDelete && (
           <DeleteShareButton deleting={deleting} disabled={revealing} onDelete={onDelete} />

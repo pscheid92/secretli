@@ -11,6 +11,9 @@ import TransferStatus, {
   type TransferProgress,
   type TransferStep,
 } from "../components/TransferStatus";
+import Button from "../components/ui/Button";
+import TextButton from "../components/ui/TextButton";
+import { usePageTitle } from "../hooks/usePageTitle";
 import { ApiError } from "../lib/api";
 import { KeySet } from "../lib/encryption";
 import { formatExpiration } from "../lib/expiration";
@@ -76,6 +79,7 @@ export default function FilePage() {
   const [progress, setProgress] = useState<TransferProgress | null>(null);
   const [result, setResult] = useState<FileResult | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+  usePageTitle(result ? "Share ready" : "Share files");
 
   // A navigation away from an in-flight upload silently discards it.
   useEffect(() => {
@@ -207,16 +211,15 @@ export default function FilePage() {
           burnAfterRead={result.burnAfterRead}
           deletionToken={result.deletionToken}
         />
-        <button
-          type="button"
+        <TextButton
+          tone="muted"
           onClick={() => {
             setResult(null);
             reset();
           }}
-          className="text-xs text-zinc-500 dark:text-zinc-100 hover:text-amber-500 dark:hover:text-amber-400 transition-colors duration-150"
         >
           ← Create another share
-        </button>
+        </TextButton>
       </div>
     );
   }
@@ -254,7 +257,7 @@ export default function FilePage() {
                 }}
               />
               {errors.files && (
-                <p className="mt-2 text-xs text-red-500 dark:text-red-400">
+                <p className="mt-2 text-xs text-red-700 dark:text-red-400">
                   {errors.files.message}
                 </p>
               )}
@@ -317,7 +320,7 @@ export default function FilePage() {
                       className="w-full rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2.5 text-sm text-zinc-900 placeholder:text-zinc-500 transition-colors duration-150 focus:border-amber-400 focus:outline-none focus:ring-1 focus:ring-amber-400/20 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100 dark:placeholder:text-zinc-500 dark:focus:border-amber-400"
                     />
                     {errors.password && (
-                      <p className="mt-2 text-xs text-red-500 dark:text-red-400">
+                      <p className="mt-2 text-xs text-red-700 dark:text-red-400">
                         {errors.password.message}
                       </p>
                     )}
@@ -356,14 +359,10 @@ export default function FilePage() {
             <TransferPreview />
           )}
 
-          <button
-            type="submit"
-            disabled={loading || files.length === 0}
-            className="flex w-full items-center justify-center gap-2 rounded-lg bg-amber-400 px-4 py-3 text-sm font-semibold text-zinc-950 transition-all duration-150 hover:bg-amber-300 focus:outline-none focus:ring-2 focus:ring-amber-400/50 disabled:cursor-not-allowed disabled:opacity-40"
-          >
+          <Button type="submit" size="lg" block disabled={loading || files.length === 0}>
             {loading && <Spinner size="sm" className="text-zinc-700" />}
             {loading ? "Working..." : "Create Secure Link"}
-          </button>
+          </Button>
         </aside>
       </form>
     </div>
