@@ -1,6 +1,7 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import Button from "../ui/Button";
 import IconButton from "../ui/IconButton";
+import PasswordInput from "../ui/PasswordInput";
 import TextButton from "../ui/TextButton";
 
 describe("shared buttons", () => {
@@ -28,6 +29,19 @@ describe("shared buttons", () => {
     expect(screen.getByRole("button", { name: "Switch theme" }).getAttribute("title")).toBe(
       "Switch theme",
     );
+  });
+
+  it("let a password field show what was typed, and hide it again", () => {
+    render(<PasswordInput aria-label="Password" defaultValue="hunter2" />);
+    const field = screen.getByLabelText("Password") as HTMLInputElement;
+    const toggle = screen.getByRole("button", { name: "Show password" });
+
+    expect(field.type).toBe("password");
+    fireEvent.click(toggle);
+    expect(field.type).toBe("text");
+    expect(toggle.getAttribute("aria-pressed")).toBe("true");
+    fireEvent.click(toggle);
+    expect(field.type).toBe("password");
   });
 
   it("keep extra classes next to the shared ones", () => {

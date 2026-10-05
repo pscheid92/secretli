@@ -135,6 +135,11 @@ describe("RetrievePage", () => {
       await screen.findByText("Wrong password. Please try again.", {}, AFTER_PASSWORD),
     ).toBeTruthy();
     expect(api.retrieveSecretRange).not.toHaveBeenCalled();
+
+    // Selected, so typing again replaces the mistyped password.
+    const input = screen.getByPlaceholderText("Enter password...") as HTMLInputElement;
+    await waitFor(() => expect(document.activeElement).toBe(input));
+    expect([input.selectionStart, input.selectionEnd]).toEqual([0, "wrong horse".length]);
   }, 30_000);
 
   it("does not blame the password when reading fails after it was accepted", async () => {
