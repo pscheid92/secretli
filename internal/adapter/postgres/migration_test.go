@@ -11,9 +11,10 @@ import (
 	"github.com/jackc/tern/v2/migrate"
 )
 
-// TestMigration004_BackfillsAndScrubs migrates a database holding rows written
-// before per-upload storage keys and checks they are carried over.
-func TestMigration004_BackfillsAndScrubs(t *testing.T) {
+// migrationDatabase creates an empty database next to the test database and
+// returns a connection to it and a migrator with every migration loaded.
+func migrationDatabase(t *testing.T) (*pgx.Conn, *migrate.Migrator) {
+	t.Helper()
 	pool := setupTestDB(t)
 	ctx := context.Background()
 
@@ -32,7 +33,7 @@ func TestMigration004_BackfillsAndScrubs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("connect: %v", err)
 	}
-	defer func() { _ = conn.Close(ctx) }()
+	t.Cleanup(func() { _ = conn.Close(context.Background()) })
 
 	migrator, err := migrate.NewMigrator(ctx, conn, "schema_version")
 	if err != nil {
@@ -41,6 +42,15 @@ func TestMigration004_BackfillsAndScrubs(t *testing.T) {
 	if err := migrator.LoadMigrations(os.DirFS("migrations")); err != nil {
 		t.Fatalf("load migrations: %v", err)
 	}
+	return conn, migrator
+}
+
+// TestMigration004_BackfillsAndScrubs migrates a database holding rows written
+// before per-upload storage keys and checks they are carried over.
+func TestMigration004_BackfillsAndScrubs(t *testing.T) {
+	conn, migrator := migrationDatabase(t)
+	ctx := context.Background()
+
 	if err := migrator.MigrateTo(ctx, 3); err != nil {
 		t.Fatalf("migrate to 3: %v", err)
 	}
@@ -105,5 +115,51 @@ func TestMigration004_BackfillsAndScrubs(t *testing.T) {
 	// The migration can be rolled back.
 	if err := migrator.MigrateTo(ctx, 3); err != nil {
 		t.Fatalf("migrate down to 3: %v", err)
+	}
+}
+
+// TestMigration008_DropsTheOldTransferTablesAndCanRestoreThem migrates up to
+// 8, back to 7 and up again.
+func TestMigration008_DropsTheOldTransferTablesAndCanRestoreThem(t *testing.T) {
+	conn, migrator := migrationDatabase(t)
+	ctx := context.Background()
+	exists := func(table string) bool {
+		t.Helper()
+		var found bool
+		if err := conn.QueryRow(ctx, "SELECT to_regclass($1) IS NOT NULL", table).Scan(&found); err != nil {
+			t.Fatalf("look up %s: %v", table, err)
+		}
+		return found
+	}
+	oldTriggers := func() int {
+		t.Helper()
+		var n int
+		err := conn.QueryRow(ctx,
+			"SELECT count(*) FROM pg_trigger WHERE tgname IN ('transfer_messages_notify', 'transfers_closed_notify')").Scan(&n)
+		if err != nil {
+			t.Fatalf("count triggers: %v", err)
+		}
+		return n
+	}
+
+	if err := migrator.MigrateTo(ctx, 8); err != nil {
+		t.Fatalf("migrate to 8: %v", err)
+	}
+	if exists("transfers") || exists("transfer_messages") || oldTriggers() != 0 {
+		t.Error("the old transfer tables or their triggers survived migration 8")
+	}
+	if !exists("code_transfers") {
+		t.Error("code_transfers is gone")
+	}
+
+	if err := migrator.MigrateTo(ctx, 7); err != nil {
+		t.Fatalf("migrate down to 7: %v", err)
+	}
+	if !exists("transfers") || !exists("transfer_messages") || oldTriggers() != 2 {
+		t.Error("rolling back to 7 did not restore the old tables and triggers")
+	}
+
+	if err := migrator.MigrateTo(ctx, 8); err != nil {
+		t.Fatalf("migrate to 8 again: %v", err)
 	}
 }
