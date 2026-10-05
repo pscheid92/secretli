@@ -2,6 +2,7 @@ import { useForm } from "react-hook-form";
 import type { SecretMeta } from "../../lib/encryption";
 import Spinner from "../Spinner";
 import Button from "../ui/Button";
+import PageTitle from "../ui/PageTitle";
 import PasswordInput from "../ui/PasswordInput";
 import BurnWarning from "./BurnWarning";
 
@@ -37,15 +38,10 @@ export default function PasswordPrompt({
       : "Reveal Text";
 
   return (
-    <div className="mx-auto max-w-xl space-y-5 rounded-lg border border-zinc-200 bg-white p-5 dark:border-zinc-700 dark:bg-zinc-900">
-      <div>
-        <h1 className="font-display text-2xl font-semibold text-zinc-800 dark:text-zinc-100">
-          Unlock Share
-        </h1>
-        <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-100">
-          Enter the password to decrypt the protected content.
-        </p>
-      </div>
+    <div className="space-y-6">
+      <PageTitle lead="Enter the password to decrypt the protected content.">
+        Unlock Share
+      </PageTitle>
       <form
         onSubmit={handleSubmit(async (data) => {
           const message = await onSubmit(data.password);
@@ -55,7 +51,7 @@ export default function PasswordPrompt({
             setFocus("password", { shouldSelect: true });
           }
         })}
-        className="space-y-4"
+        className="max-w-md space-y-4"
       >
         <PasswordInput
           large

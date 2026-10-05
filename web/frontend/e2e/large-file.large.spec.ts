@@ -66,7 +66,7 @@ test.describe("Large-file performance", () => {
 
     const uploadStartedAt = performance.now();
     await page.click('button[type="submit"]');
-    await expect(page.getByRole("main").getByText("Secure link created")).toBeVisible({
+    await expect(page.getByRole("heading", { name: "Share is ready" })).toBeVisible({
       timeout: TEST_TIMEOUT_MS,
     });
     const uploadMs = performance.now() - uploadStartedAt;

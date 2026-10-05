@@ -6,6 +6,7 @@ import { formatSize } from "../../lib/format";
 import Spinner from "../Spinner";
 import TransferStatus, { type TransferProgress } from "../TransferStatus";
 import Button from "../ui/Button";
+import PageTitle from "../ui/PageTitle";
 import TextButton from "../ui/TextButton";
 import BurnWarning from "./BurnWarning";
 import DeleteShareButton from "./DeleteShareButton";
@@ -68,17 +69,14 @@ export default function BundleDownload({
   useLeaveWarning(onlyCopyHere);
 
   return (
-    <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_320px] lg:items-start">
-      <section className="space-y-5 rounded-lg border border-zinc-200 bg-white p-5 dark:border-zinc-700 dark:bg-zinc-900">
-        <div>
-          <h1 className="font-display text-2xl font-semibold text-zinc-800 dark:text-zinc-100">
-            {isMulti ? "Download Files" : "Download File"}
-          </h1>
-          <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-100">
-            {manifest.files.length} {isMulti ? "files" : "file"} · {formatSize(totalSize)}
-          </p>
-        </div>
+    <div className="space-y-6">
+      <PageTitle
+        lead={`${manifest.files.length} ${isMulti ? "files" : "file"} · ${formatSize(totalSize)}`}
+      >
+        {isMulti ? "Download Files" : "Download File"}
+      </PageTitle>
 
+      <section className="space-y-5 rounded-lg border border-zinc-200 bg-white p-5 dark:border-zinc-700 dark:bg-zinc-900">
         <div className="divide-y divide-zinc-200 rounded-lg border border-zinc-200 dark:divide-zinc-700 dark:border-zinc-700">
           {manifest.files.map((file) => {
             const downloaded = downloadedFiles?.find((entry) => entry.file.index === file.index);
@@ -107,7 +105,7 @@ export default function BundleDownload({
         </div>
       </section>
 
-      <aside className="space-y-4 lg:sticky lg:top-24">
+      <div className="space-y-4">
         <section className="rounded-lg border border-zinc-200 bg-white px-4 py-4 dark:border-zinc-700 dark:bg-zinc-900">
           <h2 className="text-xs font-semibold uppercase tracking-widest text-zinc-500 dark:text-zinc-400">
             Bundle
@@ -194,7 +192,7 @@ export default function BundleDownload({
                 : "Download File"}
         </Button>
         {canDelete && <DeleteShareButton deleting={deleting} onDelete={onDelete} />}
-      </aside>
+      </div>
     </div>
   );
 }

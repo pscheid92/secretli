@@ -25,7 +25,7 @@ test.describe("Short-code transfer", () => {
     await sender.goto("/share");
     await sender.fill("#secret-text", secretText);
     await sender.click('button[type="submit"]');
-    await expect(sender.getByRole("main").getByText("Secure link created")).toBeVisible({
+    await expect(sender.getByRole("heading", { name: "Share is ready" })).toBeVisible({
       timeout: 10000,
     });
     await sender.getByRole("button", { name: "Send with a code" }).click();

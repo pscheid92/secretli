@@ -12,6 +12,7 @@ import TransferStatus, {
   type TransferStep,
 } from "../components/TransferStatus";
 import Button from "../components/ui/Button";
+import PageTitle from "../components/ui/PageTitle";
 import PasswordInput from "../components/ui/PasswordInput";
 import TextButton from "../components/ui/TextButton";
 import { useLeaveWarning } from "../hooks/useLeaveWarning";
@@ -222,19 +223,14 @@ export default function FilePage() {
   }
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col gap-4 border-b border-zinc-200 pb-5 dark:border-zinc-800 md:flex-row md:items-end md:justify-between">
-        <h1 className="font-display text-2xl font-semibold text-zinc-800 dark:text-zinc-100">
-          Create Share
-        </h1>
-        <div className="w-full md:w-72">
-          <ShareModeTabs active="files" />
-        </div>
+    <div className="space-y-8">
+      <PageTitle lead="Encrypted in your browser, before anything leaves your device.">
+        Share files
+      </PageTitle>
+      <div className="max-w-sm">
+        <ShareModeTabs active="files" />
       </div>
-      <form
-        onSubmit={handleSubmit(onSubmit)}
-        className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_320px] lg:items-start"
-      >
+      <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
         <div className="space-y-5">
           <section className="rounded-lg border border-zinc-200 bg-white dark:border-zinc-700 dark:bg-zinc-900">
             <div className="border-b border-zinc-200 px-4 py-3 dark:border-zinc-700">
@@ -327,7 +323,7 @@ export default function FilePage() {
           </section>
         </div>
 
-        <aside className="space-y-4 lg:sticky lg:top-24">
+        <div className="space-y-4">
           <section className="rounded-lg border border-zinc-200 bg-white px-4 py-4 dark:border-zinc-700 dark:bg-zinc-900">
             <h2 className="text-xs font-semibold uppercase tracking-widest text-zinc-500 dark:text-zinc-400">
               Share summary
@@ -359,7 +355,7 @@ export default function FilePage() {
             {loading && <Spinner size="sm" className="text-zinc-700" />}
             {loading ? "Working..." : "Create Secure Link"}
           </Button>
-        </aside>
+        </div>
       </form>
     </div>
   );
