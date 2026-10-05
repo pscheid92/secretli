@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log/slog"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -17,7 +16,9 @@ const transferEventsChannel = "transfer_events"
 
 const (
 	listenRetryMin = 500 * time.Millisecond
-	listenRetryMax = 30 * time.Second
+	// listenRetryMax keeps the listener back within seconds of the database,
+	// matching the long-polls' re-check.
+	listenRetryMax = 5 * time.Second
 )
 
 // TransferEvents wakes long-polls waiting on a transfer when it changes on
@@ -25,8 +26,7 @@ const (
 // a message is stored or the transfer closes; one connection per process
 // LISTENs and signals the waiters for that transfer.
 type TransferEvents struct {
-	pool      *pgxpool.Pool
-	listening atomic.Bool
+	pool *pgxpool.Pool
 
 	mu      sync.Mutex
 	waiters map[string]map[chan struct{}]struct{}
@@ -61,26 +61,19 @@ func (e *TransferEvents) Subscribe(transferID string) (<-chan struct{}, func()) 
 	}
 }
 
-// Listening reports whether notifications arrive right now. While they
-// don't, long-polls have to fall back to reading the database often.
-func (e *TransferEvents) Listening() bool {
-	return e.listening.Load()
-}
-
 // Run listens until ctx ends. A dropped connection is re-established with
 // a growing delay.
 func (e *TransferEvents) Run(ctx context.Context) {
 	retry := listenRetryMin
 	for {
 		listened, err := e.listen(ctx)
-		e.listening.Store(false)
 		if ctx.Err() != nil {
 			return
 		}
 		if listened {
 			retry = listenRetryMin
 		}
-		slog.Warn("transfer events: not listening, long-polls fall back to polling",
+		slog.Warn("transfer events: not listening, long-polls rely on their re-check",
 			"error", err, "retry_in", retry)
 
 		timer := time.NewTimer(retry)
@@ -111,7 +104,6 @@ func (e *TransferEvents) listen(ctx context.Context) (bool, error) {
 	if _, err := conn.Exec(ctx, "LISTEN "+transferEventsChannel); err != nil {
 		return false, fmt.Errorf("listen: %w", err)
 	}
-	e.listening.Store(true)
 	slog.Info("transfer events: listening")
 	// Changes made while nobody listened sent no notification here: let
 	// every waiter look again.

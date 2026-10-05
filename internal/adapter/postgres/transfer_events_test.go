@@ -10,8 +10,20 @@ import (
 	"github.com/pscheid92/secretli/internal/domain"
 )
 
+// listenerPID is the backend that LISTENs for transfer events, or 0.
+func listenerPID(t *testing.T, pool *pgxpool.Pool) int32 {
+	t.Helper()
+	var pid int32
+	err := pool.QueryRow(context.Background(),
+		"SELECT COALESCE(MAX(pid), 0) FROM pg_stat_activity WHERE query = 'LISTEN transfer_events'").Scan(&pid)
+	if err != nil {
+		t.Fatalf("find listener: %v", err)
+	}
+	return pid
+}
+
 // startTransferEvents runs the listener until the test ends and returns once
-// it listens.
+// the database sees it listen.
 func startTransferEvents(t *testing.T, pool *pgxpool.Pool) *pgadapter.TransferEvents {
 	t.Helper()
 	events := pgadapter.NewTransferEvents(pool)
@@ -24,8 +36,10 @@ func startTransferEvents(t *testing.T, pool *pgxpool.Pool) *pgadapter.TransferEv
 	t.Cleanup(func() {
 		cancel()
 		<-done
+		// Gone before the next test looks for its own listener.
+		waitUntil(t, "the listener is gone", func() bool { return listenerPID(t, pool) == 0 })
 	})
-	waitUntil(t, "listening", events.Listening)
+	waitUntil(t, "listening", func() bool { return listenerPID(t, pool) != 0 })
 	return events
 }
 
@@ -99,14 +113,17 @@ func TestTransferEventsRelistenAfterADroppedConnectionAndWakeEveryWaiter(t *test
 	events := startTransferEvents(t, pool)
 	changed, unsubscribe := events.Subscribe("waiting")
 	defer unsubscribe()
+	first := listenerPID(t, pool)
 
 	// As a database failover would.
-	if _, err := pool.Exec(context.Background(),
-		"SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE query = 'LISTEN transfer_events'"); err != nil {
+	if _, err := pool.Exec(context.Background(), "SELECT pg_terminate_backend($1)", first); err != nil {
 		t.Fatalf("terminate listener: %v", err)
 	}
 
 	// Whatever changed in between sent no notification here: waiters look again.
 	expectSignal(t, changed, "listening again")
-	waitUntil(t, "listening again", events.Listening)
+	waitUntil(t, "a new listener", func() bool {
+		pid := listenerPID(t, pool)
+		return pid != 0 && pid != first
+	})
 }
