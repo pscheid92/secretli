@@ -21,12 +21,13 @@ type App struct {
 	secretRepo domain.Repo
 	fileStore  domain.MultipartFileStore
 	cfg        config.Config
+	version    string
 	reg        *prometheus.Registry
 
 	SecretMetrics *metrics.SecretMetrics
 }
 
-func New(cfg config.Config, pool *pgxpool.Pool, secretRepo domain.Repo, fileStore domain.MultipartFileStore, reg *prometheus.Registry) (*App, error) {
+func New(cfg config.Config, version string, pool *pgxpool.Pool, secretRepo domain.Repo, fileStore domain.MultipartFileStore, reg *prometheus.Registry) (*App, error) {
 	ipExtractor, err := newIPExtractor(cfg.TrustedProxies)
 	if err != nil {
 		return nil, fmt.Errorf("configure trusted proxies: %w", err)
@@ -52,6 +53,7 @@ func New(cfg config.Config, pool *pgxpool.Pool, secretRepo domain.Repo, fileStor
 		secretRepo: secretRepo,
 		fileStore:  fileStore,
 		cfg:        cfg,
+		version:    version,
 		reg:        reg,
 	}
 

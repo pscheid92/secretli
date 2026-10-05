@@ -54,7 +54,7 @@ func Run() error {
 	}
 
 	reg := metrics.NewRegistry()
-	app, err := httpserver.New(cfg, pool, secretRepo, fileStore, reg)
+	app, err := httpserver.New(cfg, Version, pool, secretRepo, fileStore, reg)
 	if err != nil {
 		return fmt.Errorf("create HTTP server: %w", err)
 	}
