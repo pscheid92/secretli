@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { toast } from "sonner";
+import { parseShareLink } from "../../lib/shareLink";
 
 /** Landing state when the page is opened without a share fragment. */
 export default function LinkPrompt() {
@@ -7,18 +8,17 @@ export default function LinkPrompt() {
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    try {
-      const url = new URL(linkInput.trim());
-      const fragment = url.hash.slice(1);
-      if (!fragment) {
-        toast.error("That link doesn't contain a share key.");
-        return;
-      }
-      window.location.href = `${window.location.pathname}#${fragment}`;
-      window.location.reload();
-    } catch {
-      toast.error("Please enter a valid Secretli link.");
+    const link = parseShareLink(linkInput, window.location.origin);
+    if (link.kind === "other-host") {
+      toast.error(`That link is for ${link.host}. Open it there instead.`);
+      return;
     }
+    if (link.kind === "invalid") {
+      toast.error("Please enter a valid Secretli link.");
+      return;
+    }
+    window.location.href = `${window.location.pathname}#${link.fragment}`;
+    window.location.reload();
   }
 
   return (
@@ -37,7 +37,7 @@ export default function LinkPrompt() {
           type="text"
           value={linkInput}
           onChange={(e) => setLinkInput(e.target.value)}
-          placeholder="https://secretli.example/s#..."
+          placeholder={`${window.location.origin}/s#...`}
           autoFocus
           className="w-full rounded-lg border border-zinc-200 dark:border-zinc-500/50 bg-white dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 px-4 py-3 text-sm font-mono placeholder:text-zinc-500 dark:placeholder:text-zinc-500 focus:outline-none focus:border-amber-400 dark:focus:border-amber-400 focus:ring-1 focus:ring-amber-400/20 transition-colors duration-150"
         />
