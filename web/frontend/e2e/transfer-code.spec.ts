@@ -1,4 +1,5 @@
 import { expect, type Page, test } from "@playwright/test";
+import { expectAccessible } from "./axe";
 
 const CODE = /^\d{1,3}-[a-z]+-[a-z]+$/;
 
@@ -29,6 +30,7 @@ test.describe("Short-code transfer", () => {
     });
     await sender.getByRole("button", { name: "Send with a code" }).click();
     const firstCode = await shownCode(sender);
+    await expectAccessible(sender);
 
     const receiverContext = await browser.newContext();
     try {

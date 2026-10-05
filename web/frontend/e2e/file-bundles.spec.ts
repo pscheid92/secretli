@@ -1,5 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { type Download, expect, type Page, test } from "@playwright/test";
+import { expectAccessible } from "./axe";
 
 interface TestFile {
   name: string;
@@ -99,6 +100,7 @@ test.describe("File bundle sharing", () => {
 
     await expect(page.locator("h1")).toHaveText("Download File", { timeout: 10000 });
     await expect(page.getByTestId("bundle-file-0").getByText(file.name)).toBeVisible();
+    await expectAccessible(page);
 
     await downloadBundleFiles(page, [file], (filename) => testInfo.outputPath(filename));
   });
