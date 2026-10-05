@@ -71,6 +71,33 @@ func (a *App) registerRoutes() *metrics.SecretMetrics {
 	deleteGroup.Use(middleware.BodyLimit(smallRequestBodyLimit))
 	deleteGroup.DELETE("/:publicID", sh.DeleteSecret)
 
+	// Short-code transfers. Guessing is bounded by one claim per transfer,
+	// not by these limits; they only keep the relay from being flooded.
+	th := NewTransferHandler(a.secretRepo)
+	transfers := e.Group("/api/v1/transfers")
+
+	transferCreateGroup := transfers.Group("")
+	transferCreateGroup.Use(rateLimiter(10, time.Minute))
+	transferCreateGroup.Use(middleware.BodyLimit(smallRequestBodyLimit))
+	transferCreateGroup.POST("", th.CreateTransfer)
+
+	transferClaimGroup := transfers.Group("")
+	transferClaimGroup.Use(rateLimiter(10, time.Minute))
+	transferClaimGroup.Use(middleware.BodyLimit(smallRequestBodyLimit))
+	transferClaimGroup.POST("/claim", th.ClaimTransfer)
+
+	// A waiting side long-polls for up to 25 s per request.
+	transferMessageGroup := transfers.Group("")
+	transferMessageGroup.Use(rateLimiter(300, time.Minute))
+	transferMessageGroup.Use(middleware.BodyLimit(smallRequestBodyLimit))
+	transferMessageGroup.PUT("/:transferID/messages/:phase", th.PutMessage)
+	transferMessageGroup.GET("/:transferID/messages/:phase", th.GetMessage)
+
+	transferCloseGroup := transfers.Group("")
+	transferCloseGroup.Use(rateLimiter(30, time.Minute))
+	transferCloseGroup.Use(middleware.BodyLimit(smallRequestBodyLimit))
+	transferCloseGroup.DELETE("/:transferID", th.CloseTransfer)
+
 	uh := NewUploadHandler(a.secretRepo, a.fileStore, a.cfg.MaxFileSize, secretMetrics)
 	uploads := e.Group("/api/v1/secrets/uploads")
 

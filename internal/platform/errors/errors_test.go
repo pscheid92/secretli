@@ -15,6 +15,8 @@ func TestErrorType_HTTPStatus(t *testing.T) {
 		{NotFound, http.StatusNotFound},
 		{Conflict, http.StatusConflict},
 		{Forbidden, http.StatusForbidden},
+		{Gone, http.StatusGone},
+		{Unavailable, http.StatusServiceUnavailable},
 		{Internal, http.StatusInternalServerError},
 	}
 	for _, tt := range tests {
@@ -81,6 +83,8 @@ func TestConstructors(t *testing.T) {
 		{"BadRequest", BadRequestError("bad"), BadRequest, "bad"},
 		{"NotFound", NotFoundError("missing"), NotFound, "missing"},
 		{"Forbidden", ForbiddenError("denied"), Forbidden, "denied"},
+		{"Gone", GoneError("ended", nil), Gone, "ended"},
+		{"Unavailable", UnavailableError("busy"), Unavailable, "busy"},
 		{"Conflict", ConflictError("dup"), Conflict, "dup"},
 		{"Internal", InternalError("fail", fmt.Errorf("cause")), Internal, "fail"},
 	}
@@ -114,4 +118,11 @@ func TestAsAppError(t *testing.T) {
 			t.Error("expected non-nil Cause")
 		}
 	})
+}
+
+func TestGoneError_CarriesItsReasonInTheResponse(t *testing.T) {
+	resp := GoneError("transfer has ended", map[string]any{"reason": "mismatch"}).ToResponse()
+	if resp.Details["reason"] != "mismatch" {
+		t.Errorf("details = %v, want the reason", resp.Details)
+	}
 }
