@@ -73,7 +73,7 @@ export default function Layout() {
 
   const isShareActive =
     location.pathname === "/" || location.pathname === "/share" || location.pathname === "/file";
-  const isRetrieveActive = location.pathname === "/s";
+  const isOpenActive = location.pathname === "/s" || location.pathname === "/c";
 
   return (
     <div className="min-h-screen flex flex-col bg-zinc-50 dark:bg-zinc-950 text-zinc-800 dark:text-zinc-100">
@@ -103,10 +103,10 @@ export default function Layout() {
             </Link>
             <Link
               to="/s"
-              aria-current={isRetrieveActive ? "page" : undefined}
-              className={navLinkClass(isRetrieveActive)}
+              aria-current={isOpenActive ? "page" : undefined}
+              className={navLinkClass(isOpenActive)}
             >
-              Retrieve
+              Open
             </Link>
             <IconButton label={`Switch theme (currently ${theme})`} onClick={cycle}>
               <ThemeIcon theme={theme} />

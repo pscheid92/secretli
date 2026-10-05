@@ -397,7 +397,8 @@ export default function RetrievePage() {
 
   switch (state.stage) {
     case "prompt":
-      return <LinkPrompt />;
+      // /c is the short address the sender's code panel names.
+      return <LinkPrompt initialMode={window.location.pathname === "/c" ? "code" : "choose"} />;
     case "loading":
       return <RetrieveLoading />;
     case "error":

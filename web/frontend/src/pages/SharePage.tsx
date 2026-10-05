@@ -17,6 +17,7 @@ interface ShareResult {
   url: string;
   expiresAt: string;
   burnAfterRead: boolean;
+  passwordProtected: boolean;
   deletionToken: string;
 }
 
@@ -59,9 +60,9 @@ export default function SharePage() {
         url: `${window.location.origin}/s#${response.encoded.shareSecret}`,
         expiresAt: response.expires_at,
         burnAfterRead: data.burnAfterRead,
+        passwordProtected: hasPassword,
         deletionToken: response.deletionToken,
       });
-      toast.success("Share created");
     } catch (err) {
       if (err instanceof ApiError) {
         toast.error(err.message);
@@ -81,6 +82,7 @@ export default function SharePage() {
           url={result.url}
           expiresAt={result.expiresAt}
           burnAfterRead={result.burnAfterRead}
+          passwordProtected={result.passwordProtected}
           deletionToken={result.deletionToken}
         />
         <TextButton tone="muted" onClick={() => setResult(null)}>

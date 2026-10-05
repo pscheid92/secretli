@@ -29,6 +29,10 @@ test.describe("Accessibility", () => {
     await page.getByRole("button", { name: "Enter a code" }).click();
     await expectAccessible(page);
 
+    await page.goto("/c");
+    await expect(page.getByLabel(/Type the code/)).toBeFocused();
+    await expectAccessible(page);
+
     await page.goto("/no-such-page");
     await expect(page.locator("h1")).toHaveText("This page doesn't exist.");
     await expectAccessible(page);

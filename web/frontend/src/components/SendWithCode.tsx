@@ -19,7 +19,7 @@ function formatRemaining(ms: number): string {
 }
 
 /**
- * Shows a short code the receiver types on its Retrieve page. The link
+ * Shows a short code the receiver types at /c on its own device. The link
  * travels encrypted through the relay once the receiver proves it typed the
  * same code; the code's words never leave the two browsers.
  */
@@ -81,7 +81,11 @@ export default function SendWithCode({ url, onClose }: SendWithCodeProps) {
         {state.stage === "waiting" && (
           <>
             <p className="text-sm text-zinc-600 dark:text-zinc-300">
-              On the other device, open Retrieve, choose <strong>Enter a code</strong> and type:
+              On the other device, go to{" "}
+              <strong className="font-mono font-semibold text-zinc-900 dark:text-zinc-50">
+                {window.location.host}/c
+              </strong>{" "}
+              and type:
             </p>
             <p className="break-all text-center font-mono text-3xl font-semibold tracking-wide text-zinc-900 dark:text-zinc-50">
               {state.code}
