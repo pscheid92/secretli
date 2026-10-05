@@ -45,6 +45,9 @@ func (a *App) registerRoutes() *metrics.SecretMetrics {
 	e.GET("/api/v1/health/live", Liveness)
 	e.GET("/api/v1/health/ready", ReadinessWithDB(a.pool))
 
+	// Build version for the page footer (not rate limited)
+	e.GET("/api/v1/version", VersionHandler(a.version))
+
 	// Secrets
 	sh := NewSecretHandler(a.secretRepo, a.fileStore, secretMetrics)
 	secrets := e.Group("/api/v1/secrets")

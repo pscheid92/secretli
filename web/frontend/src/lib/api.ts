@@ -313,3 +313,11 @@ export function uploadSessionPart(
     signal,
   });
 }
+
+// --- Build version ---
+
+/** The commit the running server was built from, or "dev" for local builds. */
+export async function getVersion(): Promise<string> {
+  const { version } = await request<{ version: string }>("/api/v1/version", { method: "GET" });
+  return version;
+}

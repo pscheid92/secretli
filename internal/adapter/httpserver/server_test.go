@@ -41,7 +41,7 @@ func (fullMockRepo) DeleteFinishedUploadSessions(_ context.Context, _ time.Time)
 func newTestApp(t *testing.T, cfg config.Config) *App {
 	t.Helper()
 	repo := fullMockRepo{mockSecretRepo: newMockRepo(), uploadMockRepo: newUploadMockRepo()}
-	app, err := New(cfg, nil, repo, newUploadMockStore(), prometheus.NewRegistry())
+	app, err := New(cfg, "test", nil, repo, newUploadMockStore(), prometheus.NewRegistry())
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -68,7 +68,7 @@ func createSessionBody(t *testing.T, label string) []byte {
 
 func TestApp_RejectsInvalidTrustedProxies(t *testing.T) {
 	repo := fullMockRepo{mockSecretRepo: newMockRepo(), uploadMockRepo: newUploadMockRepo()}
-	if _, err := New(config.Config{TrustedProxies: "nope"}, nil, repo, newUploadMockStore(), prometheus.NewRegistry()); err == nil {
+	if _, err := New(config.Config{TrustedProxies: "nope"}, "test", nil, repo, newUploadMockStore(), prometheus.NewRegistry()); err == nil {
 		t.Fatal("expected error for invalid TRUSTED_PROXIES")
 	}
 }
@@ -174,5 +174,19 @@ func TestApp_RejectsOversizedJSONBody(t *testing.T) {
 
 	if rec.Code != http.StatusRequestEntityTooLarge {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusRequestEntityTooLarge)
+	}
+}
+
+func TestVersionRouteServesTheVersionPassedToNew(t *testing.T) {
+	app := newTestApp(t, config.Config{})
+	rec := httptest.NewRecorder()
+
+	app.echo.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/version", nil))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	if body := strings.TrimSpace(rec.Body.String()); body != `{"version":"test"}` {
+		t.Errorf("body = %s, want the version passed to New", body)
 	}
 }
