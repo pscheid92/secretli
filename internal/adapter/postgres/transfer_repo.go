@@ -13,6 +13,9 @@ import (
 	"github.com/pscheid92/secretli/internal/domain"
 )
 
+// transferPrimaryKey is the constraint a reused transfer id violates.
+const transferPrimaryKey = "code_transfers_pkey"
+
 func (r *SecretRepo) CreateTransfer(ctx context.Context, t *domain.Transfer, maxNameplate int, now time.Time) error {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
@@ -38,9 +41,13 @@ func (r *SecretRepo) CreateTransfer(ctx context.Context, t *domain.Transfer, max
 		TransferID:      t.TransferID,
 		Nameplate:       nameplate,
 		SenderTokenHash: t.SenderTokenHash,
+		Offer:           t.Offer,
 		CreatedAt:       timestamptz(t.CreatedAt),
 		ExpiresAt:       timestamptz(t.ExpiresAt),
 	})
+	if pgErr, ok := errors.AsType[*pgconn.PgError](err); ok && pgErr.ConstraintName == transferPrimaryKey {
+		return domain.ErrDuplicate
+	}
 	if err != nil {
 		return fmt.Errorf("insert transfer: %w", err)
 	}
@@ -54,8 +61,8 @@ func (r *SecretRepo) CreateTransfer(ctx context.Context, t *domain.Transfer, max
 func (r *SecretRepo) ClaimTransfer(ctx context.Context, nameplate int, receiverTokenHash string, now time.Time) (*domain.Transfer, error) {
 	row, err := r.q.ClaimTransfer(ctx, dbsqlc.ClaimTransferParams{
 		ReceiverTokenHash: text(receiverTokenHash),
-		NowAt:             timestamptz(now),
 		Nameplate:         int32(nameplate), //nolint:gosec // validated range
+		NowAt:             timestamptz(now),
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
 		claimed, err := r.q.ClaimedTransferExists(ctx, dbsqlc.ClaimedTransferExistsParams{
@@ -87,45 +94,29 @@ func (r *SecretRepo) GetTransfer(ctx context.Context, transferID string) (*domai
 	return transferFromRow(row), nil
 }
 
-func (r *SecretRepo) PutTransferMessage(ctx context.Context, msg *domain.TransferMessage) error {
-	n, err := r.q.CreateTransferMessage(ctx, dbsqlc.CreateTransferMessageParams{
-		TransferID: msg.TransferID,
-		Side:       msg.Side,
-		Phase:      msg.Phase,
-		Data:       msg.Data,
-		CreatedAt:  timestamptz(msg.CreatedAt),
+func (r *SecretRepo) AnswerTransfer(ctx context.Context, transferID string, share, confirmation []byte, now time.Time) (bool, error) {
+	n, err := r.q.AnswerTransfer(ctx, dbsqlc.AnswerTransferParams{
+		AnswerShare:        share,
+		AnswerConfirmation: confirmation,
+		TransferID:         transferID,
+		NowAt:              timestamptz(now),
 	})
-	if isForeignKeyError(err) {
-		return domain.ErrNotFound
-	}
 	if err != nil {
-		return fmt.Errorf("insert transfer message: %w", err)
+		return false, fmt.Errorf("answer transfer: %w", err)
 	}
-	if n == 0 {
-		return domain.ErrDuplicate
-	}
-	return nil
+	return n == 1, nil
 }
 
-func (r *SecretRepo) GetTransferMessage(ctx context.Context, transferID, side, phase string) (*domain.TransferMessage, error) {
-	row, err := r.q.GetTransferMessage(ctx, dbsqlc.GetTransferMessageParams{
+func (r *SecretRepo) DeliverTransfer(ctx context.Context, transferID string, delivery []byte, now time.Time) (bool, error) {
+	n, err := r.q.DeliverTransfer(ctx, dbsqlc.DeliverTransferParams{
+		Delivery:   delivery,
+		NowAt:      timestamptz(now),
 		TransferID: transferID,
-		Side:       side,
-		Phase:      phase,
 	})
-	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, domain.ErrNotFound
-	}
 	if err != nil {
-		return nil, fmt.Errorf("query transfer message: %w", err)
+		return false, fmt.Errorf("deliver transfer: %w", err)
 	}
-	return &domain.TransferMessage{
-		TransferID: row.TransferID,
-		Side:       row.Side,
-		Phase:      row.Phase,
-		Data:       row.Data,
-		CreatedAt:  row.CreatedAt.Time,
-	}, nil
+	return n == 1, nil
 }
 
 func (r *SecretRepo) CloseTransfer(ctx context.Context, transferID, reason string, now time.Time) error {
@@ -151,24 +142,19 @@ func (r *SecretRepo) DeleteEndedTransfers(ctx context.Context, endedBefore time.
 	return n, nil
 }
 
-func transferFromRow(row dbsqlc.Transfer) *domain.Transfer {
+func transferFromRow(row dbsqlc.CodeTransfer) *domain.Transfer {
 	return &domain.Transfer{
-		TransferID:        row.TransferID,
-		Nameplate:         int(row.Nameplate),
-		SenderTokenHash:   row.SenderTokenHash,
-		ReceiverTokenHash: row.ReceiverTokenHash.String,
-		State:             row.State,
-		CloseReason:       row.CloseReason.String,
-		CreatedAt:         row.CreatedAt.Time,
-		ExpiresAt:         row.ExpiresAt.Time,
-		ClaimedAt:         pointerFromTimestamp(row.ClaimedAt),
-		ClosedAt:          pointerFromTimestamp(row.ClosedAt),
+		TransferID:         row.TransferID,
+		Nameplate:          int(row.Nameplate),
+		SenderTokenHash:    row.SenderTokenHash,
+		ReceiverTokenHash:  row.ReceiverTokenHash.String,
+		Offer:              row.Offer,
+		AnswerShare:        row.AnswerShare,
+		AnswerConfirmation: row.AnswerConfirmation,
+		Delivery:           row.Delivery,
+		CloseReason:        row.CloseReason.String,
+		CreatedAt:          row.CreatedAt.Time,
+		ExpiresAt:          row.ExpiresAt.Time,
+		ClosedAt:           pointerFromTimestamp(row.ClosedAt),
 	}
-}
-
-func isForeignKeyError(err error) bool {
-	if err, ok := errors.AsType[*pgconn.PgError](err); ok {
-		return err.Code == "23503"
-	}
-	return false
 }

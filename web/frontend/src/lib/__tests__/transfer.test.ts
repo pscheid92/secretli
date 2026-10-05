@@ -1,16 +1,18 @@
 import {
   CodeMismatchError,
+  createOffer,
   deriveTransferKeys,
   openLink,
+  type ReceiverRelay,
   receiveLink,
   SEALED_PAYLOAD_BYTES,
+  type SenderRelay,
   sealLink,
   sendLink,
+  type TransferAnswer,
   type TransferCloseReason,
   TransferEndedError,
   type TransferParty,
-  type TransferPhase,
-  type TransferRelay,
 } from "../transfer";
 
 const LINK = "https://secretli.example/s#AbCdEfGhIjKlMnOpQrStUvWxYz0123456789-_AbCdE";
@@ -18,108 +20,147 @@ const SID = crypto.getRandomValues(new Uint8Array(32));
 const ORIGIN = "https://secretli.example";
 
 /**
- * Two relay views over one in-memory mailbox, with the server's rules:
- * write-once messages, a close the other side sees, and reads that wait.
+ * Both sides' views of one in-memory transfer, with the server's rules:
+ * legs written once, delivering ends the transfer, a close the other side
+ * sees, and waits that block until their leg exists.
  */
 function relayPair() {
-  const messages = new Map<string, Uint8Array>();
-  let closed: TransferCloseReason | null = null;
-  const writes: string[] = [];
+  let answer: TransferAnswer | null = null;
+  let delivery: Uint8Array | null = null;
+  let closed: string | null = null;
   let wake: Array<() => void> = [];
   const notify = () => {
     const waiting = wake;
     wake = [];
     for (const resolve of waiting) resolve();
   };
-
-  const side = (own: string, other: string): TransferRelay => ({
-    async put(phase: TransferPhase, data: Uint8Array) {
+  // A written leg is handed out even after the transfer closed.
+  async function waitFor<T>(read: () => T | null): Promise<T> {
+    for (;;) {
+      const value = read();
+      if (value) return value;
       if (closed) throw new TransferEndedError(closed);
-      const key = `${own}:${phase}`;
-      if (messages.has(key)) throw new Error(`${key} written twice`);
-      messages.set(key, data);
-      writes.push(key);
-      notify();
-    },
-    async get(phase: TransferPhase) {
-      for (;;) {
-        const message = messages.get(`${other}:${phase}`);
-        if (message) return message;
-        if (closed) throw new TransferEndedError(closed);
-        await new Promise<void>((resolve) => wake.push(resolve));
-      }
-    },
-    async close(reason: TransferCloseReason) {
-      closed ??= reason;
-      notify();
-    },
-  });
-
-  return {
-    sender: side("sender", "receiver"),
-    receiver: side("receiver", "sender"),
-    closedWith: () => closed,
-    writes,
+      await new Promise<void>((resolve) => wake.push(resolve));
+    }
+  }
+  const close = async (reason: TransferCloseReason) => {
+    closed ??= reason;
+    notify();
   };
+
+  const sender: SenderRelay = {
+    awaitAnswer: () => waitFor(() => answer),
+    async deliver(sealed) {
+      if (closed) throw new TransferEndedError(closed);
+      if (delivery) throw new Error("delivered twice");
+      delivery = sealed;
+      closed = "done";
+      notify();
+    },
+    close,
+  };
+  const receiver: ReceiverRelay = {
+    async answer(value) {
+      if (closed) throw new TransferEndedError(closed);
+      if (answer) throw new Error("answered twice");
+      answer = value;
+      notify();
+    },
+    awaitDelivery: () => waitFor(() => delivery),
+    close,
+  };
+
+  return { sender, receiver, closedWith: () => closed, delivered: () => delivery !== null };
 }
 
 function party(words: [string, string], overrides: Partial<TransferParty> = {}): TransferParty {
   return { words, sid: SID, origin: ORIGIN, ...overrides };
 }
 
+/** Runs both roles: the sender with its words, the receiver with its own. */
+function handOver(
+  relay: ReturnType<typeof relayPair>,
+  sender: TransferParty,
+  receiver: TransferParty,
+) {
+  const offer = createOffer(sender);
+  return Promise.allSettled([
+    sendLink(relay.sender, sender, offer, LINK),
+    receiveLink(relay.receiver, receiver, offer.share),
+  ]);
+}
+
 describe("short-code transfer", () => {
   it("hands the link to a receiver who typed the same words", async () => {
     const relay = relayPair();
 
-    const [, received] = await Promise.all([
-      sendLink(relay.sender, party(["acid", "rocket"]), LINK),
-      receiveLink(relay.receiver, party(["acid", "rocket"])),
-    ]);
+    const [sent, received] = await handOver(
+      relay,
+      party(["acid", "rocket"]),
+      party(["acid", "rocket"]),
+    );
 
-    expect(received).toBe(LINK);
+    expect(sent.status).toBe("fulfilled");
+    expect(received.status === "fulfilled" && received.value).toBe(LINK);
     expect(relay.closedWith()).toBe("done");
   });
 
-  it("never sends the payload when the words differ, and both sides learn it", async () => {
+  it("never delivers when the words differ, and both sides learn it", async () => {
     const relay = relayPair();
 
-    const [sent, received] = await Promise.allSettled([
-      sendLink(relay.sender, party(["acid", "rocket"]), LINK),
-      receiveLink(relay.receiver, party(["acid", "robe"])),
-    ]);
+    const [sent, received] = await handOver(
+      relay,
+      party(["acid", "rocket"]),
+      party(["acid", "robe"]),
+    );
 
     expect(sent.status === "rejected" && sent.reason).toBeInstanceOf(CodeMismatchError);
     expect(received.status === "rejected" && received.reason).toBeInstanceOf(CodeMismatchError);
     expect(relay.closedWith()).toBe("mismatch");
-    expect(relay.writes).not.toContain("sender:payload");
+    expect(relay.delivered()).toBe(false);
   });
 
   it("is bound to the site: a run for another origin does not match", async () => {
     const relay = relayPair();
 
-    const [sent] = await Promise.allSettled([
-      sendLink(relay.sender, party(["acid", "rocket"]), LINK),
-      receiveLink(relay.receiver, party(["acid", "rocket"], { origin: "https://evil.example" })),
-    ]);
+    const [sent] = await handOver(
+      relay,
+      party(["acid", "rocket"]),
+      party(["acid", "rocket"], { origin: "https://evil.example" }),
+    );
 
     expect(sent.status === "rejected" && sent.reason).toBeInstanceOf(CodeMismatchError);
   });
 
   it("is bound to the transfer: another session id does not match", async () => {
     const relay = relayPair();
-    const otherSid = crypto.getRandomValues(new Uint8Array(32));
 
-    const [sent] = await Promise.allSettled([
-      sendLink(relay.sender, party(["acid", "rocket"]), LINK),
-      receiveLink(relay.receiver, party(["acid", "rocket"], { sid: otherSid })),
-    ]);
+    const [sent] = await handOver(
+      relay,
+      party(["acid", "rocket"]),
+      party(["acid", "rocket"], { sid: crypto.getRandomValues(new Uint8Array(32)) }),
+    );
 
     expect(sent.status === "rejected" && sent.reason).toBeInstanceOf(CodeMismatchError);
   });
 
+  it("refuses an offer that is no valid share, and ends the transfer", async () => {
+    const relay = relayPair();
+
+    const receiving = receiveLink(
+      relay.receiver,
+      party(["acid", "rocket"]),
+      new Uint8Array(32).fill(255),
+    );
+
+    await expect(receiving).rejects.toBeInstanceOf(CodeMismatchError);
+    expect(relay.closedWith()).toBe("mismatch");
+  });
+
   it("reports a transfer the sender cancelled", async () => {
     const relay = relayPair();
-    const receiving = receiveLink(relay.receiver, party(["acid", "rocket"]));
+    const offer = createOffer(party(["acid", "rocket"]));
+    const receiving = receiveLink(relay.receiver, party(["acid", "rocket"]), offer.share);
 
     await relay.sender.close("cancelled");
 

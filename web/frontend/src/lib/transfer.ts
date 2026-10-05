@@ -1,7 +1,8 @@
 /**
- * Short-code transfer of a share link: the two browsers run CPace through
- * the relay, the receiver proves it derived the same key, and only then does
- * the sender seal the link for it. The relay sees public shares, a tag and
+ * Short-code transfer of a share link in three legs through the relay: the
+ * sender's CPace share (the offer), the receiver's share with a tag proving
+ * it derived the same key (the answer), and only then the link, sealed for
+ * the receiver (the delivery). The relay sees public shares, a tag and
  * fixed-size ciphertext; the words never leave the two devices.
  */
 import { xchacha20poly1305 } from "@noble/ciphers/chacha.js";
@@ -19,23 +20,44 @@ import {
 } from "./cpace";
 import { transferPassword } from "./transferWords";
 
-export type TransferPhase = "share" | "confirm" | "payload";
-export type TransferCloseReason = "done" | "cancelled" | "mismatch";
+/** Why a side ends a transfer early; delivering ends it as done. */
+export type TransferCloseReason = "cancelled" | "mismatch";
 
-/** One side's view of the relay mailbox. */
-export interface TransferRelay {
-  put(phase: TransferPhase, data: Uint8Array): Promise<void>;
-  /** Resolves with the other side's message for the phase once it exists. */
-  get(phase: TransferPhase): Promise<Uint8Array>;
+/** The receiver's CPace share and its proof of the same key. */
+export interface TransferAnswer {
+  readonly share: Uint8Array;
+  readonly confirmation: Uint8Array;
+}
+
+/** The relay as the sender uses it, once the transfer holds its offer. */
+export interface SenderRelay {
+  /** Resolves with the receiver's answer once it exists. */
+  awaitAnswer(): Promise<TransferAnswer>;
+  /** Stores the sealed link, which ends the transfer as done. */
+  deliver(sealed: Uint8Array): Promise<void>;
+  close(reason: TransferCloseReason): Promise<void>;
+}
+
+/** The relay as the receiver uses it, after claiming the transfer. */
+export interface ReceiverRelay {
+  answer(answer: TransferAnswer): Promise<void>;
+  /** Resolves with the sealed link once the sender delivered it. */
+  awaitDelivery(): Promise<Uint8Array>;
   close(reason: TransferCloseReason): Promise<void>;
 }
 
 /** What both sides must agree on; only the words are secret. */
 export interface TransferParty {
   readonly words: readonly [string, string];
-  /** The transfer ID the relay issued, used as the CPace session id. */
+  /** The transfer id, which the sender picks; also the CPace session id. */
   readonly sid: Uint8Array;
   readonly origin: string;
+}
+
+/** The sender's first leg, kept until the answer arrives. */
+export interface TransferOffer {
+  readonly share: Uint8Array;
+  readonly scalar: bigint;
 }
 
 /** The other side ended the transfer, or it expired. */
@@ -139,7 +161,10 @@ export function openLink(key: Uint8Array, sid: Uint8Array, sealed: Uint8Array): 
 }
 
 /** Closes the relay without letting a failed close hide the real error. */
-async function closeQuietly(relay: TransferRelay, reason: TransferCloseReason): Promise<void> {
+async function closeQuietly(
+  relay: SenderRelay | ReceiverRelay,
+  reason: TransferCloseReason,
+): Promise<void> {
   try {
     await relay.close(reason);
   } catch {
@@ -147,33 +172,36 @@ async function closeQuietly(relay: TransferRelay, reason: TransferCloseReason): 
   }
 }
 
-/** Runs CPace up to the shared keys. A share that fails the draft's checks means a mismatch. */
-async function agreeOnKeys(
-  relay: TransferRelay,
-  party: TransferParty,
-  isSender: boolean,
-): Promise<{ keys: TransferKeys; ya: Uint8Array; yb: Uint8Array }> {
-  const generator = calculateGenerator(
+function generatorFor(party: TransferParty) {
+  return calculateGenerator(
     transferPassword(party.words),
     channelIdentifier(party.origin),
     party.sid,
   );
-  const scalar = sampleScalar();
-  const own = cpaceShare(generator, scalar);
-  await relay.put("share", own);
-  const peer = await relay.get("share");
-  const [ya, yb] = isSender ? [own, peer] : [peer, own];
+}
 
-  let k: Uint8Array;
+/**
+ * K from the other side's share, closing the transfer as a mismatch when the
+ * share fails the draft's checks.
+ */
+async function sharedSecret(
+  relay: SenderRelay | ReceiverRelay,
+  scalar: bigint,
+  peerShare: Uint8Array,
+): Promise<Uint8Array> {
   try {
-    k = scalarMultVfy(scalar, peer);
+    return scalarMultVfy(scalar, peerShare);
   } catch (err) {
     if (!(err instanceof CPaceError)) throw err;
     await closeQuietly(relay, "mismatch");
     throw new CodeMismatchError();
   }
-  const isk = cpaceIsk(party.sid, k, ya, AD_SENDER, yb, AD_RECEIVER);
-  return { keys: deriveTransferKeys(isk, party.sid), ya, yb };
+}
+
+/** The sender's first leg: its CPace share, computed before the transfer exists. */
+export function createOffer(party: TransferParty): TransferOffer {
+  const scalar = sampleScalar();
+  return { share: cpaceShare(generatorFor(party), scalar), scalar };
 }
 
 /**
@@ -181,27 +209,38 @@ async function agreeOnKeys(
  * tag proves it typed the same code.
  */
 export async function sendLink(
-  relay: TransferRelay,
+  relay: SenderRelay,
   party: TransferParty,
+  offer: TransferOffer,
   link: string,
 ): Promise<void> {
-  const { keys, ya, yb } = await agreeOnKeys(relay, party, true);
-  const tag = await relay.get("confirm");
-  if (!equalBytes(tag, confirmationTag(keys.confirm, ya, yb))) {
+  const answer = await relay.awaitAnswer();
+  const k = await sharedSecret(relay, offer.scalar, answer.share);
+  const isk = cpaceIsk(party.sid, k, offer.share, AD_SENDER, answer.share, AD_RECEIVER);
+  const keys = deriveTransferKeys(isk, party.sid);
+  if (!equalBytes(answer.confirmation, confirmationTag(keys.confirm, offer.share, answer.share))) {
     await closeQuietly(relay, "mismatch");
     throw new CodeMismatchError();
   }
-  await relay.put("payload", sealLink(keys.payload, party.sid, link));
-  await closeQuietly(relay, "done");
+  await relay.deliver(sealLink(keys.payload, party.sid, link));
 }
 
-/** Receiver role: proves knowledge of the code, then opens the sealed link. */
-export async function receiveLink(relay: TransferRelay, party: TransferParty): Promise<string> {
-  const { keys, ya, yb } = await agreeOnKeys(relay, party, false);
-  await relay.put("confirm", confirmationTag(keys.confirm, ya, yb));
+/** Receiver role: answers the offer, proving knowledge of the code, then opens the link. */
+export async function receiveLink(
+  relay: ReceiverRelay,
+  party: TransferParty,
+  offer: Uint8Array,
+): Promise<string> {
+  const scalar = sampleScalar();
+  const share = cpaceShare(generatorFor(party), scalar);
+  const k = await sharedSecret(relay, scalar, offer);
+  const isk = cpaceIsk(party.sid, k, offer, AD_SENDER, share, AD_RECEIVER);
+  const keys = deriveTransferKeys(isk, party.sid);
+  await relay.answer({ share, confirmation: confirmationTag(keys.confirm, offer, share) });
+
   let sealed: Uint8Array;
   try {
-    sealed = await relay.get("payload");
+    sealed = await relay.awaitDelivery();
   } catch (err) {
     if (err instanceof TransferEndedError && err.reason === "mismatch")
       throw new CodeMismatchError();

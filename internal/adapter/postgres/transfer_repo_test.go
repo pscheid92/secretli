@@ -1,6 +1,7 @@
 package postgres_test
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -14,11 +15,18 @@ import (
 	tokencrypto "github.com/pscheid92/secretli/internal/platform/crypto"
 )
 
+var (
+	testOffer        = bytes.Repeat([]byte{'a'}, domain.TransferShareBytes)
+	testAnswerShare  = bytes.Repeat([]byte{'b'}, domain.TransferShareBytes)
+	testConfirmation = bytes.Repeat([]byte{'t'}, domain.TransferConfirmationBytes)
+	testDelivery     = bytes.Repeat([]byte{'s'}, domain.TransferDeliveryBytes)
+)
+
 func newTestTransfer(id string, now time.Time) *domain.Transfer {
 	return &domain.Transfer{
 		TransferID:      id,
 		SenderTokenHash: tokencrypto.TokenHash("sender-" + id),
-		State:           domain.TransferStateOpen,
+		Offer:           testOffer,
 		CreatedAt:       now,
 		ExpiresAt:       now.Add(10 * time.Minute),
 	}
@@ -31,6 +39,21 @@ func createTestTransfer(t *testing.T, repo *pgadapter.SecretRepo, id string, now
 		t.Fatalf("CreateTransfer(%s): %v", id, err)
 	}
 	return transfer
+}
+
+func claimTestTransfer(t *testing.T, repo *pgadapter.SecretRepo, transfer *domain.Transfer, now time.Time) {
+	t.Helper()
+	if _, err := repo.ClaimTransfer(context.Background(), transfer.Nameplate, "receiver-"+transfer.TransferID, now); err != nil {
+		t.Fatalf("ClaimTransfer(%s): %v", transfer.TransferID, err)
+	}
+}
+
+func answerTestTransfer(t *testing.T, repo *pgadapter.SecretRepo, transfer *domain.Transfer, now time.Time) {
+	t.Helper()
+	stored, err := repo.AnswerTransfer(context.Background(), transfer.TransferID, testAnswerShare, testConfirmation, now)
+	if err != nil || !stored {
+		t.Fatalf("AnswerTransfer(%s) = %v, %v", transfer.TransferID, stored, err)
+	}
 }
 
 func TestTransferConcurrentCreatesNeverShareANameplate(t *testing.T) {
@@ -75,7 +98,7 @@ func TestTransferNameplatesFreeUpWhenATransferEndsOrExpires(t *testing.T) {
 	if closed.Nameplate != 1 || expiring.Nameplate != 2 {
 		t.Fatalf("nameplates = %d, %d, want 1, 2", closed.Nameplate, expiring.Nameplate)
 	}
-	if err := repo.CloseTransfer(ctx, closed.TransferID, domain.TransferCloseDone, now); err != nil {
+	if err := repo.CloseTransfer(ctx, closed.TransferID, domain.TransferCloseCancelled, now); err != nil {
 		t.Fatalf("CloseTransfer: %v", err)
 	}
 
@@ -93,8 +116,8 @@ func TestTransferNameplatesFreeUpWhenATransferEndsOrExpires(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetTransfer: %v", err)
 	}
-	if got.State != domain.TransferStateClosed || got.CloseReason != domain.TransferCloseExpired {
-		t.Errorf("expired transfer state = %q (%q), want closed (expired)", got.State, got.CloseReason)
+	if got.ClosedAt == nil || got.CloseReason != domain.TransferCloseExpired {
+		t.Errorf("expired transfer closed at %v as %q, want closed as expired", got.ClosedAt, got.CloseReason)
 	}
 }
 
@@ -114,7 +137,19 @@ func TestTransferCreateFailsWhenEveryNameplateIsTaken(t *testing.T) {
 	}
 }
 
-func TestTransferClaimSucceedsOnce(t *testing.T) {
+func TestTransferCreateRefusesAReusedID(t *testing.T) {
+	repo := pgadapter.NewSecretRepo(setupTestDB(t))
+	now := time.Now()
+	createTestTransfer(t, repo, "only-once", now)
+
+	err := repo.CreateTransfer(context.Background(), newTestTransfer("only-once", now), 999, now)
+
+	if !errors.Is(err, domain.ErrDuplicate) {
+		t.Errorf("err = %v, want ErrDuplicate", err)
+	}
+}
+
+func TestTransferClaimSucceedsOnceAndReturnsTheOffer(t *testing.T) {
 	repo := pgadapter.NewSecretRepo(setupTestDB(t))
 	ctx := context.Background()
 	now := time.Now()
@@ -124,7 +159,7 @@ func TestTransferClaimSucceedsOnce(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ClaimTransfer: %v", err)
 	}
-	if claimed.TransferID != transfer.TransferID || claimed.ReceiverTokenHash != "receiver-hash" || claimed.State != domain.TransferStateClaimed {
+	if claimed.TransferID != transfer.TransferID || claimed.ReceiverTokenHash != "receiver-hash" || !bytes.Equal(claimed.Offer, testOffer) {
 		t.Errorf("claimed = %+v", claimed)
 	}
 
@@ -148,39 +183,54 @@ func TestTransferClaimRejectsAnExpiredTransfer(t *testing.T) {
 	}
 }
 
-func TestTransferMessagesAreWriteOnceAndNeedATransfer(t *testing.T) {
+func TestTransferAnswerNeedsAClaimAndIsWrittenOnce(t *testing.T) {
 	repo := pgadapter.NewSecretRepo(setupTestDB(t))
 	ctx := context.Background()
 	now := time.Now()
-	transfer := createTestTransfer(t, repo, "messages", now)
-	msg := &domain.TransferMessage{
-		TransferID: transfer.TransferID,
-		Side:       domain.TransferSideSender,
-		Phase:      domain.TransferPhaseShare,
-		Data:       []byte{1, 2, 3},
-		CreatedAt:  now,
+	transfer := createTestTransfer(t, repo, "answer-me", now)
+
+	if stored, err := repo.AnswerTransfer(ctx, transfer.TransferID, testAnswerShare, testConfirmation, now); err != nil || stored {
+		t.Errorf("answer before the claim = %v, %v, want not stored", stored, err)
+	}
+	claimTestTransfer(t, repo, transfer, now)
+	answerTestTransfer(t, repo, transfer, now)
+	if stored, err := repo.AnswerTransfer(ctx, transfer.TransferID, testDelivery[:32], testConfirmation, now); err != nil || stored {
+		t.Errorf("second answer = %v, %v, want not stored", stored, err)
 	}
 
-	if err := repo.PutTransferMessage(ctx, msg); err != nil {
-		t.Fatalf("PutTransferMessage: %v", err)
+	got, err := repo.GetTransfer(ctx, transfer.TransferID)
+	if err != nil {
+		t.Fatalf("GetTransfer: %v", err)
 	}
-	got, err := repo.GetTransferMessage(ctx, transfer.TransferID, domain.TransferSideSender, domain.TransferPhaseShare)
-	if err != nil || string(got.Data) != string(msg.Data) {
-		t.Fatalf("GetTransferMessage = %v, %v", got, err)
+	if !bytes.Equal(got.AnswerShare, testAnswerShare) || !bytes.Equal(got.AnswerConfirmation, testConfirmation) {
+		t.Errorf("answer = %x / %x, want the first one", got.AnswerShare, got.AnswerConfirmation)
+	}
+}
+
+func TestTransferDeliveryNeedsTheAnswerAndClosesAsDone(t *testing.T) {
+	repo := pgadapter.NewSecretRepo(setupTestDB(t))
+	ctx := context.Background()
+	now := time.Now()
+	transfer := createTestTransfer(t, repo, "deliver-me", now)
+	claimTestTransfer(t, repo, transfer, now)
+
+	if stored, err := repo.DeliverTransfer(ctx, transfer.TransferID, testDelivery, now); err != nil || stored {
+		t.Errorf("delivery before the answer = %v, %v, want not stored", stored, err)
+	}
+	answerTestTransfer(t, repo, transfer, now)
+	if stored, err := repo.DeliverTransfer(ctx, transfer.TransferID, testDelivery, now); err != nil || !stored {
+		t.Fatalf("DeliverTransfer = %v, %v", stored, err)
+	}
+	if stored, err := repo.DeliverTransfer(ctx, transfer.TransferID, testDelivery, now); err != nil || stored {
+		t.Errorf("second delivery = %v, %v, want not stored", stored, err)
 	}
 
-	rewrite := *msg
-	rewrite.Data = []byte{9}
-	if err := repo.PutTransferMessage(ctx, &rewrite); !errors.Is(err, domain.ErrDuplicate) {
-		t.Errorf("rewrite: err = %v, want ErrDuplicate", err)
+	got, err := repo.GetTransfer(ctx, transfer.TransferID)
+	if err != nil {
+		t.Fatalf("GetTransfer: %v", err)
 	}
-	orphan := *msg
-	orphan.TransferID = "no-such-transfer"
-	if err := repo.PutTransferMessage(ctx, &orphan); !errors.Is(err, domain.ErrNotFound) {
-		t.Errorf("orphan message: err = %v, want ErrNotFound", err)
-	}
-	if _, err := repo.GetTransferMessage(ctx, transfer.TransferID, domain.TransferSideReceiver, domain.TransferPhaseShare); !errors.Is(err, domain.ErrNotFound) {
-		t.Errorf("missing message: err = %v, want ErrNotFound", err)
+	if !bytes.Equal(got.Delivery, testDelivery) || got.CloseReason != domain.TransferCloseDone || got.ClosedAt == nil {
+		t.Errorf("transfer = %+v, want delivered and closed as done", got)
 	}
 }
 
@@ -193,19 +243,19 @@ func TestTransferCloseRecordsTheReasonOnce(t *testing.T) {
 	if err := repo.CloseTransfer(ctx, transfer.TransferID, domain.TransferCloseMismatch, now); err != nil {
 		t.Fatalf("CloseTransfer: %v", err)
 	}
-	if err := repo.CloseTransfer(ctx, transfer.TransferID, domain.TransferCloseDone, now); !errors.Is(err, domain.ErrNotFound) {
+	if err := repo.CloseTransfer(ctx, transfer.TransferID, domain.TransferCloseCancelled, now); !errors.Is(err, domain.ErrNotFound) {
 		t.Errorf("second close: err = %v, want ErrNotFound", err)
 	}
 	got, err := repo.GetTransfer(ctx, transfer.TransferID)
 	if err != nil {
 		t.Fatalf("GetTransfer: %v", err)
 	}
-	if got.State != domain.TransferStateClosed || got.CloseReason != domain.TransferCloseMismatch || got.ClosedAt == nil {
+	if got.CloseReason != domain.TransferCloseMismatch || got.ClosedAt == nil {
 		t.Errorf("transfer = %+v, want closed with the first reason", got)
 	}
 }
 
-func TestTransferCleanupDeletesEndedTransfersWithTheirMessages(t *testing.T) {
+func TestTransferCleanupDeletesEndedTransfers(t *testing.T) {
 	repo := pgadapter.NewSecretRepo(setupTestDB(t))
 	ctx := context.Background()
 	now := time.Now()
@@ -216,10 +266,7 @@ func TestTransferCleanupDeletesEndedTransfersWithTheirMessages(t *testing.T) {
 	if err := repo.CreateTransfer(ctx, expired, 999, now.Add(-20*time.Minute)); err != nil {
 		t.Fatalf("CreateTransfer: %v", err)
 	}
-	if err := repo.PutTransferMessage(ctx, &domain.TransferMessage{TransferID: closed.TransferID, Side: domain.TransferSideSender, Phase: domain.TransferPhaseShare, Data: []byte{1}, CreatedAt: now}); err != nil {
-		t.Fatalf("PutTransferMessage: %v", err)
-	}
-	if err := repo.CloseTransfer(ctx, closed.TransferID, domain.TransferCloseDone, now.Add(-2*time.Minute)); err != nil {
+	if err := repo.CloseTransfer(ctx, closed.TransferID, domain.TransferCloseCancelled, now.Add(-2*time.Minute)); err != nil {
 		t.Fatalf("CloseTransfer: %v", err)
 	}
 
@@ -234,7 +281,7 @@ func TestTransferCleanupDeletesEndedTransfersWithTheirMessages(t *testing.T) {
 	if _, err := repo.GetTransfer(ctx, active.TransferID); err != nil {
 		t.Errorf("active transfer: %v, want it kept", err)
 	}
-	if _, err := repo.GetTransferMessage(ctx, closed.TransferID, domain.TransferSideSender, domain.TransferPhaseShare); !errors.Is(err, domain.ErrNotFound) {
-		t.Errorf("message of deleted transfer: err = %v, want ErrNotFound", err)
+	if _, err := repo.GetTransfer(ctx, closed.TransferID); !errors.Is(err, domain.ErrNotFound) {
+		t.Errorf("closed transfer: err = %v, want it deleted", err)
 	}
 }

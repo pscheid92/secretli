@@ -53,27 +53,30 @@ type UploadSessionRepo interface {
 }
 
 type TransferRepo interface {
-	// CreateTransfer stores an open transfer under the smallest nameplate from
-	// 1 to maxNameplate that no active transfer holds, and sets it on t. It
-	// returns ErrConflict when every nameplate is taken.
+	// CreateTransfer stores an open transfer, with the sender's offer, under
+	// the smallest free nameplate up to maxNameplate, first closing transfers
+	// that ran out. It returns ErrConflict when no nameplate is free and
+	// ErrDuplicate when the transfer id is taken.
 	CreateTransfer(ctx context.Context, t *Transfer, maxNameplate int, now time.Time) error
-	// ClaimTransfer hands the open transfer under nameplate to a receiver,
-	// once. It returns ErrConflict if the transfer was already claimed and
-	// ErrNotFound if no active transfer has that nameplate.
+	// ClaimTransfer hands the active, unclaimed transfer under nameplate to a
+	// receiver. It returns ErrConflict if that transfer was already claimed
+	// and ErrNotFound if there is none.
 	ClaimTransfer(ctx context.Context, nameplate int, receiverTokenHash string, now time.Time) (*Transfer, error)
 	GetTransfer(ctx context.Context, transferID string) (*Transfer, error)
-	// PutTransferMessage stores a message once; a second write for the same
-	// side and phase returns ErrDuplicate.
-	PutTransferMessage(ctx context.Context, msg *TransferMessage) error
-	GetTransferMessage(ctx context.Context, transferID, side, phase string) (*TransferMessage, error)
+	// AnswerTransfer stores the receiver's answer if the transfer is active,
+	// claimed and not answered yet, and reports whether it did.
+	AnswerTransfer(ctx context.Context, transferID string, share, confirmation []byte, now time.Time) (bool, error)
+	// DeliverTransfer stores the sealed link and closes the transfer as done
+	// if it is active and answered, and reports whether it did.
+	DeliverTransfer(ctx context.Context, transferID string, delivery []byte, now time.Time) (bool, error)
 	// CloseTransfer ends an active transfer. It returns ErrNotFound if the
-	// transfer does not exist or has already ended.
+	// transfer does not exist or already ended.
 	CloseTransfer(ctx context.Context, transferID, reason string, now time.Time) error
 }
 
 type TransferCleanupRepo interface {
-	// DeleteEndedTransfers deletes transfers, with their messages, that
-	// expired or were closed before the given time.
+	// DeleteEndedTransfers deletes transfers that expired or were closed
+	// before the given time.
 	DeleteEndedTransfers(ctx context.Context, endedBefore time.Time) (int64, error)
 }
 
