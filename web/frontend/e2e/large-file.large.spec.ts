@@ -115,14 +115,14 @@ async function retrieveBundle(
   sampleHeap: (label: string) => Promise<void>,
 ): Promise<{ revealMs: number; downloadMs: number }> {
   const revealStartedAt = performance.now();
-  await page.getByRole("button", { name: /Prepare Download/ }).click();
+  await page.getByRole("button", { name: "Show the files" }).click();
   await expect(page.locator("h1")).toHaveText("Here's your file", { timeout: TEST_TIMEOUT_MS });
   const revealMs = performance.now() - revealStartedAt;
   await sampleHeap("after manifest");
 
   const downloadStartedAt = performance.now();
   const downloadPromise = page.waitForEvent("download", { timeout: TEST_TIMEOUT_MS });
-  await page.getByRole("button", { name: "Download File" }).click();
+  await page.getByRole("button", { name: "Download file" }).click();
   const download = await downloadPromise;
   expect(download.suggestedFilename()).toBe(filename);
   await download.saveAs(outputPath);

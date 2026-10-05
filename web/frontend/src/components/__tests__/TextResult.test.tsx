@@ -34,10 +34,10 @@ describe("TextResult", () => {
     });
     renderText(true);
 
-    expect(screen.getByText(/this page has the only copy/)).toBeTruthy();
+    expect(screen.getByText(/When you leave this page, it's gone for good/)).toBeTruthy();
     expect(leavingAsks()).toBe(true);
 
-    fireEvent.click(screen.getByRole("button", { name: "Copy" }));
+    fireEvent.click(screen.getByRole("button", { name: "Copy secret" }));
 
     await waitFor(() => expect(leavingAsks()).toBe(false));
   });
@@ -53,7 +53,7 @@ describe("TextResult", () => {
   it("lets a reusable text go without asking", () => {
     renderText(false);
 
-    expect(screen.queryByText(/this page has the only copy/)).toBeNull();
+    expect(screen.queryByText(/When you leave this page, it's gone for good/)).toBeNull();
     expect(leavingAsks()).toBe(false);
   });
 });

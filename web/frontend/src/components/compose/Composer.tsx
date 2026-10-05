@@ -17,6 +17,7 @@ import Spinner from "../Spinner";
 import Button from "../ui/Button";
 import IconButton from "../ui/IconButton";
 import { CheckIcon, PaperclipIcon, PlusIcon } from "../ui/icons";
+import ProgressRow from "../ui/ProgressRow";
 import { FOCUS } from "../ui/styles";
 import TextButton from "../ui/TextButton";
 import ChipMenu, { CHIP } from "./ChipMenu";
@@ -192,9 +193,6 @@ export default function Composer({ onSubmit, busy }: ComposerProps) {
     }
     setPasswordOn(!passwordOn);
   }
-
-  const percent =
-    busy?.fraction === undefined ? null : Math.round(Math.min(Math.max(busy.fraction, 0), 1) * 100);
 
   return (
     <form onSubmit={handleSubmit} onKeyDown={handleKeyDown} className="space-y-3.5">
@@ -412,38 +410,23 @@ export default function Composer({ onSubmit, busy }: ComposerProps) {
         </div>
 
         {busy && (
-          <div className="relative border-t border-line">
-            {percent !== null && (
-              <div
-                role="progressbar"
-                aria-label="Upload"
-                aria-valuemin={0}
-                aria-valuemax={100}
-                aria-valuenow={percent}
-                className="absolute inset-x-0 top-0 h-0.5 overflow-hidden bg-line"
-              >
-                <div
-                  className="h-full bg-accent transition-[width] duration-200"
-                  style={{ width: `${percent}%` }}
-                />
-              </div>
-            )}
-            <div className="flex flex-wrap items-center gap-3 px-6 py-3 text-sm text-muted">
-              <Spinner size="sm" className="text-accent" />
-              <span role="status" className="flex-1">
-                {busy.stage === "encrypting"
-                  ? "Encrypting…"
-                  : busy.label
-                    ? `Uploading · ${busy.label}`
-                    : "Uploading…"}
-              </span>
-              {busy.onCancel && (
+          <ProgressRow
+            label={
+              busy.stage === "encrypting"
+                ? "Encrypting…"
+                : busy.label
+                  ? `Uploading · ${busy.label}`
+                  : "Uploading…"
+            }
+            fraction={busy.fraction}
+            action={
+              busy.onCancel && (
                 <TextButton tone="danger" onClick={busy.onCancel}>
                   Cancel upload
                 </TextButton>
-              )}
-            </div>
-          </div>
+              )
+            }
+          />
         )}
       </div>
 

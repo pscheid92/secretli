@@ -246,6 +246,35 @@ export function FileIcon() {
   );
 }
 
+export function ArrowRightIcon() {
+  return (
+    <Icon>
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="M4.75 12h14.5M13.5 6.25L19.25 12l-5.75 5.75"
+      />
+    </Icon>
+  );
+}
+
+export function DownloadIcon() {
+  return (
+    <Icon>
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="M12 3.75v10.5M8.25 10.5L12 14.25l3.75-3.75"
+      />
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="M4.75 15.5v1.75A2.25 2.25 0 0 0 7 19.5h10a2.25 2.25 0 0 0 2.25-2.25V15.5"
+      />
+    </Icon>
+  );
+}
+
 export function ArrowLeftIcon() {
   return (
     <Icon>

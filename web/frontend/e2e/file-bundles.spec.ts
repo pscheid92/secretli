@@ -55,14 +55,8 @@ async function revealBundle(page: Page, shareUrl: string, password?: string) {
     timeout: 10000,
   });
 
-  if (password) {
-    await page.getByRole("button", { name: "Unlock Share" }).click();
-    await expect(page.locator("h1")).toHaveText("Enter the password", { timeout: 10000 });
-    await page.fill('input[type="password"]', password);
-    await page.click('button[type="submit"]');
-  } else {
-    await page.getByRole("button", { name: /Prepare Download/ }).click();
-  }
+  if (password) await page.fill('input[type="password"]', password);
+  await page.getByRole("button", { name: "Show the files" }).click();
 }
 
 async function downloadBundleFiles(
@@ -74,7 +68,7 @@ async function downloadBundleFiles(
   page.on("download", (download) => downloads.push(download));
 
   await page
-    .getByRole("button", { name: files.length > 1 ? "Download Files" : "Download File" })
+    .getByRole("button", { name: files.length > 1 ? "Download files" : "Download file" })
     .click();
   await expect.poll(() => downloads.length, { timeout: 10000 }).toBe(files.length);
 
@@ -168,7 +162,7 @@ test.describe("File bundle sharing", () => {
     await page.goto(ownerUrl);
     await expect(page.locator("h1")).toHaveText("Your secret", { timeout: 10000 });
 
-    await page.getByRole("button", { name: "Delete share" }).click();
+    await page.getByRole("button", { name: "Delete it now" }).click();
     await page.getByRole("button", { name: "Delete permanently" }).click();
     await expect(page.getByRole("main").getByText("Secret deleted")).toBeVisible({
       timeout: 10000,

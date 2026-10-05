@@ -1,5 +1,7 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { toast } from "sonner";
+import { useCopied } from "../hooks/useCopied";
+import { copyToClipboard } from "../lib/clipboard";
 import { formatExpiry } from "../lib/format";
 import QRCode from "./QRCode";
 import DeleteShareButton from "./retrieve/DeleteShareButton";
@@ -27,30 +29,6 @@ interface SecretResultProps {
   onDelete: () => void;
 }
 
-/** How long a copy button says "Copied". */
-const COPIED_MS = 2000;
-
-/**
- * Copies text to the clipboard. Where the browser refuses, the text is
- * selected on the page instead, so it can be copied by hand.
- */
-async function copyText(text: string, shown: HTMLElement | null): Promise<boolean> {
-  try {
-    await navigator.clipboard.writeText(text);
-    return true;
-  } catch {
-    if (shown) {
-      const range = document.createRange();
-      range.selectNodeContents(shown);
-      const selection = window.getSelection();
-      selection?.removeAllRanges();
-      selection?.addRange(range);
-    }
-    toast.error("Couldn't copy automatically. The link is selected: copy it with Ctrl+C or ⌘C.");
-    return false;
-  }
-}
-
 /** Whether the browser can hand the link to the system share sheet. */
 function canShare(url: string): boolean {
   return typeof navigator.share === "function" && (navigator.canShare?.({ url }) ?? true);
@@ -64,17 +42,6 @@ async function shareLink(url: string) {
     if (err instanceof DOMException && err.name === "AbortError") return;
     toast.error("Sharing didn't work. Copy the link instead.");
   }
-}
-
-/** Flips to true for a moment after copying. */
-function useCopied(): [boolean, () => void] {
-  const [copied, setCopied] = useState(false);
-  useEffect(() => {
-    if (!copied) return;
-    const timer = setTimeout(() => setCopied(false), COPIED_MS);
-    return () => clearTimeout(timer);
-  }, [copied]);
-  return [copied, () => setCopied(true)];
 }
 
 const QUIET = "border-0 px-3.25";
@@ -137,7 +104,7 @@ export default function SecretResult({
         <div className="flex flex-wrap items-center gap-0.5 border-t border-line p-2">
           <Button
             onClick={async () => {
-              if (await copyText(url, linkRef.current)) markCopied();
+              if (await copyToClipboard(url, linkRef.current)) markCopied();
             }}
             className="mr-1 pl-4"
           >
@@ -229,19 +196,14 @@ export default function SecretResult({
                 variant="quiet"
                 className={QUIET}
                 onClick={async () => {
-                  if (await copyText(ownerUrl, ownerRef.current)) markOwnerCopied();
+                  if (await copyToClipboard(ownerUrl, ownerRef.current)) markOwnerCopied();
                 }}
               >
                 {ownerCopied ? <CheckIcon /> : <CopyIcon />}
                 {ownerCopied ? "Copied" : "Copy"}
               </Button>
             </div>
-            <DeleteShareButton
-              label="Delete it now"
-              question="Delete it for good? The link stops working right away."
-              deleting={deleting}
-              onDelete={onDelete}
-            />
+            <DeleteShareButton deleting={deleting} onDelete={onDelete} />
             <p className="text-[13px] text-faint">
               Secretli can't show these links again. Copy what you need before you leave.
             </p>

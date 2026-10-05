@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
+import type { DownloadProgress } from "../components/retrieve/BundleDownload";
 import BundleDownload from "../components/retrieve/BundleDownload";
 import LinkPrompt from "../components/retrieve/LinkPrompt";
-import PasswordPrompt from "../components/retrieve/PasswordPrompt";
 import {
   RetrieveError,
   RetrieveLoading,
@@ -10,7 +10,6 @@ import {
 } from "../components/retrieve/RetrieveStatus";
 import ShareDetails from "../components/retrieve/ShareDetails";
 import TextResult from "../components/retrieve/TextResult";
-import type { TransferProgress } from "../components/TransferStatus";
 import { usePageTitle } from "../hooks/usePageTitle";
 import {
   ApiError,
@@ -73,7 +72,6 @@ type State =
   | { stage: "prompt" }
   | { stage: "loading" }
   | { stage: "confirm"; identity: ShareIdentity; meta: DecryptedMeta }
-  | { stage: "password"; identity: ShareIdentity; meta: DecryptedMeta }
   | { stage: "decrypted"; identity: ShareIdentity; text: string; burnAfterRead: boolean }
   | {
       stage: "bundle-ready";
@@ -114,12 +112,11 @@ export default function RetrievePage() {
   const [state, setState] = useState<State>(
     initialHashRef.current ? { stage: "loading" } : { stage: "prompt" },
   );
-  const [passwordLoading, setPasswordLoading] = useState(false);
   usePageTitle("Open a secret");
   const [revealing, setRevealing] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [downloadingBundle, setDownloadingBundle] = useState(false);
-  const [downloadProgress, setDownloadProgress] = useState<TransferProgress | null>(null);
+  const [downloadProgress, setDownloadProgress] = useState<DownloadProgress | null>(null);
   const [downloadedFiles, setDownloadedFiles] = useState<DecryptedBundleFile[] | null>(null);
   // Starting a retrieval session is what burns a burn-after-read share, so a
   // started session is kept and reused until the server stops accepting it. A
@@ -186,45 +183,28 @@ export default function RetrievePage() {
     return () => window.removeEventListener("hashchange", handleHashChange);
   }, []);
 
-  async function handleReveal() {
-    if (state.stage !== "confirm") return;
+  /** Returns a message for the password field, or null once the share has been revealed. */
+  async function handleReveal(password?: string): Promise<string | null> {
+    if (state.stage !== "confirm") return null;
     const { identity, meta } = state;
-
-    if (meta.clientMeta.password_protected) {
-      setState({ stage: "password", identity, meta });
-      return;
-    }
 
     setRevealing(true);
     try {
-      await reveal(identity, identity.baseKeySet, meta.clientMeta);
-    } catch (err) {
-      handleRevealError(err);
-    } finally {
-      setRevealing(false);
-    }
-  }
-
-  /** Returns a field error message, or null once the share has been revealed. */
-  async function handlePasswordSubmit(password: string): Promise<string | null> {
-    if (state.stage !== "password") return null;
-    const { identity, meta } = state;
-
-    setPasswordLoading(true);
-    try {
-      const blobKeySet = await KeySet.fromShareSecret(identity.shareSecret, password);
+      const blobKeySet = meta.clientMeta.password_protected
+        ? await KeySet.fromShareSecret(identity.shareSecret, password ?? "")
+        : identity.baseKeySet;
       await reveal(identity, blobKeySet, meta.clientMeta);
       return null;
     } catch (err) {
       // Only a rejected blob token means a wrong password. Once the server
       // accepted it the password was right, whatever fails afterwards.
-      if (err instanceof BlobTokenRejectedError) {
-        return "Wrong password. Please try again.";
+      if (meta.clientMeta.password_protected && err instanceof BlobTokenRejectedError) {
+        return "Wrong password. Try again.";
       }
       handleRevealError(err);
       return null;
     } finally {
-      setPasswordLoading(false);
+      setRevealing(false);
     }
   }
 
@@ -436,15 +416,6 @@ export default function RetrievePage() {
           canDelete={Boolean(state.identity.deletionToken)}
           onReveal={handleReveal}
           onDelete={() => handleDelete(state.identity)}
-        />
-      );
-    case "password":
-      return (
-        <PasswordPrompt
-          clientMeta={state.meta.clientMeta}
-          burnAfterRead={state.meta.serverMeta.burn_after_read}
-          loading={passwordLoading}
-          onSubmit={handlePasswordSubmit}
         />
       );
     case "decrypted":
