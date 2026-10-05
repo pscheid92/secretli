@@ -98,25 +98,42 @@ export interface SendingTransfer {
   cancel(): void;
 }
 
+/**
+ * Whether the transfer is over on the relay already: handed over and closed,
+ * closed as a mismatch by the protocol, or ended by the other side. Closing
+ * it again would only send a misleading "cancelled".
+ */
+function transferEnded(err?: unknown): boolean {
+  return err === undefined || err instanceof CodeMismatchError || err instanceof TransferEndedError;
+}
+
 export async function startSending(link: string): Promise<SendingTransfer> {
   const opened = await openTransfer();
   const words = randomWords();
   const controller = new AbortController();
   const relay = httpTransferRelay(opened.transfer_id, opened.sender_token, controller.signal);
+  let ended = false;
   const done = sendLink(
     relay,
     { words, sid: base64UrlDecode(opened.transfer_id), origin: window.location.origin },
     link,
   );
-  // A cancelled wait rejects; whoever awaits done handles the other errors.
-  done.catch(() => {});
+  done.then(
+    () => {
+      ended = true;
+    },
+    (err) => {
+      // A cancelled wait rejects too; whoever awaits done handles the rest.
+      ended = transferEnded(err);
+    },
+  );
 
   return {
     code: formatCode(opened.nameplate, words),
     expiresAt: Date.parse(opened.expires_at),
     done,
     cancel() {
-      if (controller.signal.aborted) return;
+      if (ended || controller.signal.aborted) return;
       controller.abort();
       closeTransfer(opened.transfer_id, opened.sender_token, "cancelled", true).catch(() => {});
     },
@@ -130,20 +147,26 @@ export async function receiveWithCode(input: string, signal?: AbortSignal): Prom
     throw new CodeFormatError(parsed.error === "unknown-word" ? parsed.word : undefined);
 
   const claimed = await claimTransfer(parsed.nameplate);
-  // Tell the sender right away if the receiver gives up.
-  signal?.addEventListener(
-    "abort",
-    () => {
-      closeTransfer(claimed.transfer_id, claimed.receiver_token, "cancelled", true).catch(() => {});
-    },
-    { once: true },
-  );
+  const cancel = () => {
+    closeTransfer(claimed.transfer_id, claimed.receiver_token, "cancelled", true).catch(() => {});
+  };
+  // Tell the sender right away if the receiver gives up while waiting.
+  signal?.addEventListener("abort", cancel, { once: true });
   const relay = httpTransferRelay(claimed.transfer_id, claimed.receiver_token, signal);
-  return receiveLink(relay, {
-    words: parsed.words,
-    sid: base64UrlDecode(claimed.transfer_id),
-    origin: window.location.origin,
-  });
+  try {
+    return await receiveLink(relay, {
+      words: parsed.words,
+      sid: base64UrlDecode(claimed.transfer_id),
+      origin: window.location.origin,
+    });
+  } catch (err) {
+    // Any other failure leaves the transfer claimed; release the sender now
+    // instead of letting it wait for the expiry.
+    if (!transferEnded(err) && !signal?.aborted) cancel();
+    throw err;
+  } finally {
+    signal?.removeEventListener("abort", cancel);
+  }
 }
 
 function rateLimited(err: unknown): boolean {
