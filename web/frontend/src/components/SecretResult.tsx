@@ -1,6 +1,7 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { toast } from "sonner";
 import QRCode from "./QRCode";
+import QRCodeOverlay from "./QRCodeOverlay";
 
 interface SecretResultProps {
   url: string;
@@ -63,6 +64,13 @@ export default function SecretResult({
 }: SecretResultProps) {
   const ownerUrl = `${url}!${deletionToken}`;
   const [showQR, setShowQR] = useState(false);
+  const [showLargeQR, setShowLargeQR] = useState(false);
+  const largeQRButtonRef = useRef<HTMLButtonElement>(null);
+
+  function closeLargeQR() {
+    setShowLargeQR(false);
+    largeQRButtonRef.current?.focus();
+  }
 
   async function copyShareUrl() {
     await navigator.clipboard.writeText(url);
@@ -94,7 +102,7 @@ export default function SecretResult({
 
         <LinkField label="Recipient link" value={url} onCopy={copyShareUrl} />
 
-        <div className="flex justify-end">
+        <div className="flex justify-end gap-4">
           <button
             type="button"
             onClick={() => setShowQR(!showQR)}
@@ -102,13 +110,25 @@ export default function SecretResult({
           >
             {showQR ? "Hide QR code" : "Show QR code"}
           </button>
+          <button
+            ref={largeQRButtonRef}
+            type="button"
+            onClick={() => setShowLargeQR(true)}
+            className="text-xs font-medium text-zinc-500 transition-colors duration-150 hover:text-amber-500 dark:text-zinc-400 dark:hover:text-amber-400"
+          >
+            Show large QR code
+          </button>
         </div>
 
         {showQR && (
           <div className="flex justify-center rounded-lg border border-zinc-200 bg-white p-6 dark:border-zinc-700 dark:bg-zinc-950">
-            <QRCode url={url} />
+            <div className="inline-block rounded-lg bg-white p-2">
+              <QRCode url={url} />
+            </div>
           </div>
         )}
+
+        {showLargeQR && <QRCodeOverlay url={url} onClose={closeLargeQR} />}
 
         {burnAfterRead && (
           <div className="flex items-start gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 dark:border-amber-900/40 dark:bg-amber-900/10">
