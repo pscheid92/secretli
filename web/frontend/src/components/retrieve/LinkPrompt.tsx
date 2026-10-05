@@ -1,10 +1,19 @@
 import { useState } from "react";
 import { toast } from "sonner";
+import { canScan } from "../../lib/qrScanner";
 import { parseShareLink } from "../../lib/shareLink";
+import QRScanner from "./QRScanner";
+
+function openShare(fragment: string) {
+  window.location.href = `${window.location.pathname}#${fragment}`;
+  window.location.reload();
+}
 
 /** Landing state when the page is opened without a share fragment. */
 export default function LinkPrompt() {
   const [linkInput, setLinkInput] = useState("");
+  const [scanning, setScanning] = useState(false);
+  const scanAvailable = canScan();
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -17,8 +26,7 @@ export default function LinkPrompt() {
       toast.error("Please enter a valid Secretli link.");
       return;
     }
-    window.location.href = `${window.location.pathname}#${link.fragment}`;
-    window.location.reload();
+    openShare(link.fragment);
   }
 
   return (
@@ -28,7 +36,9 @@ export default function LinkPrompt() {
           Open a Share
         </h1>
         <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-100">
-          Paste a Secretli link to decrypt it in this browser.
+          {scanAvailable
+            ? "Paste a Secretli link or scan its QR code to decrypt it in this browser."
+            : "Paste a Secretli link to decrypt it in this browser."}
         </p>
       </div>
       <form onSubmit={handleSubmit} className="space-y-4">
@@ -48,6 +58,37 @@ export default function LinkPrompt() {
           Open Share
         </button>
       </form>
+      {scanAvailable &&
+        (scanning ? (
+          <QRScanner onScan={openShare} onCancel={() => setScanning(false)} />
+        ) : (
+          <button
+            type="button"
+            onClick={() => setScanning(true)}
+            className="flex w-full items-center justify-center gap-2 rounded-lg border border-zinc-200 px-4 py-3 text-sm font-medium text-zinc-700 transition-colors duration-150 hover:border-amber-400 hover:text-zinc-900 focus:outline-none focus:ring-2 focus:ring-amber-400/50 dark:border-zinc-500/50 dark:text-zinc-100 dark:hover:border-amber-400 dark:hover:text-white"
+          >
+            <svg
+              className="h-4 w-4"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+              strokeWidth={1.5}
+              aria-hidden="true"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                d="M6.827 6.175A2.31 2.31 0 0 1 5.186 7.23c-.38.054-.757.112-1.134.175C2.999 7.58 2.25 8.507 2.25 9.574V18a2.25 2.25 0 0 0 2.25 2.25h15A2.25 2.25 0 0 0 21.75 18V9.574c0-1.067-.75-1.994-1.802-2.169a47.865 47.865 0 0 0-1.134-.175 2.31 2.31 0 0 1-1.64-1.055l-.822-1.316a2.192 2.192 0 0 0-1.736-1.039 48.774 48.774 0 0 0-5.232 0 2.192 2.192 0 0 0-1.736 1.039l-.821 1.316Z"
+              />
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                d="M16.5 12.75a4.5 4.5 0 1 1-9 0 4.5 4.5 0 0 1 9 0Z"
+              />
+            </svg>
+            Scan QR code
+          </button>
+        ))}
     </div>
   );
 }

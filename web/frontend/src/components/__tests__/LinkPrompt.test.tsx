@@ -35,4 +35,32 @@ describe("LinkPrompt", () => {
     expect(toast.error).toHaveBeenCalledWith("Please enter a valid Secretli link.");
     expect(window.location.hash).toBe("");
   });
+
+  describe("QR scanning", () => {
+    afterEach(() => {
+      Reflect.deleteProperty(navigator, "mediaDevices");
+      Reflect.deleteProperty(window, "isSecureContext");
+    });
+
+    it("is not offered without camera access", () => {
+      render(<LinkPrompt />);
+
+      expect(screen.queryByRole("button", { name: "Scan QR code" })).toBeNull();
+    });
+
+    it("opens the scanner when camera access is available", () => {
+      Object.defineProperty(window, "isSecureContext", { value: true, configurable: true });
+      Object.defineProperty(navigator, "mediaDevices", {
+        // Never settles: this test only checks that the scanner appears.
+        value: { getUserMedia: () => new Promise(() => {}) },
+        configurable: true,
+      });
+      render(<LinkPrompt />);
+
+      fireEvent.click(screen.getByRole("button", { name: "Scan QR code" }));
+
+      expect(screen.getByRole("region", { name: "QR code scanner" })).toBeTruthy();
+      expect(screen.getByText("Starting the camera…")).toBeTruthy();
+    });
+  });
 });
