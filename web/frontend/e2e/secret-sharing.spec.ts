@@ -38,13 +38,16 @@ test.describe("Text secret sharing", () => {
     expect(decryptedText).toBe(secretText);
   });
 
-  test("create password-protected secret and retrieve", async ({ page }) => {
+  test("password-protected one-time secret: retrieve it, then get asked before leaving", async ({
+    page,
+  }) => {
     const secretText = `Password secret ${Date.now()}`;
     const password = "testpassword123";
 
     await page.goto("/share");
 
     await page.fill("#secret-text", secretText);
+    await page.getByRole("switch", { name: /Burn after reading/ }).click();
     await page.getByRole("switch", { name: /Password protection/ }).click();
     await page.fill('input[type="password"]', password);
     await page.click('button[type="submit"]');
@@ -69,6 +72,20 @@ test.describe("Text secret sharing", () => {
     await expect(page.locator("h1")).toHaveText("Decrypted Text", { timeout: 10000 });
     const decryptedText = await page.locator("pre").textContent();
     expect(decryptedText).toBe(secretText);
+
+    // The share is gone from the server now: leaving asks first, also
+    // through the app's own links.
+    await expect(page.getByText(/this page has the only copy/)).toBeVisible();
+    // The dialog blocks the click until it is answered: stay on the page.
+    const [leaving] = await Promise.all([
+      page.waitForEvent("dialog").then(async (dialog) => {
+        await dialog.dismiss();
+        return dialog;
+      }),
+      page.getByRole("link", { name: "Share" }).click(),
+    ]);
+    expect(leaving.type()).toBe("beforeunload");
+    await expect(page.locator("pre")).toHaveText(secretText);
   });
 
   test("owner link can delete a text secret before recipients retrieve it", async ({

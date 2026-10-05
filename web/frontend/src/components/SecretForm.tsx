@@ -7,6 +7,7 @@ import Spinner from "./Spinner";
 import Toggle from "./Toggle";
 import TransferStatus, { type TransferStep } from "./TransferStatus";
 import Button from "./ui/Button";
+import PasswordInput from "./ui/PasswordInput";
 
 export interface SecretFormData {
   text: string;
@@ -163,11 +164,11 @@ export default function SecretForm({ onSubmit, loading, stage }: SecretFormProps
               </div>
               {showPassword && (
                 <div className="px-3 py-3">
-                  <input
-                    type="password"
+                  <PasswordInput
                     {...register("password", {
                       validate: (v) => !showPassword || v.length > 0 || "Password is required",
                     })}
+                    aria-label="Password"
                     placeholder="Enter a password..."
                     autoFocus
                     autoComplete="off"
@@ -175,7 +176,6 @@ export default function SecretForm({ onSubmit, loading, stage }: SecretFormProps
                     data-gramm_editor="false"
                     data-enable-grammarly="false"
                     data-1p-ignore
-                    className="w-full rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2.5 text-sm text-zinc-900 placeholder:text-zinc-500 transition-colors duration-150 focus:border-amber-400 focus:outline-none focus:ring-1 focus:ring-amber-400/20 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100 dark:placeholder:text-zinc-500 dark:focus:border-amber-400"
                   />
                   {errors.password && (
                     <p className="mt-2 text-xs text-red-700 dark:text-red-400">

@@ -63,7 +63,7 @@ type State =
   | { stage: "loading" }
   | { stage: "confirm"; identity: ShareIdentity; meta: DecryptedMeta }
   | { stage: "password"; identity: ShareIdentity; meta: DecryptedMeta }
-  | { stage: "decrypted"; identity: ShareIdentity; text: string }
+  | { stage: "decrypted"; identity: ShareIdentity; text: string; burnAfterRead: boolean }
   | {
       stage: "bundle-ready";
       identity: ShareIdentity;
@@ -252,7 +252,7 @@ export default function RetrievePage() {
     }
 
     if (text !== undefined) {
-      setState({ stage: "decrypted", identity, text });
+      setState({ stage: "decrypted", identity, text, burnAfterRead: session.burn_after_read });
       return;
     }
 
@@ -430,6 +430,7 @@ export default function RetrievePage() {
       return (
         <TextResult
           text={state.text}
+          burnAfterRead={state.burnAfterRead}
           canDelete={Boolean(state.identity.deletionToken)}
           deleting={deleting}
           onDelete={() => handleDelete(state.identity)}

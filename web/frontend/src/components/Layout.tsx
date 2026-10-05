@@ -1,5 +1,6 @@
 import { Link, Outlet, useLocation } from "react-router";
 import { Toaster } from "sonner";
+import { useLeaveWarningActive } from "../hooks/useLeaveWarning";
 import { useTheme } from "../hooks/useTheme";
 import BuildVersion from "./BuildVersion";
 import IconButton from "./ui/IconButton";
@@ -70,6 +71,7 @@ function navLinkClass(active: boolean): string {
 export default function Layout() {
   const { theme, cycle } = useTheme();
   const location = useLocation();
+  const reloadDocument = useLeaveWarningActive();
 
   const isShareActive =
     location.pathname === "/" || location.pathname === "/share" || location.pathname === "/file";
@@ -86,7 +88,7 @@ export default function Layout() {
       />
       <header className="sticky top-0 z-50 border-b border-zinc-200 dark:border-zinc-500/50 bg-white/90 dark:bg-zinc-950/90 backdrop-blur-md">
         <nav className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3 sm:px-6">
-          <Link to="/" className="flex items-center gap-2 group">
+          <Link to="/" reloadDocument={reloadDocument} className="flex items-center gap-2 group">
             <span className="font-display text-sm font-semibold tracking-[0.2em] uppercase text-zinc-800 dark:text-zinc-100">
               Secretli
             </span>
@@ -96,6 +98,7 @@ export default function Layout() {
           <div className="flex items-center gap-5 sm:gap-8">
             <Link
               to="/share"
+              reloadDocument={reloadDocument}
               aria-current={isShareActive ? "page" : undefined}
               className={navLinkClass(isShareActive)}
             >
@@ -103,6 +106,7 @@ export default function Layout() {
             </Link>
             <Link
               to="/s"
+              reloadDocument={reloadDocument}
               aria-current={isOpenActive ? "page" : undefined}
               className={navLinkClass(isOpenActive)}
             >

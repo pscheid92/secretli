@@ -104,9 +104,13 @@ export default function ShareDetails({
       <aside className="space-y-4 lg:sticky lg:top-24">
         {serverMeta.burn_after_read && (
           <BurnWarning>
-            {isBundle
-              ? "These files can be downloaded only once. Once you start, the link stops working, so keep this page open until the download finishes."
-              : "This share can be opened only once. Once you reveal it, the link stops working, so copy what you need."}
+            {canDelete
+              ? // The owner link of a one-time share: revealing it here would
+                // take it away from the recipient.
+                "This is your owner link, and nobody has opened the share yet. Revealing it here uses it up: your recipient won't be able to open it. To remove it instead, use Delete share."
+              : isBundle
+                ? "These files can be downloaded only once. Once you start, the link stops working, so keep this page open until the download finishes."
+                : "This share can be opened only once. Once you reveal it, the link stops working, so copy what you need."}
           </BurnWarning>
         )}
         <section className="rounded-lg border border-zinc-200 bg-white px-4 py-4 dark:border-zinc-700 dark:bg-zinc-900">

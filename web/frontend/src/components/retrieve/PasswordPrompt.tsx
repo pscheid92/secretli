@@ -2,6 +2,7 @@ import { useForm } from "react-hook-form";
 import type { SecretMeta } from "../../lib/encryption";
 import Spinner from "../Spinner";
 import Button from "../ui/Button";
+import PasswordInput from "../ui/PasswordInput";
 import BurnWarning from "./BurnWarning";
 
 interface PasswordPromptProps {
@@ -23,6 +24,7 @@ export default function PasswordPrompt({
     handleSubmit,
     formState: { errors },
     setError,
+    setFocus,
   } = useForm<{ password: string }>({ defaultValues: { password: "" } });
 
   const isBundle = clientMeta.type === "bundle";
@@ -47,12 +49,16 @@ export default function PasswordPrompt({
       <form
         onSubmit={handleSubmit(async (data) => {
           const message = await onSubmit(data.password);
-          if (message) setError("password", { message });
+          if (message) {
+            setError("password", { message });
+            // Selected, so retyping replaces the mistyped password.
+            setFocus("password", { shouldSelect: true });
+          }
         })}
         className="space-y-4"
       >
-        <input
-          type="password"
+        <PasswordInput
+          large
           {...register("password", { required: "Password is required" })}
           aria-label="Password"
           placeholder="Enter password..."
@@ -62,7 +68,6 @@ export default function PasswordPrompt({
           data-gramm_editor="false"
           data-enable-grammarly="false"
           data-1p-ignore
-          className="w-full rounded-lg border border-zinc-200 dark:border-zinc-500/50 bg-white dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 px-4 py-3 text-sm placeholder:text-zinc-500 dark:placeholder:text-zinc-500 focus:outline-none focus:border-amber-400 dark:focus:border-amber-400 focus:ring-1 focus:ring-amber-400/20 transition-colors duration-150"
         />
         {errors.password && (
           <p className="text-xs text-red-700 dark:text-red-400">{errors.password.message}</p>
