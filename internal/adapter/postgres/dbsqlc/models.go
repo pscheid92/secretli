@@ -8,6 +8,21 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+type CodeTransfer struct {
+	TransferID         string
+	Nameplate          int32
+	SenderTokenHash    string
+	ReceiverTokenHash  pgtype.Text
+	Offer              []byte
+	AnswerShare        []byte
+	AnswerConfirmation []byte
+	Delivery           []byte
+	CloseReason        pgtype.Text
+	CreatedAt          pgtype.Timestamptz
+	ExpiresAt          pgtype.Timestamptz
+	ClosedAt           pgtype.Timestamptz
+}
+
 type RetrievalSession struct {
 	ID               int64
 	PublicID         string
