@@ -3,13 +3,22 @@ export class ApiError extends Error {
   readonly requestId?: string;
   /** The server's Retry-After header, for callers that retry. */
   readonly retryAfter?: string;
+  /** Structured details from the error body, such as why a transfer ended. */
+  readonly details?: Readonly<Record<string, unknown>>;
 
-  constructor(status: number, message: string, requestId?: string, retryAfter?: string) {
+  constructor(
+    status: number,
+    message: string,
+    requestId?: string,
+    retryAfter?: string,
+    details?: Readonly<Record<string, unknown>>,
+  ) {
     super(requestId ? `${message} (request id: ${requestId})` : message);
     this.name = "ApiError";
     this.status = status;
     this.requestId = requestId;
     this.retryAfter = retryAfter;
+    this.details = details;
   }
 }
 
@@ -168,6 +177,7 @@ async function apiErrorFromResponse(res: Response, fallbackRequestID: string): P
     message,
     requestIDFromResponse(res, fallbackRequestID),
     res.headers.get("Retry-After") ?? undefined,
+    body?.details,
   );
 }
 
@@ -320,4 +330,81 @@ export function uploadSessionPart(
 export async function getVersion(): Promise<string> {
   const { version } = await request<{ version: string }>("/api/v1/version", { method: "GET" });
   return version;
+}
+
+// --- Short-code transfers ---
+
+export type TransferPhaseName = "share" | "confirm" | "payload";
+export type TransferCloseReasonName = "done" | "cancelled" | "mismatch";
+
+export interface OpenTransferResponse {
+  readonly nameplate: number;
+  readonly transfer_id: string;
+  readonly sender_token: string;
+  readonly expires_at: string;
+}
+
+export interface ClaimTransferResponse {
+  readonly transfer_id: string;
+  readonly receiver_token: string;
+  readonly expires_at: string;
+}
+
+export function openTransfer(): Promise<OpenTransferResponse> {
+  return request("/api/v1/transfers", { method: "POST" });
+}
+
+export function claimTransfer(nameplate: number): Promise<ClaimTransferResponse> {
+  return request("/api/v1/transfers/claim", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ nameplate }),
+  });
+}
+
+/** Stores this side's message; data is unpadded base64url. */
+export function putTransferMessage(
+  transferID: string,
+  token: string,
+  phase: TransferPhaseName,
+  data: string,
+  signal?: AbortSignal,
+): Promise<void> {
+  return request(`/api/v1/transfers/${transferID}/messages/${phase}`, {
+    method: "PUT",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ data }),
+    signal,
+  });
+}
+
+/**
+ * One long-poll for the other side's message. Resolves with its base64url
+ * data, or null when the server's poll window passed without one.
+ */
+export async function pollTransferMessage(
+  transferID: string,
+  token: string,
+  phase: TransferPhaseName,
+  signal?: AbortSignal,
+): Promise<string | null> {
+  const body = await request<{ data: string } | undefined>(
+    `/api/v1/transfers/${transferID}/messages/${phase}`,
+    { method: "GET", headers: { Authorization: `Bearer ${token}` }, signal },
+  );
+  return body?.data ?? null;
+}
+
+/** Ends a transfer. keepalive lets the request finish while the page unloads. */
+export function closeTransfer(
+  transferID: string,
+  token: string,
+  reason: TransferCloseReasonName,
+  keepalive = false,
+): Promise<void> {
+  return request(`/api/v1/transfers/${transferID}?reason=${reason}`, {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${token}` },
+    keepalive,
+  });
 }

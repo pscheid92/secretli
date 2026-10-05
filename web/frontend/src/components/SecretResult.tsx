@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import QRCode from "./QRCode";
+import SendWithCode from "./SendWithCode";
 
 interface SecretResultProps {
   url: string;
@@ -63,6 +64,7 @@ export default function SecretResult({
 }: SecretResultProps) {
   const ownerUrl = `${url}!${deletionToken}`;
   const [showQR, setShowQR] = useState(false);
+  const [sendingCode, setSendingCode] = useState(false);
   const qrRef = useRef<HTMLDivElement>(null);
 
   // On shorter screens the code reaches below the fold.
@@ -100,7 +102,7 @@ export default function SecretResult({
 
         <LinkField label="Recipient link" value={url} onCopy={copyShareUrl} />
 
-        <div className="flex justify-end">
+        <div className="flex justify-end gap-4">
           <button
             type="button"
             onClick={() => setShowQR(!showQR)}
@@ -108,7 +110,16 @@ export default function SecretResult({
           >
             {showQR ? "Hide QR code" : "Show QR code"}
           </button>
+          <button
+            type="button"
+            onClick={() => setSendingCode(!sendingCode)}
+            className="text-xs font-medium text-zinc-500 transition-colors duration-150 hover:text-amber-500 dark:text-zinc-400 dark:hover:text-amber-400"
+          >
+            {sendingCode ? "Stop sending" : "Send with a code"}
+          </button>
         </div>
+
+        {sendingCode && <SendWithCode url={url} onClose={() => setSendingCode(false)} />}
 
         {showQR && (
           <div
