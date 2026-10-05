@@ -1,36 +1,28 @@
+import { type FormEvent, useId, useRef, useState } from "react";
 import type { SecretMetadataResponse } from "../../lib/api";
 import type { SecretMeta } from "../../lib/encryption";
-import { formatRelativeTime, formatSize } from "../../lib/format";
-import SecretTypeIcon from "../SecretTypeIcon";
+import { formatExpiry, formatRelativeTime, formatSize } from "../../lib/format";
 import Spinner from "../Spinner";
 import Button from "../ui/Button";
+import { LockIcon } from "../ui/icons";
+import Note from "../ui/Note";
 import PageTitle from "../ui/PageTitle";
-import BurnWarning from "./BurnWarning";
+import PasswordInput from "../ui/PasswordInput";
 import DeleteShareButton from "./DeleteShareButton";
 
-function MetaRow({ label, value, accent }: { label: string; value: string; accent?: boolean }) {
-  return (
-    <div className="flex items-center justify-between py-2.5 text-sm">
-      <span className="text-zinc-600 dark:text-zinc-100">{label}</span>
-      <span
-        className={
-          accent
-            ? "text-amber-700 dark:text-amber-400 font-medium"
-            : "text-zinc-600 dark:text-zinc-100"
-        }
-      >
-        {value}
-      </span>
-    </div>
-  );
+/** Label for the button that starts decryption, given what the share is. */
+export function revealLabel(clientMeta: SecretMeta): string {
+  return clientMeta.type === "bundle" ? "Show the files" : "Reveal secret";
 }
 
-/** Label for the button that starts decryption, given what the share is. */
-export function revealLabel(clientMeta: SecretMeta, burnAfterRead: boolean): string {
-  if (clientMeta.password_protected) return "Unlock Share";
-  const isBundle = clientMeta.type === "bundle";
-  if (burnAfterRead) return isBundle ? "Prepare Download & Burn" : "Reveal & Burn";
-  return isBundle ? "Prepare Download" : "Reveal Text";
+/** What a recipient is told before deciding to open it. */
+function recipientLead(serverMeta: SecretMetadataResponse, isBundle: boolean): string {
+  const size = isBundle && serverMeta.blob_size > 0 ? ` (${formatSize(serverMeta.blob_size)})` : "";
+  const sent = `${isBundle ? `A set of files${size}, sent` : "Sent"} ${formatRelativeTime(serverMeta.created_at)}.`;
+  const opens = serverMeta.burn_after_read
+    ? "It opens once, then it's gone."
+    : "It can be opened until the link expires.";
+  return `${sent} ${opens} The link expires ${formatExpiry(serverMeta.expires_at)}.`;
 }
 
 interface ShareDetailsProps {
@@ -39,7 +31,8 @@ interface ShareDetailsProps {
   revealing: boolean;
   deleting: boolean;
   canDelete: boolean;
-  onReveal: () => void;
+  /** Resolves to a message for the password field, or null once the secret is open. */
+  onReveal: (password?: string) => Promise<string | null>;
   onDelete: () => void;
 }
 
@@ -54,80 +47,91 @@ export default function ShareDetails({
   onDelete,
 }: ShareDetailsProps) {
   const isBundle = clientMeta.type === "bundle";
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const passwordRef = useRef<HTMLInputElement>(null);
+  const passwordId = useId();
+  const errorId = useId();
+
+  async function handleSubmit(e: FormEvent) {
+    e.preventDefault();
+    if (revealing) return;
+    const message = await onReveal(clientMeta.password_protected ? password : undefined);
+    if (message) {
+      setError(message);
+      // Selected, so retyping replaces the mistyped password.
+      passwordRef.current?.focus();
+      passwordRef.current?.select();
+    }
+  }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-8">
       {canDelete ? (
-        <PageTitle lead="This is your owner link. You can open the secret, or delete it for everyone.">
+        <PageTitle
+          lead={`This is your owner link. You can open the secret, or delete it for everyone. The link expires ${formatExpiry(serverMeta.expires_at)}.`}
+        >
           Your secret
         </PageTitle>
       ) : (
-        <PageTitle lead="Review the details before this browser decrypts it.">
-          Someone sent you a secret
-        </PageTitle>
+        <PageTitle lead={recipientLead(serverMeta, isBundle)}>Someone sent you a secret</PageTitle>
       )}
 
-      <section className="space-y-5 rounded-lg border border-zinc-200 bg-white p-5 dark:border-zinc-700 dark:bg-zinc-900">
-        <div className="divide-y divide-zinc-200 rounded-lg border border-zinc-200 dark:divide-zinc-700 dark:border-zinc-700">
-          <div className="flex items-center gap-2.5 px-4 py-3">
-            <SecretTypeIcon
-              type={clientMeta.type}
-              className="h-4 w-4 text-zinc-500 dark:text-zinc-100"
+      {canDelete && serverMeta.burn_after_read && (
+        // The owner link of a one-time share: opening it here would take it
+        // away from the recipient.
+        <Note>
+          Nobody has opened it yet. Opening it here uses it up: your recipient won't be able to. To
+          remove it instead, delete it below.
+        </Note>
+      )}
+
+      <form onSubmit={handleSubmit} className="flex max-w-md flex-col gap-4">
+        {clientMeta.password_protected && (
+          <div className="flex flex-col gap-2">
+            <label htmlFor={passwordId} className="px-1 text-sm font-medium text-muted">
+              Password
+            </label>
+            <PasswordInput
+              ref={passwordRef}
+              id={passwordId}
+              value={password}
+              onChange={(e) => {
+                setPassword(e.target.value);
+                setError(null);
+              }}
+              placeholder="From the sender"
+              aria-invalid={error ? true : undefined}
+              aria-describedby={error ? errorId : undefined}
+              autoFocus
+              autoComplete="off"
+              spellCheck={false}
+              data-gramm="false"
+              data-gramm_editor="false"
+              data-enable-grammarly="false"
+              data-1p-ignore
             />
-            <span className="text-sm font-medium text-zinc-700 dark:text-zinc-100">
-              {isBundle ? "Files" : "Text"}
-            </span>
+            {error && (
+              <p id={errorId} className="px-1 text-sm text-danger">
+                {error}
+              </p>
+            )}
           </div>
-          <div className="px-4">
-            <MetaRow label="Created" value={formatRelativeTime(serverMeta.created_at)} />
-          </div>
-          <div className="px-4">
-            <MetaRow label="Expires" value={formatRelativeTime(serverMeta.expires_at)} />
-          </div>
-          {isBundle && serverMeta.blob_size > 0 && (
-            <div className="px-4">
-              <MetaRow label="Size" value={formatSize(serverMeta.blob_size)} />
-            </div>
-          )}
-          {clientMeta.password_protected && (
-            <div className="px-4">
-              <MetaRow label="Password" value="Required" accent />
-            </div>
-          )}
-        </div>
+        )}
+        <Button type="submit" size="lg" disabled={revealing} className="self-start">
+          {revealing && <Spinner size="sm" />}
+          {revealing ? "Decrypting…" : revealLabel(clientMeta)}
+        </Button>
+      </form>
 
-        {isBundle && (
-          <p className="text-xs leading-relaxed text-zinc-500 dark:text-zinc-400">
-            File names and sizes are hidden until the encrypted manifest is opened.
-          </p>
-        )}
-      </section>
+      <p className="flex items-center gap-2.5 text-[13px] text-faint">
+        <LockIcon />
+        Decrypted here, in your browser. The server never sees what's inside.
+      </p>
 
-      <div className="space-y-4">
-        {serverMeta.burn_after_read && (
-          <BurnWarning>
-            {canDelete
-              ? // The owner link of a one-time share: revealing it here would
-                // take it away from the recipient.
-                "Nobody has opened it yet. Revealing it here uses it up: your recipient won't be able to open it. To remove it instead, use Delete share."
-              : isBundle
-                ? "These files can be downloaded only once. Once you start, the link stops working, so keep this page open until the download finishes."
-                : "This share can be opened only once. Once you reveal it, the link stops working, so copy what you need."}
-          </BurnWarning>
-        )}
-        <section className="rounded-lg border border-zinc-200 bg-white px-4 py-4 dark:border-zinc-700 dark:bg-zinc-900">
-          <h2 className="text-xs font-semibold uppercase tracking-widest text-zinc-500 dark:text-zinc-400">
-            Next step
-          </h2>
-          <Button size="lg" block onClick={onReveal} disabled={revealing} className="mt-4">
-            {revealing && <Spinner size="sm" className="text-zinc-700" />}
-            {revealing ? "Decrypting..." : revealLabel(clientMeta, serverMeta.burn_after_read)}
-          </Button>
-        </section>
-        {canDelete && (
-          <DeleteShareButton deleting={deleting} disabled={revealing} onDelete={onDelete} />
-        )}
-      </div>
+      {canDelete && (
+        <DeleteShareButton deleting={deleting} disabled={revealing} onDelete={onDelete} />
+      )}
     </div>
   );
 }

@@ -3,13 +3,20 @@ import { useLeaveWarning } from "../../hooks/useLeaveWarning";
 import { type BundleManifest, type DecryptedBundleFile, manifestTotalSize } from "../../lib/bundle";
 import { saveBlob } from "../../lib/download";
 import { formatSize } from "../../lib/format";
-import Spinner from "../Spinner";
-import TransferStatus, { type TransferProgress } from "../TransferStatus";
 import Button from "../ui/Button";
+import { ArrowRightIcon, DownloadIcon, FileIcon } from "../ui/icons";
+import Note from "../ui/Note";
 import PageTitle from "../ui/PageTitle";
+import ProgressRow from "../ui/ProgressRow";
+import { textButtonClass } from "../ui/styles";
 import TextButton from "../ui/TextButton";
-import BurnWarning from "./BurnWarning";
 import DeleteShareButton from "./DeleteShareButton";
+
+/** 0..1 of the files decrypted so far, with a label like "4.0 MB / 10.0 MB". */
+export interface DownloadProgress {
+  fraction: number;
+  label: string;
+}
 
 function secondsUntil(iso: string): number {
   return Math.max(0, Math.floor((new Date(iso).getTime() - Date.now()) / 1000));
@@ -36,7 +43,7 @@ interface BundleDownloadProps {
   sessionExpiresAt: string;
   burnAfterRead: boolean;
   downloading: boolean;
-  progress: TransferProgress | null;
+  progress: DownloadProgress | null;
   downloadedFiles: DecryptedBundleFile[] | null;
   canDelete: boolean;
   deleting: boolean;
@@ -68,131 +75,83 @@ export default function BundleDownload({
   const onlyCopyHere = burnAfterRead && !downloadedFiles && !expired;
   useLeaveWarning(onlyCopyHere);
 
+  const note = downloadedFiles
+    ? isMulti
+      ? "Saved. If your browser blocked one of them, use Save next to that file."
+      : "Saved. Use Save to save it again."
+    : expired
+      ? burnAfterRead
+        ? "The download window closed. This one-time secret can't be opened again."
+        : "The download window closed. Open the link again to start a new one."
+      : `${formatCountdown(secondsLeft)} left to download${
+          burnAfterRead ? ", and it opens only once: stay on this page until it's done." : "."
+        }`;
+
   return (
-    <div className="space-y-6">
+    <div className="space-y-7">
       <PageTitle
         lead={`${manifest.files.length} ${isMulti ? "files" : "file"} · ${formatSize(totalSize)}`}
       >
         {isMulti ? "Here are your files" : "Here's your file"}
       </PageTitle>
 
-      <section className="space-y-5 rounded-lg border border-zinc-200 bg-white p-5 dark:border-zinc-700 dark:bg-zinc-900">
-        <div className="divide-y divide-zinc-200 rounded-lg border border-zinc-200 dark:divide-zinc-700 dark:border-zinc-700">
+      <div className="overflow-hidden rounded-[20px] border border-line bg-surface shadow-card">
+        <ul className="m-0 list-none px-2.5 pt-2.5 pb-1.5">
           {manifest.files.map((file) => {
             const downloaded = downloadedFiles?.find((entry) => entry.file.index === file.index);
             return (
-              <div
+              <li
                 key={`${file.index}-${file.path}`}
                 data-testid={`bundle-file-${file.index}`}
-                className="grid grid-cols-[1fr_auto] items-center gap-4 px-4 py-3"
+                className="flex min-h-13 items-center gap-3 pr-2 pl-3.5"
               >
-                <span className="min-w-0 truncate font-mono text-sm font-medium text-zinc-700 dark:text-zinc-100">
+                <span className="flex text-faint">
+                  <FileIcon />
+                </span>
+                <span
+                  className="min-w-0 flex-1 truncate font-mono text-sm text-ink"
+                  title={file.path}
+                >
                   {file.path}
                 </span>
-                <span className="flex items-center gap-3">
-                  <span className="text-xs tabular-nums text-zinc-500 dark:text-zinc-400">
-                    {formatSize(file.size)}
-                  </span>
-                  {downloaded && (
-                    <TextButton onClick={() => saveBlob(downloaded.blob, downloaded.file.name)}>
-                      Save
-                    </TextButton>
-                  )}
-                </span>
-              </div>
+                <span className="text-[13px] tabular-nums text-faint">{formatSize(file.size)}</span>
+                {downloaded && (
+                  <TextButton onClick={() => saveBlob(downloaded.blob, downloaded.file.name)}>
+                    Save
+                  </TextButton>
+                )}
+              </li>
             );
           })}
+        </ul>
+        <div className="flex flex-wrap items-center gap-0.5 border-t border-line p-2">
+          <Button onClick={onDownloadAll} disabled={!canDownload} className="pl-4">
+            <DownloadIcon />
+            {downloading
+              ? "Preparing…"
+              : downloadedFiles
+                ? "Save again"
+                : isMulti
+                  ? "Download files"
+                  : "Download file"}
+          </Button>
         </div>
-      </section>
-
-      <div className="space-y-4">
-        <section className="rounded-lg border border-zinc-200 bg-white px-4 py-4 dark:border-zinc-700 dark:bg-zinc-900">
-          <h2 className="text-xs font-semibold uppercase tracking-widest text-zinc-500 dark:text-zinc-400">
-            Bundle
-          </h2>
-          <div className="mt-2 divide-y divide-zinc-200 dark:divide-zinc-700">
-            <div className="py-3">
-              <div className="text-xs text-zinc-500 dark:text-zinc-400">Name</div>
-              <div className="mt-1 truncate text-sm font-medium text-zinc-900 dark:text-zinc-100">
-                {manifest.bundleName}
-              </div>
-            </div>
-            <div className="py-3">
-              <div className="text-xs text-zinc-500 dark:text-zinc-400">Files</div>
-              <div className="mt-1 text-sm font-medium text-zinc-900 dark:text-zinc-100">
-                {manifest.files.length}
-              </div>
-            </div>
-            <div className="py-3">
-              <div className="text-xs text-zinc-500 dark:text-zinc-400">Total size</div>
-              <div className="mt-1 text-sm font-medium text-zinc-900 dark:text-zinc-100">
-                {formatSize(totalSize)}
-              </div>
-            </div>
-            {!downloadedFiles && (
-              <div className="py-3">
-                <div className="text-xs text-zinc-500 dark:text-zinc-400">Download window</div>
-                <div
-                  className={`mt-1 text-sm font-medium tabular-nums ${
-                    expired
-                      ? "text-red-600 dark:text-red-400"
-                      : secondsLeft < 120
-                        ? "text-amber-700 dark:text-amber-400"
-                        : "text-zinc-900 dark:text-zinc-100"
-                  }`}
-                >
-                  {expired ? "Expired" : `${formatCountdown(secondsLeft)} remaining`}
-                </div>
-              </div>
-            )}
-          </div>
-        </section>
-
-        {expired && (
-          <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-xs text-red-700 dark:border-red-900/40 dark:bg-red-900/10 dark:text-red-400">
-            {burnAfterRead
-              ? "The download window has closed. This share was consumed when it was opened and can no longer be downloaded."
-              : "The download window has closed. Open the link again to start a new one."}
-          </div>
-        )}
-
         {downloading && (
-          <TransferStatus
-            title={isMulti ? "Preparing files" : "Preparing file"}
-            progress={progress ?? undefined}
-            steps={[
-              { label: "Reading encrypted data", state: "active" },
-              { label: "Decrypting", state: "active" },
-              { label: "Saving", state: "pending" },
-            ]}
+          <ProgressRow
+            label={progress ? `Decrypting · ${progress.label}` : "Reading the encrypted data…"}
+            fraction={progress?.fraction}
           />
         )}
-        {isMulti && (
-          <p className="text-xs leading-relaxed text-zinc-500 dark:text-zinc-400">
-            Your browser will save {manifest.files.length} files. If it blocks some of them, use the
-            Save buttons next to each file.
-          </p>
-        )}
-        {onlyCopyHere && (
-          <BurnWarning>
-            This one-time share is already deleted from the server. Download the files now: if you
-            leave this page first, they're gone.
-          </BurnWarning>
-        )}
-        <Button size="lg" block onClick={onDownloadAll} disabled={!canDownload}>
-          {downloading && <Spinner size="sm" className="text-zinc-700" />}
-          {downloading
-            ? "Preparing..."
-            : downloadedFiles
-              ? isMulti
-                ? "Save Files Again"
-                : "Save File Again"
-              : isMulti
-                ? "Download Files"
-                : "Download File"}
-        </Button>
-        {canDelete && <DeleteShareButton deleting={deleting} onDelete={onDelete} />}
       </div>
+
+      <Note>{note}</Note>
+
+      {canDelete && <DeleteShareButton deleting={deleting} onDelete={onDelete} />}
+
+      <a href="/share" className={textButtonClass("muted")}>
+        Share a secret of your own
+        <ArrowRightIcon />
+      </a>
     </div>
   );
 }

@@ -67,11 +67,8 @@ test.describe("Text secret sharing", () => {
 
     await expect(page.locator("h1")).toHaveText("Someone sent you a secret", { timeout: 10000 });
 
-    await page.getByRole("button", { name: "Unlock Share" }).click();
-
-    await expect(page.locator("h1")).toHaveText("Enter the password", { timeout: 10000 });
+    // The password field sits right on the page the link opens.
     await expectAccessible(page);
-
     await page.fill('input[type="password"]', password);
     await page.click('button[type="submit"]');
 
@@ -81,14 +78,14 @@ test.describe("Text secret sharing", () => {
 
     // The share is gone from the server now: leaving asks first, also
     // through the app's own links.
-    await expect(page.getByText(/this page has the only copy/)).toBeVisible();
+    await expect(page.getByText(/When you leave this page, it's gone for good/)).toBeVisible();
     // The dialog blocks the click until it is answered: stay on the page.
     const [leaving] = await Promise.all([
       page.waitForEvent("dialog").then(async (dialog) => {
         await dialog.dismiss();
         return dialog;
       }),
-      page.getByRole("link", { name: "Share" }).click(),
+      page.getByRole("link", { name: "Share", exact: true }).click(),
     ]);
     expect(leaving.type()).toBe("beforeunload");
     await expect(page.locator("pre")).toHaveText(secretText);
@@ -116,7 +113,7 @@ test.describe("Text secret sharing", () => {
     await page.goto(ownerUrl);
     await expect(page.locator("h1")).toHaveText("Your secret", { timeout: 10000 });
 
-    await page.getByRole("button", { name: "Delete share" }).click();
+    await page.getByRole("button", { name: "Delete it now" }).click();
     await expectAccessible(page);
     await page.getByRole("button", { name: "Delete permanently" }).click();
     await expect(page.getByRole("main").getByText("Secret deleted")).toBeVisible({

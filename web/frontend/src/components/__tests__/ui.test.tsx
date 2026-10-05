@@ -34,7 +34,7 @@ describe("shared buttons", () => {
   it("let a password field show what was typed, and hide it again", () => {
     render(<PasswordInput aria-label="Password" defaultValue="hunter2" />);
     const field = screen.getByLabelText("Password") as HTMLInputElement;
-    const toggle = screen.getByRole("button", { name: "Show password" });
+    const toggle = screen.getByRole("button", { name: "Show" });
 
     expect(field.type).toBe("password");
     fireEvent.click(toggle);

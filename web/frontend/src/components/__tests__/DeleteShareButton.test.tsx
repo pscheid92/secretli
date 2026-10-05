@@ -6,10 +6,10 @@ describe("DeleteShareButton", () => {
     const onDelete = vi.fn();
     render(<DeleteShareButton deleting={false} onDelete={onDelete} />);
 
-    fireEvent.click(screen.getByRole("button", { name: "Delete share" }));
+    fireEvent.click(screen.getByRole("button", { name: "Delete it now" }));
 
     expect(onDelete).not.toHaveBeenCalled();
-    expect(screen.getByRole("group", { name: "Delete share" })).toBeTruthy();
+    expect(screen.getByRole("group", { name: "Delete it now" })).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Delete permanently" }));
     expect(onDelete).toHaveBeenCalledTimes(1);
   });
@@ -18,17 +18,17 @@ describe("DeleteShareButton", () => {
     const onDelete = vi.fn();
     render(<DeleteShareButton deleting={false} onDelete={onDelete} />);
 
-    fireEvent.click(screen.getByRole("button", { name: "Delete share" }));
+    fireEvent.click(screen.getByRole("button", { name: "Delete it now" }));
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
 
     expect(onDelete).not.toHaveBeenCalled();
-    expect(screen.getByRole("button", { name: "Delete share" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Delete it now" })).toBeTruthy();
   });
 
   it("disables both buttons while the deletion runs", () => {
     render(<DeleteShareButton deleting onDelete={vi.fn()} />);
 
-    expect(screen.getByRole("button", { name: "Deleting..." }).hasAttribute("disabled")).toBe(true);
+    expect(screen.getByRole("button", { name: "Deleting…" }).hasAttribute("disabled")).toBe(true);
     expect(screen.getByRole("button", { name: "Cancel" }).hasAttribute("disabled")).toBe(true);
   });
 });

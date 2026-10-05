@@ -82,12 +82,8 @@ function failNextRangeRead(error: Error) {
   });
 }
 
-async function openPasswordPrompt() {
-  fireEvent.click(await screen.findByRole("button", { name: "Unlock Share" }));
-}
-
 async function submitPassword(password: string) {
-  const input = await screen.findByPlaceholderText("Enter password...");
+  const input = await screen.findByLabelText("Password");
   fireEvent.change(input, { target: { value: password } });
   fireEvent.submit(input.closest("form") as HTMLFormElement);
 }
@@ -103,12 +99,12 @@ describe("RetrievePage", () => {
     failNextRangeRead(new ApiError(503, "storage unavailable"));
     render(<RetrievePage />);
 
-    fireEvent.click(await screen.findByRole("button", { name: "Reveal & Burn" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Reveal secret" }));
     await waitFor(() => expect(toast.error).toHaveBeenCalled());
 
     // The page stays put, and trying again reuses the session that burned the
     // share instead of starting one the server would refuse.
-    fireEvent.click(await screen.findByRole("button", { name: "Reveal & Burn" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Reveal secret" }));
     expect(await screen.findByText(SECRET_TEXT)).toBeTruthy();
     expect(api.startRetrievalSession).toHaveBeenCalledTimes(1);
   });
@@ -118,14 +114,14 @@ describe("RetrievePage", () => {
     failNextRangeRead(new ApiError(403, "invalid retrieval session"));
     render(<RetrievePage />);
 
-    fireEvent.click(await screen.findByRole("button", { name: "Reveal Text" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Reveal secret" }));
     await waitFor(() =>
       expect(toast.error).toHaveBeenCalledWith(
         "The download window has expired. Please try again.",
       ),
     );
 
-    fireEvent.click(await screen.findByRole("button", { name: "Reveal Text" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Reveal secret" }));
     expect(await screen.findByText(SECRET_TEXT)).toBeTruthy();
     expect(api.startRetrievalSession).toHaveBeenCalledTimes(2);
   });
@@ -134,15 +130,12 @@ describe("RetrievePage", () => {
     await publishTextShare({ password: "correct horse" });
     render(<RetrievePage />);
 
-    await openPasswordPrompt();
     await submitPassword("wrong horse");
-    expect(
-      await screen.findByText("Wrong password. Please try again.", {}, AFTER_PASSWORD),
-    ).toBeTruthy();
+    expect(await screen.findByText("Wrong password. Try again.", {}, AFTER_PASSWORD)).toBeTruthy();
     expect(api.retrieveSecretRange).not.toHaveBeenCalled();
 
     // Selected, so typing again replaces the mistyped password.
-    const input = screen.getByPlaceholderText("Enter password...") as HTMLInputElement;
+    const input = screen.getByLabelText("Password") as HTMLInputElement;
     await waitFor(() => expect(document.activeElement).toBe(input));
     expect([input.selectionStart, input.selectionEnd]).toEqual([0, "wrong horse".length]);
   }, 30_000);
@@ -152,14 +145,13 @@ describe("RetrievePage", () => {
     failNextRangeRead(new ApiError(0, "Network error — please check your connection"));
     render(<RetrievePage />);
 
-    await openPasswordPrompt();
     await submitPassword("correct horse");
     await waitFor(
       () =>
         expect(toast.error).toHaveBeenCalledWith("Network error — please check your connection"),
       AFTER_PASSWORD,
     );
-    expect(screen.queryByText("Wrong password. Please try again.")).toBeNull();
+    expect(screen.queryByText("Wrong password. Try again.")).toBeNull();
 
     await submitPassword("correct horse");
     expect(await screen.findByText(SECRET_TEXT, {}, AFTER_PASSWORD)).toBeTruthy();
@@ -171,16 +163,13 @@ describe("RetrievePage", () => {
     failNextRangeRead(new ApiError(0, "Network error — please check your connection"));
     render(<RetrievePage />);
 
-    await openPasswordPrompt();
     await submitPassword("correct horse");
     await waitFor(() => expect(toast.error).toHaveBeenCalled(), AFTER_PASSWORD);
 
     // The burned share would answer a new session with 404; the typo must
     // neither reach the server nor throw the kept session away.
     await submitPassword("correct hose");
-    expect(
-      await screen.findByText("Wrong password. Please try again.", {}, AFTER_PASSWORD),
-    ).toBeTruthy();
+    expect(await screen.findByText("Wrong password. Try again.", {}, AFTER_PASSWORD)).toBeTruthy();
     expect(api.startRetrievalSession).toHaveBeenCalledTimes(1);
 
     await submitPassword("correct horse");
@@ -193,14 +182,14 @@ describe("RetrievePage", () => {
     render(<RetrievePage />);
 
     expect(await screen.findByText(/This is your owner link/)).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Delete share" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Delete it now" })).toBeTruthy();
   });
 
   it("gives recipients the usual one-time warning", async () => {
     await publishTextShare({ burnAfterRead: true });
     render(<RetrievePage />);
 
-    expect(await screen.findByText(/copy what you need/)).toBeTruthy();
+    expect(await screen.findByText(/It opens once, then it's gone/)).toBeTruthy();
     expect(screen.queryByText(/This is your owner link/)).toBeNull();
   });
 
@@ -233,7 +222,7 @@ describe("RetrievePage", () => {
     failNextRangeRead(new ApiError(403, "invalid retrieval session"));
     render(<RetrievePage />);
 
-    fireEvent.click(await screen.findByRole("button", { name: "Reveal & Burn" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Reveal secret" }));
 
     // Trying again could only get a 404, so do not invite it.
     expect(await screen.findByRole("heading", { name: "The download window closed" })).toBeTruthy();
