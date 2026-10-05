@@ -1,6 +1,8 @@
 import { Link } from "react-router";
+import { useLeaveWarningActive } from "../hooks/useLeaveWarning";
 
 export default function ShareModeTabs({ active }: { active: "text" | "files" }) {
+  const reloadDocument = useLeaveWarningActive();
   const itemClass = (mode: "text" | "files") =>
     `flex-1 rounded-md px-3 py-2 text-center text-sm font-medium transition-colors duration-150 ${
       active === mode
@@ -11,6 +13,7 @@ export default function ShareModeTabs({ active }: { active: "text" | "files" }) 
   return (
     <div className="grid grid-cols-2 gap-1 rounded-lg border border-zinc-200 bg-zinc-100 p-1 dark:border-zinc-600 dark:bg-zinc-900">
       <Link
+        reloadDocument={reloadDocument}
         to="/share"
         className={itemClass("text")}
         aria-current={active === "text" ? "page" : undefined}
@@ -18,6 +21,7 @@ export default function ShareModeTabs({ active }: { active: "text" | "files" }) 
         Text
       </Link>
       <Link
+        reloadDocument={reloadDocument}
         to="/file"
         className={itemClass("files")}
         aria-current={active === "files" ? "page" : undefined}

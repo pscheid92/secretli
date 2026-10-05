@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { Controller, useForm } from "react-hook-form";
 import { toast } from "sonner";
 import ExpirationPicker from "../components/ExpirationPicker";
@@ -13,6 +13,7 @@ import TransferStatus, {
 } from "../components/TransferStatus";
 import Button from "../components/ui/Button";
 import TextButton from "../components/ui/TextButton";
+import { useLeaveWarning } from "../hooks/useLeaveWarning";
 import { usePageTitle } from "../hooks/usePageTitle";
 import { ApiError } from "../lib/api";
 import { KeySet } from "../lib/encryption";
@@ -83,14 +84,7 @@ export default function FilePage() {
   usePageTitle(result ? "Share ready" : "Share files");
 
   // A navigation away from an in-flight upload silently discards it.
-  useEffect(() => {
-    if (!loading) return;
-    const warn = (event: BeforeUnloadEvent) => {
-      event.preventDefault();
-    };
-    window.addEventListener("beforeunload", warn);
-    return () => window.removeEventListener("beforeunload", warn);
-  }, [loading]);
+  useLeaveWarning(loading);
 
   const {
     register,

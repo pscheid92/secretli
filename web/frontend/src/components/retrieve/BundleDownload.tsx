@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useLeaveWarning } from "../../hooks/useLeaveWarning";
 import { type BundleManifest, type DecryptedBundleFile, manifestTotalSize } from "../../lib/bundle";
 import { saveBlob } from "../../lib/download";
 import { formatSize } from "../../lib/format";
@@ -6,6 +7,7 @@ import Spinner from "../Spinner";
 import TransferStatus, { type TransferProgress } from "../TransferStatus";
 import Button from "../ui/Button";
 import TextButton from "../ui/TextButton";
+import BurnWarning from "./BurnWarning";
 import DeleteShareButton from "./DeleteShareButton";
 
 function secondsUntil(iso: string): number {
@@ -60,6 +62,10 @@ export default function BundleDownload({
   // Once the blobs are in memory the server session no longer matters.
   const expired = secondsLeft === 0 && !downloadedFiles;
   const canDownload = !downloading && !expired;
+  // A one-time share is gone from the server: until the files are saved,
+  // this page holds the only way to get them.
+  const onlyCopyHere = burnAfterRead && !downloadedFiles && !expired;
+  useLeaveWarning(onlyCopyHere);
 
   return (
     <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_320px] lg:items-start">
@@ -168,6 +174,12 @@ export default function BundleDownload({
             Your browser will save {manifest.files.length} files. If it blocks some of them, use the
             Save buttons next to each file.
           </p>
+        )}
+        {onlyCopyHere && (
+          <BurnWarning>
+            This one-time share is already deleted from the server. Download the files now: if you
+            leave this page first, they're gone.
+          </BurnWarning>
         )}
         <Button size="lg" block onClick={onDownloadAll} disabled={!canDownload}>
           {downloading && <Spinner size="sm" className="text-zinc-700" />}
