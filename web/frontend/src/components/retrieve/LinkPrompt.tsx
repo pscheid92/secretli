@@ -3,22 +3,34 @@ import { toast } from "sonner";
 import { canScan } from "../../lib/qrScanner";
 import { parseShareLink } from "../../lib/shareLink";
 import Button from "../ui/Button";
-import { buttonClass } from "../ui/styles";
+import { CameraIcon, KeyboardIcon } from "../ui/icons";
 import EnterCode from "./EnterCode";
 import QRScanner from "./QRScanner";
-
-const SECONDARY_BUTTON = buttonClass({ variant: "secondary", size: "lg", block: true });
 
 /** RetrievePage reloads when the fragment changes and opens the share. */
 function openShare(fragment: string) {
   window.location.hash = fragment;
 }
 
+interface LinkPromptProps {
+  /** "code" opens with code entry ready, as /c does. */
+  initialMode?: "choose" | "code";
+}
+
 /** Landing state when the page is opened without a share fragment. */
-export default function LinkPrompt() {
+export default function LinkPrompt({ initialMode = "choose" }: LinkPromptProps) {
   const [linkInput, setLinkInput] = useState("");
-  const [mode, setMode] = useState<"choose" | "scan" | "code">("choose");
+  const [mode, setMode] = useState<"choose" | "scan" | "code">(initialMode);
   const scanAvailable = canScan();
+
+  // A pasted share link opens right away; anything else stays in the field.
+  function handlePaste(e: React.ClipboardEvent<HTMLInputElement>) {
+    const link = parseShareLink(e.clipboardData.getData("text"), window.location.origin);
+    if (link.kind === "share") {
+      e.preventDefault();
+      openShare(link.fragment);
+    }
+  }
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -53,8 +65,9 @@ export default function LinkPrompt() {
           aria-label="Share link"
           value={linkInput}
           onChange={(e) => setLinkInput(e.target.value)}
+          onPaste={handlePaste}
           placeholder={`${window.location.origin}/s#...`}
-          autoFocus
+          autoFocus={initialMode === "choose"}
           className="w-full rounded-lg border border-zinc-200 dark:border-zinc-500/50 bg-white dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 px-4 py-3 text-sm font-mono placeholder:text-zinc-500 dark:placeholder:text-zinc-500 focus:outline-none focus:border-amber-400 dark:focus:border-amber-400 focus:ring-1 focus:ring-amber-400/20 transition-colors duration-150"
         />
         <Button type="submit" size="lg" block>
@@ -66,46 +79,15 @@ export default function LinkPrompt() {
       {mode === "choose" && (
         <div className={`grid gap-3 ${scanAvailable ? "sm:grid-cols-2" : ""}`}>
           {scanAvailable && (
-            <button type="button" onClick={() => setMode("scan")} className={SECONDARY_BUTTON}>
-              <svg
-                className="h-4 w-4"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-                strokeWidth={1.5}
-                aria-hidden="true"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  d="M6.827 6.175A2.31 2.31 0 0 1 5.186 7.23c-.38.054-.757.112-1.134.175C2.999 7.58 2.25 8.507 2.25 9.574V18a2.25 2.25 0 0 0 2.25 2.25h15A2.25 2.25 0 0 0 21.75 18V9.574c0-1.067-.75-1.994-1.802-2.169a47.865 47.865 0 0 0-1.134-.175 2.31 2.31 0 0 1-1.64-1.055l-.822-1.316a2.192 2.192 0 0 0-1.736-1.039 48.774 48.774 0 0 0-5.232 0 2.192 2.192 0 0 0-1.736 1.039l-.821 1.316Z"
-                />
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  d="M16.5 12.75a4.5 4.5 0 1 1-9 0 4.5 4.5 0 0 1 9 0Z"
-                />
-              </svg>
+            <Button variant="secondary" size="lg" block onClick={() => setMode("scan")}>
+              <CameraIcon />
               Scan QR code
-            </button>
+            </Button>
           )}
-          <button type="button" onClick={() => setMode("code")} className={SECONDARY_BUTTON}>
-            <svg
-              className="h-4 w-4"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-              strokeWidth={1.5}
-              aria-hidden="true"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                d="M2.25 6.75A2.25 2.25 0 0 1 4.5 4.5h15a2.25 2.25 0 0 1 2.25 2.25v10.5a2.25 2.25 0 0 1-2.25 2.25h-15a2.25 2.25 0 0 1-2.25-2.25V6.75ZM6 9h.01M9 9h.01M12 9h.01M15 9h.01M18 9h.01M6 12h.01M9 12h.01M12 12h.01M15 12h.01M18 12h.01M8 15.75h8"
-              />
-            </svg>
+          <Button variant="secondary" size="lg" block onClick={() => setMode("code")}>
+            <KeyboardIcon />
             Enter a code
-          </button>
+          </Button>
         </div>
       )}
     </div>

@@ -41,6 +41,8 @@ describe("SendWithCode", () => {
 
     await screen.findByText("7-acid-rocket");
     expect(startSending).toHaveBeenCalledWith("https://secretli.example/s#key");
+    // The short address that opens code entry on the other device.
+    expect(screen.getByText(`${window.location.host}/c`)).toBeTruthy();
     expect(screen.getByText(/expires in 10:00/)).toBeTruthy();
 
     await act(async () => done.resolve());

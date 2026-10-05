@@ -29,6 +29,34 @@ describe("LinkPrompt", () => {
     expect(window.location.hash).toBe(`#${SECRET}`);
   });
 
+  it("opens a pasted share link right away", () => {
+    render(<LinkPrompt />);
+
+    fireEvent.paste(screen.getByRole("textbox"), {
+      clipboardData: { getData: () => `${window.location.origin}/s#${SECRET}` },
+    });
+
+    expect(window.location.hash).toBe(`#${SECRET}`);
+  });
+
+  it("leaves other pasted text in the field", () => {
+    render(<LinkPrompt />);
+
+    fireEvent.paste(screen.getByRole("textbox"), {
+      clipboardData: { getData: () => "https://other.example/login" },
+    });
+
+    expect(window.location.hash).toBe("");
+    expect(toast.error).not.toHaveBeenCalled();
+  });
+
+  it("starts with code entry ready when opened at /c", () => {
+    render(<LinkPrompt initialMode="code" />);
+
+    expect(screen.getByRole("region", { name: "Enter a code" })).toBeTruthy();
+    expect(document.activeElement).toBe(screen.getByLabelText(/Type the code/));
+  });
+
   it("refuses a share link for another host and names that host", () => {
     render(<LinkPrompt />);
 

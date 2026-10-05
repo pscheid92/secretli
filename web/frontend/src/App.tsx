@@ -12,7 +12,9 @@ export default function App() {
         <Route element={<Layout />}>
           <Route index element={<SharePage />} />
           <Route path="share" element={<SharePage />} />
-          <Route path="s" element={<RetrievePage />} />
+          {/* Keyed: switching between /s and /c starts the page afresh. */}
+          <Route path="s" element={<RetrievePage key="s" />} />
+          <Route path="c" element={<RetrievePage key="c" />} />
           <Route path="file" element={<FilePage />} />
           <Route path="*" element={<NotFoundPage />} />
         </Route>

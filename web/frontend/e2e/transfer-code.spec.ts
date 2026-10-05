@@ -30,14 +30,16 @@ test.describe("Short-code transfer", () => {
     });
     await sender.getByRole("button", { name: "Send with a code" }).click();
     const firstCode = await shownCode(sender);
+    await expect(sender.getByText(/go to .+\/c and type/)).toBeVisible();
     await expectAccessible(sender);
 
     const receiverContext = await browser.newContext();
     try {
       const receiver = await receiverContext.newPage();
-      await receiver.goto("/s");
-      await receiver.getByRole("button", { name: "Enter a code" }).click();
+      // The address the sender's panel names: code entry, ready to type.
+      await receiver.goto("/c");
       const codeField = receiver.getByLabel(/Type the code/);
+      await expect(codeField).toBeFocused();
 
       await test.step("a wrong code", async () => {
         await codeField.fill(wrongCode(firstCode));
