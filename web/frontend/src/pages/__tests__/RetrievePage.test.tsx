@@ -28,7 +28,9 @@ const AFTER_PASSWORD = { timeout: 15_000 };
  * Publishes a text share on a fake server: metadata and blob are really
  * encrypted, so the page decrypts them exactly as it would in production.
  */
-async function publishTextShare(options: { burnAfterRead?: boolean; password?: string } = {}) {
+async function publishTextShare(
+  options: { burnAfterRead?: boolean; password?: string; ownerLink?: boolean } = {},
+) {
   const baseKeySet = await KeySet.generateRandom();
   const shareSecret = baseKeySet.getEncoded().shareSecret;
   const blobKeySet = options.password
@@ -67,7 +69,10 @@ async function publishTextShare(options: { burnAfterRead?: boolean; password?: s
     bytes.slice(start, end + 1),
   );
 
-  window.location.hash = `#${shareSecret}`;
+  // An owner link carries the 43-character deletion token after "!".
+  window.location.hash = options.ownerLink
+    ? `#${shareSecret}!${"D".repeat(43)}`
+    : `#${shareSecret}`;
 }
 
 /** Makes the next range read fail the way a range read does after its retries. */
@@ -182,6 +187,22 @@ describe("RetrievePage", () => {
     expect(await screen.findByText(SECRET_TEXT, {}, AFTER_PASSWORD)).toBeTruthy();
     expect(api.startRetrievalSession).toHaveBeenCalledTimes(1);
   }, 60_000);
+
+  it("warns owners that revealing their one-time share takes it from the recipient", async () => {
+    await publishTextShare({ burnAfterRead: true, ownerLink: true });
+    render(<RetrievePage />);
+
+    expect(await screen.findByText(/This is your owner link/)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Delete share" })).toBeTruthy();
+  });
+
+  it("gives recipients the usual one-time warning", async () => {
+    await publishTextShare({ burnAfterRead: true });
+    render(<RetrievePage />);
+
+    expect(await screen.findByText(/copy what you need/)).toBeTruthy();
+    expect(screen.queryByText(/This is your owner link/)).toBeNull();
+  });
 
   it("says a link is damaged instead of asking the server about it", async () => {
     // Cut off while copying: one character short.
