@@ -15,6 +15,7 @@ Secrets are encrypted entirely in the browser — the server never sees plaintex
 - **QR codes** — every share link includes a scannable QR code
 - **Installable** — add it to your home screen or dock; on Android, share text from any app straight into it
 - **Manual deletion** — owners can delete secrets before they expire
+- **Owner status** — the owner link tells you what became of a secret: opened (and when), expired unopened, or deleted
 - **URL fragment security** — encryption keys live in the URL fragment (`#`), which is never sent to the server
 
 ## How It Works

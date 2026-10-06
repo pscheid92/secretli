@@ -123,6 +123,7 @@ func TestSecretRepo_RetrievalSession(t *testing.T) {
 		ctx,
 		"session-001",
 		tokencrypto.TokenHash("blob-token-session-001"),
+		"",
 		sessionHash,
 		time.Now().Add(15*time.Minute),
 		time.Now(),
@@ -151,6 +152,7 @@ func TestSecretRepo_RetrievalSession(t *testing.T) {
 		ctx,
 		"session-001",
 		tokencrypto.TokenHash("wrong-blob-token"),
+		"",
 		tokencrypto.TokenHash("session-token-wrong-blob"),
 		time.Now().Add(15*time.Minute),
 		time.Now(),
@@ -178,6 +180,7 @@ func TestSecretRepo_RetrievalSessionExpiry(t *testing.T) {
 		ctx,
 		"session-expiry-active",
 		tokencrypto.TokenHash("blob-token-session-expiry-active"),
+		"",
 		activeHash,
 		time.Now().Add(15*time.Minute),
 		time.Now(),
@@ -190,6 +193,7 @@ func TestSecretRepo_RetrievalSessionExpiry(t *testing.T) {
 		ctx,
 		"session-expiry-expired",
 		tokencrypto.TokenHash("blob-token-session-expiry-expired"),
+		"",
 		expiredHash,
 		time.Now().Add(-time.Minute),
 		time.Now(),
@@ -232,6 +236,7 @@ func TestSecretRepo_StartRetrievalSession_BurnAfterRead(t *testing.T) {
 		ctx,
 		"session-burn-001",
 		tokencrypto.TokenHash("blob-token-session-burn-001"),
+		"",
 		tokencrypto.TokenHash("session-token"),
 		time.Now().Add(15*time.Minute),
 		time.Now(),
@@ -252,6 +257,7 @@ func TestSecretRepo_StartRetrievalSession_BurnAfterRead(t *testing.T) {
 		ctx,
 		"session-burn-001",
 		tokencrypto.TokenHash("blob-token-session-burn-001"),
+		"",
 		tokencrypto.TokenHash("session-token-2"),
 		time.Now().Add(15*time.Minute),
 		time.Now(),
@@ -271,11 +277,11 @@ func TestSecretRepo_Delete(t *testing.T) {
 		t.Fatalf("create: %v", err)
 	}
 
-	if err := repo.Delete(ctx, "del-001"); err != nil {
+	if err := repo.Delete(ctx, "del-001", time.Now()); err != nil {
 		t.Fatalf("delete: %v", err)
 	}
 
-	err := repo.Delete(ctx, "del-001")
+	err := repo.Delete(ctx, "del-001", time.Now())
 	if !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("expected ErrNotFound on second delete, got %v", err)
 	}
@@ -375,6 +381,7 @@ func TestSecretRepo_DeleteExpired_KeepsBurnedSecretWithActiveSession(t *testing.
 		ctx,
 		"burn-active-session",
 		tokencrypto.TokenHash("blob-token-burn-active-session"),
+		"",
 		tokencrypto.TokenHash("session-active"),
 		time.Now().Add(15*time.Minute),
 		time.Now(),

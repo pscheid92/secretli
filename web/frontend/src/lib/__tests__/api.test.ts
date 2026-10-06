@@ -16,6 +16,7 @@ import {
   retrieveSecretRange,
   retryDelayMs,
   type StartUploadSessionParams,
+  secretGoneFromError,
   startRetrievalSession,
   startUploadSession,
   uploadSessionPart,
@@ -117,6 +118,17 @@ describe("retrieval sessions", () => {
     expect(call[1]).toEqual(expect.objectContaining({ method: "POST" }));
     expectHeader(call[1], "X-Blob-Token", "blob-token");
     expectHeader(call[1], "X-Request-ID");
+  });
+
+  it("sends the deletion token along when the owner opens their own secret", async () => {
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(new Response(JSON.stringify({}), { status: 201 }));
+
+    await startRetrievalSession("pub-id", "blob-token", "deletion-token");
+
+    expectHeader(fetchSpy.mock.calls[0][1], "X-Blob-Token", "blob-token");
+    expectHeader(fetchSpy.mock.calls[0][1], "X-Deletion-Token", "deletion-token");
   });
 
   it("retrieves a byte range with bearer session and range headers", async () => {
@@ -406,3 +418,22 @@ function expectHeader(init: RequestInit | undefined, name: string, value?: strin
   }
   expect(headers.get(name)).toBe(value);
 }
+
+describe("secretGoneFromError", () => {
+  it("reads what became of a secret out of a 410, and nothing out of anything else", () => {
+    const details = {
+      outcome: "opened",
+      burn_after_read: true,
+      ended_at: "2026-10-06T12:00:00Z",
+      opened_by_owner: false,
+    };
+    expect(
+      secretGoneFromError(new ApiError(410, "secret is gone", undefined, undefined, details)),
+    ).toEqual({ ...details, first_opened_at: undefined });
+
+    const odd = { outcome: "vanished", ended_at: "2026-10-06T12:00:00Z" };
+    expect(secretGoneFromError(new ApiError(410, "gone", undefined, undefined, odd))).toBeNull();
+    expect(secretGoneFromError(new ApiError(404, "not found"))).toBeNull();
+    expect(secretGoneFromError(new Error("boom"))).toBeNull();
+  });
+});

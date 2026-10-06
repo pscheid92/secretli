@@ -17,9 +17,13 @@ type CleanupBatch struct {
 type SecretRepo interface {
 	Create(ctx context.Context, secret *Secret, now time.Time) error
 	GetByPublicID(ctx context.Context, publicID string, now time.Time) (*Secret, error)
-	StartRetrievalSession(ctx context.Context, publicID, blobTokenHash, sessionTokenHash string, expiresAt, now time.Time) (*Secret, error)
+	// StartRetrievalSession checks the blob token and opens a session to read
+	// the blob. Opening a one-time secret ends it. deletionTokenHash, when the
+	// caller has one, marks the owner opening their own secret, which does not
+	// count as a recipient getting it.
+	StartRetrievalSession(ctx context.Context, publicID, blobTokenHash, deletionTokenHash, sessionTokenHash string, expiresAt, now time.Time) (*Secret, error)
 	GetByRetrievalSession(ctx context.Context, publicID, sessionTokenHash string, now time.Time) (*Secret, error)
-	Delete(ctx context.Context, publicID string) error
+	Delete(ctx context.Context, publicID string, now time.Time) error
 	// DeleteExpired deletes one batch of at most limit secrets that are
 	// expired, or burn-after-read and consumed with no retrieval session left,
 	// oldest first. beforeDelete runs for each row while it is locked; rows it
@@ -27,6 +31,10 @@ type SecretRepo interface {
 	// later failure.
 	DeleteExpired(ctx context.Context, now time.Time, limit int, beforeDelete func(storageKey string) error) (CleanupBatch, error)
 	DeleteExpiredRetrievalSessions(ctx context.Context, now time.Time) (int64, error)
+	// GetTombstone tells what became of a secret that is gone, or ErrNotFound
+	// for one that is live, never was, or is forgotten.
+	GetTombstone(ctx context.Context, publicID string, now time.Time) (*SecretTombstone, error)
+	DeleteExpiredTombstones(ctx context.Context, now time.Time) (int64, error)
 }
 
 type UploadSessionRepo interface {

@@ -32,6 +32,13 @@ FROM secrets
 WHERE public_id = sqlc.arg(public_id)
   AND expires_at > sqlc.arg(now_at);
 
+-- name: GetSecretIgnoringExpiry :one
+-- The row whatever its state, to tell what became of an expired secret the
+-- cleanup has not reached yet.
+SELECT *
+FROM secrets
+WHERE public_id = $1;
+
 -- name: ClaimBurnAfterRead :execrows
 UPDATE secrets
 SET retrieved_at = sqlc.arg(now_at)
@@ -41,9 +48,17 @@ WHERE public_id = sqlc.arg(public_id)
   AND retrieved_at IS NULL
   AND expires_at > sqlc.arg(now_at);
 
--- name: DeleteSecret :execrows
+-- name: MarkSecretOpened :exec
+-- The first time a recipient opens a reusable secret.
+UPDATE secrets
+SET retrieved_at = sqlc.arg(now_at)
+WHERE public_id = sqlc.arg(public_id)
+  AND retrieved_at IS NULL;
+
+-- name: DeleteSecret :one
 DELETE FROM secrets
-WHERE public_id = $1;
+WHERE public_id = $1
+RETURNING *;
 
 -- name: SelectSecretsForCleanup :many
 -- Expired secrets and consumed burn-after-read secrets whose retrieval

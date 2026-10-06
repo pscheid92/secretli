@@ -82,17 +82,29 @@ func (q *Queries) CreateSecret(ctx context.Context, arg CreateSecretParams) erro
 	return err
 }
 
-const deleteSecret = `-- name: DeleteSecret :execrows
+const deleteSecret = `-- name: DeleteSecret :one
 DELETE FROM secrets
 WHERE public_id = $1
+RETURNING public_id, metadata_token_hash, blob_token_hash, deletion_token_hash, encrypted_meta, blob_size, burn_after_read, expires_at, created_at, retrieved_at, storage_key
 `
 
-func (q *Queries) DeleteSecret(ctx context.Context, publicID string) (int64, error) {
-	result, err := q.db.Exec(ctx, deleteSecret, publicID)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
+func (q *Queries) DeleteSecret(ctx context.Context, publicID string) (Secret, error) {
+	row := q.db.QueryRow(ctx, deleteSecret, publicID)
+	var i Secret
+	err := row.Scan(
+		&i.PublicID,
+		&i.MetadataTokenHash,
+		&i.BlobTokenHash,
+		&i.DeletionTokenHash,
+		&i.EncryptedMeta,
+		&i.BlobSize,
+		&i.BurnAfterRead,
+		&i.ExpiresAt,
+		&i.CreatedAt,
+		&i.RetrievedAt,
+		&i.StorageKey,
+	)
+	return i, err
 }
 
 const deleteSecretsByPublicIDs = `-- name: DeleteSecretsByPublicIDs :execrows
@@ -148,6 +160,51 @@ func (q *Queries) GetSecretByPublicID(ctx context.Context, arg GetSecretByPublic
 		&i.StorageKey,
 	)
 	return i, err
+}
+
+const getSecretIgnoringExpiry = `-- name: GetSecretIgnoringExpiry :one
+SELECT public_id, metadata_token_hash, blob_token_hash, deletion_token_hash, encrypted_meta, blob_size, burn_after_read, expires_at, created_at, retrieved_at, storage_key
+FROM secrets
+WHERE public_id = $1
+`
+
+// The row whatever its state, to tell what became of an expired secret the
+// cleanup has not reached yet.
+func (q *Queries) GetSecretIgnoringExpiry(ctx context.Context, publicID string) (Secret, error) {
+	row := q.db.QueryRow(ctx, getSecretIgnoringExpiry, publicID)
+	var i Secret
+	err := row.Scan(
+		&i.PublicID,
+		&i.MetadataTokenHash,
+		&i.BlobTokenHash,
+		&i.DeletionTokenHash,
+		&i.EncryptedMeta,
+		&i.BlobSize,
+		&i.BurnAfterRead,
+		&i.ExpiresAt,
+		&i.CreatedAt,
+		&i.RetrievedAt,
+		&i.StorageKey,
+	)
+	return i, err
+}
+
+const markSecretOpened = `-- name: MarkSecretOpened :exec
+UPDATE secrets
+SET retrieved_at = $1
+WHERE public_id = $2
+  AND retrieved_at IS NULL
+`
+
+type MarkSecretOpenedParams struct {
+	NowAt    pgtype.Timestamptz
+	PublicID string
+}
+
+// The first time a recipient opens a reusable secret.
+func (q *Queries) MarkSecretOpened(ctx context.Context, arg MarkSecretOpenedParams) error {
+	_, err := q.db.Exec(ctx, markSecretOpened, arg.NowAt, arg.PublicID)
+	return err
 }
 
 const selectSecretsForCleanup = `-- name: SelectSecretsForCleanup :many

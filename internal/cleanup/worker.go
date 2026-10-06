@@ -32,6 +32,7 @@ const (
 type Repo interface {
 	DeleteExpired(ctx context.Context, now time.Time, limit int, beforeDelete func(storageKey string) error) (domain.CleanupBatch, error)
 	DeleteExpiredRetrievalSessions(ctx context.Context, now time.Time) (int64, error)
+	DeleteExpiredTombstones(ctx context.Context, now time.Time) (int64, error)
 	AbortExpiredUploadSessions(ctx context.Context, now time.Time, limit int, beforeAbort func(session *domain.UploadSession) error) (domain.CleanupBatch, error)
 	DeleteFinishedUploadSessions(ctx context.Context, finishedBefore time.Time) (int64, error)
 	DeleteEndedTransfers(ctx context.Context, endedBefore time.Time) (int64, error)
@@ -128,6 +129,13 @@ func (w *Worker) runCycle(ctx context.Context) {
 	if err != nil {
 		slog.ErrorContext(ctx, "cleanup: secret cleanup failed", "error", err)
 		w.metrics.CleanupErrors.Inc()
+	}
+
+	if count, err := w.secretRepo.DeleteExpiredTombstones(ctx, now); err != nil {
+		slog.ErrorContext(ctx, "cleanup: tombstone cleanup failed", "error", err)
+		w.metrics.CleanupErrors.Inc()
+	} else if count > 0 {
+		slog.InfoContext(ctx, "cleanup: forgot tombstones", "count", count)
 	}
 }
 

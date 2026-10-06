@@ -33,8 +33,9 @@ type mockSecretRepo struct {
 	expiredUploadErr error
 	abortCalls       int
 
-	finishedBefore time.Time
-	transfersEnded time.Time
+	finishedBefore        time.Time
+	transfersEnded        time.Time
+	tombstonesForgottenAt time.Time
 }
 
 func (m *mockSecretRepo) DeleteExpired(_ context.Context, _ time.Time, limit int, beforeDelete func(string) error) (domain.CleanupBatch, error) {
@@ -80,6 +81,11 @@ func (m *mockSecretRepo) DeleteFinishedUploadSessions(_ context.Context, finishe
 
 func (m *mockSecretRepo) DeleteEndedTransfers(_ context.Context, endedBefore time.Time) (int64, error) {
 	m.transfersEnded = endedBefore
+	return 0, nil
+}
+
+func (m *mockSecretRepo) DeleteExpiredTombstones(_ context.Context, now time.Time) (int64, error) {
+	m.tombstonesForgottenAt = now
 	return 0, nil
 }
 
@@ -366,4 +372,17 @@ func counterValue(t *testing.T, c prometheus.Counter) float64 {
 		t.Fatalf("read counter: %v", err)
 	}
 	return metric.GetCounter().GetValue()
+}
+
+func TestRunCycle_ForgetsOldTombstones(t *testing.T) {
+	repo := &mockSecretRepo{}
+	w := NewWorker(time.Minute, repo, &mockFileStore{}, testMetrics())
+
+	before := time.Now()
+	w.runCycle(context.Background())
+	after := time.Now()
+
+	if repo.tombstonesForgottenAt.Before(before) || repo.tombstonesForgottenAt.After(after) {
+		t.Errorf("tombstones forgotten as of %v, want the cycle's now", repo.tombstonesForgottenAt)
+	}
 }

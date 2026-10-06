@@ -8,7 +8,7 @@ async function shownLink(page: Page, which: "share-link" | "owner-link"): Promis
 }
 
 test.describe("Text secret sharing", () => {
-  test("create secret and retrieve via share link", async ({ page }) => {
+  test("create secret and retrieve via share link", async ({ page, context }) => {
     const secretText = `Test secret ${Date.now()}`;
 
     await page.goto("/share");
@@ -24,6 +24,7 @@ test.describe("Text secret sharing", () => {
 
     const shareUrl = await shownLink(page, "share-link");
     expect(shareUrl).toContain("/s#");
+    const ownerUrl = await shownLink(page, "owner-link");
 
     // Open the link in a tab that already shows /s, as when it is pasted into
     // the address bar there: only the fragment changes.
@@ -41,6 +42,21 @@ test.describe("Text secret sharing", () => {
 
     const decryptedText = await page.locator("pre").textContent();
     expect(decryptedText).toBe(secretText);
+
+    // The owner link now says what happened, and so does the link itself.
+    const ownerPage = await context.newPage();
+    await ownerPage.goto(ownerUrl);
+    await expect(ownerPage.locator("h1")).toHaveText("Your secret was opened", { timeout: 10000 });
+    await expect(ownerPage.getByText(/^Opened today at /)).toBeVisible();
+    await expectAccessible(ownerPage);
+
+    const latePage = await context.newPage();
+    await latePage.goto(shareUrl);
+    await expect(latePage.locator("h1")).toHaveText("This secret was already opened", {
+      timeout: 10000,
+    });
+    await expect(latePage.getByText(/tell the sender/)).toBeVisible();
+    await expectAccessible(latePage);
   });
 
   test("password-protected one-time secret: retrieve it, then get asked before leaving", async ({
@@ -120,10 +136,17 @@ test.describe("Text secret sharing", () => {
       timeout: 10000,
     });
 
+    // Coming back to the owner link later still says so.
+    await page.goto(ownerUrl);
+    await expect(page.locator("h1")).toHaveText("Secret deleted", { timeout: 10000 });
+    await expect(page.getByText(/^You deleted it today at /)).toBeVisible();
+    await expectAccessible(page);
+
     const recipientPage = await context.newPage();
     await recipientPage.goto(shareUrl);
-    await expect(recipientPage.getByText(/It was opened already, or it expired\./)).toBeVisible({
+    await expect(recipientPage.locator("h1")).toHaveText("This secret was deleted", {
       timeout: 10000,
     });
+    await expect(recipientPage.getByText(/^The sender deleted it today at /)).toBeVisible();
   });
 });

@@ -1,6 +1,7 @@
 package httpserver
 
 import (
+	"context"
 	cryptorand "crypto/rand"
 	"encoding/base64"
 	"errors"
@@ -63,6 +64,16 @@ func (h *SecretHandler) StartRetrievalSession(c echo.Context) error {
 		return apperrors.BadRequestError("malformed " + HeaderBlobToken + " header")
 	}
 
+	// The owner link carries the deletion token too. With it, the owner
+	// opening their own secret is told apart from a recipient getting it.
+	var deletionTokenHash string
+	if deletionToken := c.Request().Header.Get(HeaderDeletionToken); deletionToken != "" {
+		if !domain.ValidToken(deletionToken) {
+			return apperrors.BadRequestError("malformed " + HeaderDeletionToken + " header")
+		}
+		deletionTokenHash = crypto.TokenHash(deletionToken)
+	}
+
 	sessionToken, err := newRetrievalSessionToken()
 	if err != nil {
 		return apperrors.InternalError("failed to create retrieval session", err)
@@ -74,6 +85,7 @@ func (h *SecretHandler) StartRetrievalSession(c echo.Context) error {
 		c.Request().Context(),
 		publicID,
 		crypto.TokenHash(token),
+		deletionTokenHash,
 		crypto.TokenHash(sessionToken),
 		sessionExpiresAt,
 		now,
@@ -170,6 +182,7 @@ func (h *SecretHandler) SecretMetadata(c echo.Context) error {
 		BurnAfterRead: secret.BurnAfterRead,
 		ExpiresAt:     secret.ExpiresAt.UTC().Format(time.RFC3339),
 		CreatedAt:     secret.CreatedAt.UTC().Format(time.RFC3339),
+		OpenedAt:      rfc3339Pointer(secret.RetrievedAt),
 	})
 }
 
@@ -200,7 +213,7 @@ func (h *SecretHandler) DeleteSecret(c echo.Context) error {
 
 	// The row may already be gone if cleanup raced with this request; the
 	// object is deleted either way, so report success.
-	if err := h.repo.Delete(ctx, secret.PublicID); err != nil && !errors.Is(err, domain.ErrNotFound) {
+	if err := h.repo.Delete(ctx, secret.PublicID, time.Now()); err != nil && !errors.Is(err, domain.ErrNotFound) {
 		return apperrors.InternalError("failed to delete secret", err)
 	}
 
@@ -210,12 +223,6 @@ func (h *SecretHandler) DeleteSecret(c echo.Context) error {
 }
 
 func (h *SecretHandler) authenticateMetadata(c echo.Context) (*domain.Secret, error) {
-	return h.authenticateSecret(c, HeaderMetadataToken, func(secret *domain.Secret) string {
-		return secret.MetadataTokenHash
-	})
-}
-
-func (h *SecretHandler) authenticateSecret(c echo.Context, header string, expectedHash func(*domain.Secret) string) (*domain.Secret, error) {
 	publicID := c.Param("publicID")
 	if publicID == "" {
 		return nil, apperrors.BadRequestError("missing public_id")
@@ -225,31 +232,74 @@ func (h *SecretHandler) authenticateSecret(c echo.Context, header string, expect
 	}
 
 	r := c.Request()
-	token := r.Header.Get(header)
+	token := r.Header.Get(HeaderMetadataToken)
 	if token == "" {
-		return nil, apperrors.BadRequestError("missing " + header + " header")
+		return nil, apperrors.BadRequestError("missing " + HeaderMetadataToken + " header")
 	}
 	if !domain.ValidToken(token) {
-		return nil, apperrors.BadRequestError("malformed " + header + " header")
+		return nil, apperrors.BadRequestError("malformed " + HeaderMetadataToken + " header")
 	}
+	tokenHash := crypto.TokenHash(token)
+	now := time.Now()
 
-	secret, err := h.repo.GetByPublicID(r.Context(), publicID, time.Now())
+	secret, err := h.repo.GetByPublicID(r.Context(), publicID, now)
 	if errors.Is(err, domain.ErrNotFound) {
-		return nil, apperrors.NotFoundError("secret not found")
+		return nil, h.secretGone(r.Context(), publicID, tokenHash, now)
 	}
 	if err != nil {
 		return nil, apperrors.InternalError("failed to get secret", err)
 	}
 
-	if !crypto.TokensEqual(crypto.TokenHash(token), expectedHash(secret)) {
+	if !crypto.TokensEqual(tokenHash, secret.MetadataTokenHash) {
 		return nil, apperrors.ForbiddenError("invalid token")
 	}
 
+	// A consumed one-time secret stays on file while its download runs, but
+	// to everyone else it is gone.
 	if secret.BurnAfterRead && secret.RetrievedAt != nil {
-		return nil, apperrors.NotFoundError("secret not found")
+		return nil, h.secretGone(r.Context(), publicID, tokenHash, now)
 	}
 
 	return secret, nil
+}
+
+// secretGone answers for a secret that is not there any more: with what
+// became of it, when the request carries the link's metadata token, and with
+// a plain not found otherwise.
+func (h *SecretHandler) secretGone(ctx context.Context, publicID, metadataTokenHash string, now time.Time) error {
+	tomb, err := h.repo.GetTombstone(ctx, publicID, now)
+	if errors.Is(err, domain.ErrNotFound) {
+		return apperrors.NotFoundError("secret not found")
+	}
+	if err != nil {
+		return apperrors.InternalError("failed to look up secret", err)
+	}
+	if !crypto.TokensEqual(metadataTokenHash, tomb.MetadataTokenHash) {
+		return apperrors.NotFoundError("secret not found")
+	}
+	return apperrors.GoneError("secret is gone", tombstoneDetails(tomb))
+}
+
+// tombstoneDetails is what a client is told about a secret that is gone.
+func tombstoneDetails(tomb *domain.SecretTombstone) map[string]any {
+	details := map[string]any{
+		"outcome":         string(tomb.Outcome),
+		"burn_after_read": tomb.BurnAfterRead,
+		"ended_at":        tomb.EndedAt.UTC().Format(time.RFC3339),
+		"opened_by_owner": tomb.OpenedByOwner,
+	}
+	if tomb.FirstOpenedAt != nil {
+		details["first_opened_at"] = tomb.FirstOpenedAt.UTC().Format(time.RFC3339)
+	}
+	return details
+}
+
+func rfc3339Pointer(t *time.Time) *string {
+	if t == nil {
+		return nil
+	}
+	s := t.UTC().Format(time.RFC3339)
+	return &s
 }
 
 var expirationDurations = map[string]time.Duration{
