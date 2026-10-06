@@ -11,6 +11,7 @@ import { ApiError, deleteSecret } from "../lib/api";
 import { KeySet } from "../lib/encryption";
 import { formatSize } from "../lib/format";
 import { UploadCancelledError, uploadMultipartBundle } from "../lib/multipartBundleUpload";
+import { takeSharedText } from "../lib/shareTarget";
 import {
   fitsBundleManifestLimit,
   fitsBundleUploadLimit,
@@ -39,6 +40,8 @@ export default function SharePage() {
   const [deleting, setDeleting] = useState(false);
   // Each new secret gets a fresh composer.
   const [draft, setDraft] = useState(0);
+  // Text shared into the installed app fills the first draft; the next starts empty.
+  const [shared] = useState(() => takeSharedText());
   const abortRef = useRef<AbortController | null>(null);
   usePageTitle(
     view.kind === "result"
@@ -190,7 +193,12 @@ export default function SharePage() {
   return (
     <div key="compose" className="space-y-8">
       <PageTitle lead="Encrypted in your browser. Gone once it's read.">Share a secret</PageTitle>
-      <Composer key={draft} onSubmit={handleSubmit} busy={busy} />
+      <Composer
+        key={draft}
+        onSubmit={handleSubmit}
+        busy={busy}
+        initialText={draft === 0 ? shared : ""}
+      />
     </div>
   );
 }

@@ -29,6 +29,14 @@ test.describe("Accessibility", () => {
     await expectAccessible(page);
   });
 
+  test("the composer filled by the share target", async ({ page }) => {
+    await page.goto("/share?title=Note&text=shared%20text");
+    await expect(page.getByLabel("Secret")).toHaveValue("shared text");
+    // The shared text leaves the address bar as soon as it has been read.
+    await expect(page).toHaveURL(/\/share$/);
+    await expectAccessible(page);
+  });
+
   test("open page, code entry and error pages", async ({ page }) => {
     await page.goto("/s");
     await expectAccessible(page);

@@ -13,6 +13,7 @@ Secrets are encrypted entirely in the browser — the server never sees plaintex
 - **Password protection** — add a password for an extra layer of encryption (scrypt)
 - **Configurable expiration** — from 5 minutes to 7 days
 - **QR codes** — every share link includes a scannable QR code
+- **Installable** — add it to your home screen or dock; on Android, share text from any app straight into it
 - **Manual deletion** — owners can delete secrets before they expire
 - **URL fragment security** — encryption keys live in the URL fragment (`#`), which is never sent to the server
 
