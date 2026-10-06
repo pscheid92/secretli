@@ -102,6 +102,9 @@ export default function Layout() {
           End-to-end encrypted in your browser
         </span>
         <span className="flex items-center gap-4">
+          <Link to="/how" reloadDocument={reloadDocument} className={FOOTER_LINK}>
+            How it works
+          </Link>
           <a
             href="https://github.com/pscheid92/secretli"
             target="_blank"
