@@ -110,13 +110,6 @@
       transform: translateY(6px);
     }
   }
-
-  /* Screens not yet moved to the tokens still say amber-400: paint it the accent. */
-  --color-amber-400: var(--accent);
-  /* Tailwind's own zinc-50, written in sRGB. Chrome reports the default as
-     oklch(0.985 0 none), which axe cannot parse, so it would skip every
-     contrast check against it. */
-  --color-zinc-50: #fafafa;
 }
 
 @layer base {
