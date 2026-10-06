@@ -65,6 +65,11 @@ export default function HowItWorksPage() {
           the link opens once, and hashes of the tokens.
         </p>
         <p>
+          Once a secret is gone, a note of what became of it stays for a week: opened, expired or
+          deleted, and when. It holds no content, and only a link to the secret can read it. That is
+          how the owner link, and the link itself, can tell you what happened.
+        </p>
+        <p>
           That is all. The server cannot read the content, cannot see the file names, and cannot
           tell a note from a file.
         </p>
@@ -95,7 +100,8 @@ export default function HowItWorksPage() {
         <p>
           Your owner link is the recipient's link with a deletion token after <Code>!</Code>. It
           opens the secret too, so keep it to yourself. What it adds is the right to delete the
-          secret for everyone, before anyone has opened it.
+          secret for everyone, and word of what became of it: opened, and when; expired unopened; or
+          deleted by you.
         </p>
       </Section>
 

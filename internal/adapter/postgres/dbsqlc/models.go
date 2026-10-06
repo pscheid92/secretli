@@ -45,6 +45,18 @@ type Secret struct {
 	StorageKey        string
 }
 
+type SecretTombstone struct {
+	PublicID          string
+	MetadataTokenHash string
+	DeletionTokenHash string
+	Outcome           string
+	BurnAfterRead     bool
+	EndedAt           pgtype.Timestamptz
+	FirstOpenedAt     pgtype.Timestamptz
+	OpenedByOwner     bool
+	KeepUntil         pgtype.Timestamptz
+}
+
 type UploadPart struct {
 	SessionID  string
 	PartNumber int32

@@ -9,6 +9,7 @@ import {
   ShareDeleted,
 } from "../components/retrieve/RetrieveStatus";
 import ShareDetails from "../components/retrieve/ShareDetails";
+import ShareGone from "../components/retrieve/ShareGone";
 import TextResult from "../components/retrieve/TextResult";
 import { usePageTitle } from "../hooks/usePageTitle";
 import {
@@ -18,7 +19,9 @@ import {
   isTransientStatus,
   type RetrievalSessionResponse,
   retrieveSecretRange,
+  type SecretGone,
   type SecretMetadataResponse,
+  secretGoneFromError,
   startRetrievalSession,
 } from "../lib/api";
 import {
@@ -84,6 +87,7 @@ type State =
       burnAfterRead: boolean;
     }
   | { stage: "deleted" }
+  | { stage: "gone"; gone: SecretGone; owner: boolean }
   | { stage: "error"; title: string; message: string };
 
 /** The server did not accept the blob token: the link or password is wrong. */
@@ -153,7 +157,10 @@ export default function RetrievePage() {
         meta: { serverMeta, clientMeta },
       });
     } catch (err) {
-      if (err instanceof ApiError) {
+      const gone = secretGoneFromError(err);
+      if (gone) {
+        setState({ stage: "gone", gone, owner: Boolean(deletionToken) });
+      } else if (err instanceof ApiError) {
         if (err.status === 404) {
           setState({ stage: "error", ...GONE });
         } else if (err.status === 403) {
@@ -201,7 +208,7 @@ export default function RetrievePage() {
       if (meta.clientMeta.password_protected && err instanceof BlobTokenRejectedError) {
         return "Wrong password. Try again.";
       }
-      handleRevealError(err);
+      handleRevealError(err, identity);
       return null;
     } finally {
       setRevealing(false);
@@ -221,7 +228,11 @@ export default function RetrievePage() {
     // The public ID always comes from the share secret; blob access may be
     // password-derived.
     const publicID = identity.baseKeySet.getEncoded().publicID;
-    const session = await retrievalSession(publicID, blobKeySet.getEncoded().blobToken);
+    const session = await retrievalSession(
+      publicID,
+      blobKeySet.getEncoded().blobToken,
+      identity.deletionToken,
+    );
 
     let manifest: BundleManifest;
     let text: string | undefined;
@@ -268,6 +279,7 @@ export default function RetrievePage() {
   async function retrievalSession(
     publicID: string,
     blobToken: string,
+    deletionToken: string,
   ): Promise<RetrievalSessionResponse> {
     const kept = retrievalRef.current;
     if (kept && kept.blobToken === blobToken) {
@@ -280,7 +292,7 @@ export default function RetrievePage() {
       throw new BlobTokenRejectedError();
     }
     try {
-      const session = await startRetrievalSession(publicID, blobToken);
+      const session = await startRetrievalSession(publicID, blobToken, deletionToken || undefined);
       retrievalRef.current = { blobToken, session };
       return session;
     } catch (err) {
@@ -295,7 +307,7 @@ export default function RetrievePage() {
    * Transient failures leave the page as it is so the reader can retry with
    * the session already started; only definite answers end on an error page.
    */
-  function handleRevealError(err: unknown) {
+  function handleRevealError(err: unknown, identity: ShareIdentity) {
     if (err instanceof BlobTokenRejectedError) {
       setState({
         stage: "error",
@@ -323,7 +335,8 @@ export default function RetrievePage() {
       return;
     }
     if (err.status === 404) {
-      setState({ stage: "error", ...GONE });
+      // It went away between showing it and opening it; the server can say why.
+      void explainGone(identity);
     } else if (err.status === 429) {
       toast.error("Too many attempts. Please wait a minute and try again.");
     } else if (err.status === 0) {
@@ -332,6 +345,22 @@ export default function RetrievePage() {
       toast.error("The server could not complete the request. Please try again.");
     } else {
       setState(failed(err.message));
+    }
+  }
+
+  /** Asks what became of a secret that the server just refused to open. */
+  async function explainGone(identity: ShareIdentity) {
+    const encoded = identity.baseKeySet.getEncoded();
+    try {
+      await getSecretMetadata(encoded.publicID, encoded.metadataToken);
+      setState({ stage: "error", ...GONE });
+    } catch (err) {
+      const gone = secretGoneFromError(err);
+      setState(
+        gone
+          ? { stage: "gone", gone, owner: Boolean(identity.deletionToken) }
+          : { stage: "error", ...GONE },
+      );
     }
   }
 
@@ -406,6 +435,8 @@ export default function RetrievePage() {
       return <RetrieveError title={state.title} message={state.message} />;
     case "deleted":
       return <ShareDeleted />;
+    case "gone":
+      return <ShareGone gone={state.gone} owner={state.owner} />;
     case "confirm":
       return (
         <ShareDetails

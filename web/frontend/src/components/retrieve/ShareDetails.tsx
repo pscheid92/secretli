@@ -1,7 +1,7 @@
 import { type FormEvent, useId, useRef, useState } from "react";
 import type { SecretMetadataResponse } from "../../lib/api";
 import type { SecretMeta } from "../../lib/encryption";
-import { formatExpiry, formatRelativeTime, formatSize } from "../../lib/format";
+import { formatExpiry, formatMoment, formatRelativeTime, formatSize } from "../../lib/format";
 import Spinner from "../Spinner";
 import Button from "../ui/Button";
 import { LockIcon } from "../ui/icons";
@@ -13,6 +13,16 @@ import DeleteShareButton from "./DeleteShareButton";
 /** Label for the button that starts decryption, given what the share is. */
 export function revealLabel(clientMeta: SecretMeta): string {
   return clientMeta.type === "bundle" ? "Show the files" : "Reveal secret";
+}
+
+/** What the owner is told: for a reusable secret, whether anyone has opened it yet. */
+function ownerLead(serverMeta: SecretMetadataResponse): string {
+  const opened = serverMeta.burn_after_read
+    ? ""
+    : serverMeta.opened_at
+      ? `It was first opened ${formatMoment(serverMeta.opened_at)}. `
+      : "Nobody has opened it yet. ";
+  return `This is your owner link. ${opened}You can open the secret, or delete it for everyone. The link expires ${formatExpiry(serverMeta.expires_at)}.`;
 }
 
 /** What a recipient is told before deciding to open it. */
@@ -68,11 +78,7 @@ export default function ShareDetails({
   return (
     <div className="space-y-8">
       {canDelete ? (
-        <PageTitle
-          lead={`This is your owner link. You can open the secret, or delete it for everyone. The link expires ${formatExpiry(serverMeta.expires_at)}.`}
-        >
-          Your secret
-        </PageTitle>
+        <PageTitle lead={ownerLead(serverMeta)}>Your secret</PageTitle>
       ) : (
         <PageTitle lead={recipientLead(serverMeta, isBundle)}>Someone sent you a secret</PageTitle>
       )}

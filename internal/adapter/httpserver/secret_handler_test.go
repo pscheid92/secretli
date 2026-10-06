@@ -40,10 +40,11 @@ func callHandler(c echo.Context, handler echo.HandlerFunc) {
 
 // mockSecretRepo implements domain.SecretRepo for testing
 type mockSecretRepo struct {
-	mu        sync.Mutex
-	secrets   map[string]*domain.Secret
-	sessions  map[string]mockRetrievalSession
-	deleteErr error
+	mu         sync.Mutex
+	secrets    map[string]*domain.Secret
+	sessions   map[string]mockRetrievalSession
+	tombstones map[string]*domain.SecretTombstone
+	deleteErr  error
 }
 
 type mockRetrievalSession struct {
@@ -53,8 +54,9 @@ type mockRetrievalSession struct {
 
 func newMockRepo() *mockSecretRepo {
 	return &mockSecretRepo{
-		secrets:  make(map[string]*domain.Secret),
-		sessions: make(map[string]mockRetrievalSession),
+		secrets:    make(map[string]*domain.Secret),
+		sessions:   make(map[string]mockRetrievalSession),
+		tombstones: make(map[string]*domain.SecretTombstone),
 	}
 }
 
@@ -85,7 +87,7 @@ func (m *mockSecretRepo) GetByPublicID(_ context.Context, publicID string, now t
 	return &secret, nil
 }
 
-func (m *mockSecretRepo) StartRetrievalSession(_ context.Context, publicID, blobTokenHash, sessionTokenHash string, expiresAt, now time.Time) (*domain.Secret, error) {
+func (m *mockSecretRepo) StartRetrievalSession(_ context.Context, publicID, blobTokenHash, deletionTokenHash, sessionTokenHash string, expiresAt, now time.Time) (*domain.Secret, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -99,7 +101,12 @@ func (m *mockSecretRepo) StartRetrievalSession(_ context.Context, publicID, blob
 	if !tokencrypto.TokensEqual(blobTokenHash, s.BlobTokenHash) {
 		return nil, domain.ErrForbidden
 	}
-	if s.BurnAfterRead {
+	byOwner := deletionTokenHash != "" && tokencrypto.TokensEqual(deletionTokenHash, s.DeletionTokenHash)
+	switch {
+	case s.BurnAfterRead:
+		s.RetrievedAt = &now
+		m.bury(s, domain.TombstoneOpened, now, byOwner)
+	case !byOwner && s.RetrievedAt == nil:
 		s.RetrievedAt = &now
 	}
 	m.sessions[sessionTokenHash] = mockRetrievalSession{publicID: publicID, expiresAt: expiresAt}
@@ -123,17 +130,19 @@ func (m *mockSecretRepo) GetByRetrievalSession(_ context.Context, publicID, sess
 	return &secret, nil
 }
 
-func (m *mockSecretRepo) Delete(_ context.Context, publicID string) error {
+func (m *mockSecretRepo) Delete(_ context.Context, publicID string, now time.Time) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	if m.deleteErr != nil {
 		return m.deleteErr
 	}
-	if _, ok := m.secrets[publicID]; !ok {
+	s, ok := m.secrets[publicID]
+	if !ok {
 		return domain.ErrNotFound
 	}
 	delete(m.secrets, publicID)
+	m.bury(s, domain.TombstoneDeleted, now, false)
 	return nil
 }
 
@@ -154,6 +163,9 @@ func (m *mockSecretRepo) DeleteExpired(_ context.Context, now time.Time, limit i
 				continue
 			}
 			delete(m.secrets, id)
+			if expired {
+				m.bury(s, domain.TombstoneExpired, s.ExpiresAt, false)
+			}
 			batch.Removed++
 		}
 	}
@@ -1057,4 +1069,73 @@ func TestParseExpiration(t *testing.T) {
 			t.Errorf("parseExpiration(%q) = %v, want %v", tt.input, d, tt.expected)
 		}
 	}
+}
+
+// bury records what became of a secret; the first outcome stays, as in the
+// database.
+func (m *mockSecretRepo) bury(s *domain.Secret, outcome domain.TombstoneOutcome, now time.Time, byOwner bool) {
+	if _, done := m.tombstones[s.PublicID]; done {
+		return
+	}
+	var firstOpened *time.Time
+	switch {
+	case outcome == domain.TombstoneOpened && !byOwner:
+		firstOpened = &now
+	case !s.BurnAfterRead:
+		firstOpened = s.RetrievedAt
+	}
+	m.tombstones[s.PublicID] = &domain.SecretTombstone{
+		PublicID:          s.PublicID,
+		MetadataTokenHash: s.MetadataTokenHash,
+		DeletionTokenHash: s.DeletionTokenHash,
+		Outcome:           outcome,
+		BurnAfterRead:     s.BurnAfterRead,
+		EndedAt:           now,
+		FirstOpenedAt:     firstOpened,
+		OpenedByOwner:     byOwner,
+		KeepUntil:         domain.TombstoneKeepUntil(s.ExpiresAt, now),
+	}
+}
+
+func (m *mockSecretRepo) GetTombstone(_ context.Context, publicID string, now time.Time) (*domain.SecretTombstone, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if tomb, ok := m.tombstones[publicID]; ok && tomb.KeepUntil.After(now) {
+		t := *tomb
+		return &t, nil
+	}
+	// Like the database, an expired secret the cleanup has not reached yet
+	// tells its own outcome.
+	if s, ok := m.secrets[publicID]; ok && !s.ExpiresAt.After(now) {
+		var firstOpened *time.Time
+		if !s.BurnAfterRead {
+			firstOpened = s.RetrievedAt
+		}
+		return &domain.SecretTombstone{
+			PublicID:          s.PublicID,
+			MetadataTokenHash: s.MetadataTokenHash,
+			DeletionTokenHash: s.DeletionTokenHash,
+			Outcome:           domain.TombstoneExpired,
+			BurnAfterRead:     s.BurnAfterRead,
+			EndedAt:           s.ExpiresAt,
+			FirstOpenedAt:     firstOpened,
+			KeepUntil:         domain.TombstoneKeepUntil(s.ExpiresAt, now),
+		}, nil
+	}
+	return nil, domain.ErrNotFound
+}
+
+func (m *mockSecretRepo) DeleteExpiredTombstones(_ context.Context, now time.Time) (int64, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	var count int64
+	for id, tomb := range m.tombstones {
+		if !tomb.KeepUntil.After(now) {
+			delete(m.tombstones, id)
+			count++
+		}
+	}
+	return count, nil
 }

@@ -102,13 +102,21 @@ export interface RetrievalSessionResponse {
   burn_after_read: boolean;
 }
 
+/**
+ * Opens a secret for reading. The owner's deletion token, when there is one,
+ * tells the server that the owner is looking rather than a recipient getting
+ * it.
+ */
 export async function startRetrievalSession(
   publicID: string,
   blobToken: string,
+  deletionToken?: string,
 ): Promise<RetrievalSessionResponse> {
   return request(`/api/v1/secrets/${publicID}/retrieval-session`, {
     method: "POST",
-    headers: { "X-Blob-Token": blobToken },
+    headers: deletionToken
+      ? { "X-Blob-Token": blobToken, "X-Deletion-Token": deletionToken }
+      : { "X-Blob-Token": blobToken },
   });
 }
 
@@ -210,6 +218,8 @@ export interface SecretMetadataResponse {
   burn_after_read: boolean;
   expires_at: string;
   created_at: string;
+  /** When a recipient first opened a reusable secret, if one has. */
+  opened_at?: string;
 }
 
 export function getSecretMetadata(
@@ -220,6 +230,41 @@ export function getSecretMetadata(
     method: "GET",
     headers: { "X-Metadata-Token": metadataToken },
   });
+}
+
+export type SecretOutcome = "opened" | "expired" | "deleted";
+
+/**
+ * What became of a secret that is gone: the details of the 410 the metadata
+ * endpoint answers with for as long as the server remembers.
+ */
+export interface SecretGone {
+  readonly outcome: SecretOutcome;
+  readonly burn_after_read: boolean;
+  /** When it happened; for an expired secret, its expiry. */
+  readonly ended_at: string;
+  /** When a recipient first opened it, if anyone did. */
+  readonly first_opened_at?: string;
+  /** A one-time secret the owner opened themselves, so nobody else got it. */
+  readonly opened_by_owner: boolean;
+}
+
+const OUTCOMES: readonly string[] = ["opened", "expired", "deleted"];
+
+/** The story behind a 410 from the metadata endpoint, or null for any other error. */
+export function secretGoneFromError(err: unknown): SecretGone | null {
+  if (!(err instanceof ApiError) || err.status !== 410 || !err.details) return null;
+  const { outcome, ended_at, first_opened_at, burn_after_read, opened_by_owner } = err.details;
+  if (typeof outcome !== "string" || !OUTCOMES.includes(outcome) || typeof ended_at !== "string") {
+    return null;
+  }
+  return {
+    outcome: outcome as SecretOutcome,
+    burn_after_read: Boolean(burn_after_read),
+    ended_at,
+    first_opened_at: typeof first_opened_at === "string" ? first_opened_at : undefined,
+    opened_by_owner: Boolean(opened_by_owner),
+  };
 }
 
 // --- Delete ---

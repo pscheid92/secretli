@@ -142,7 +142,7 @@ test.describe("File bundle sharing", () => {
 
     const secondPage = await context.newPage();
     await secondPage.goto(shareUrl);
-    await expect(secondPage.getByText(/It was opened already, or it expired\./)).toBeVisible({
+    await expect(secondPage.getByText(/^Someone opened it today at /)).toBeVisible({
       timeout: 10000,
     });
   });
@@ -170,7 +170,7 @@ test.describe("File bundle sharing", () => {
 
     const recipientPage = await context.newPage();
     await recipientPage.goto(shareUrl);
-    await expect(recipientPage.getByText(/It was opened already, or it expired\./)).toBeVisible({
+    await expect(recipientPage.getByText(/^The sender deleted it today at /)).toBeVisible({
       timeout: 10000,
     });
   });

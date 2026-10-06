@@ -63,7 +63,7 @@ func (r *SecretRepo) GetByPublicID(ctx context.Context, publicID string, now tim
 	return secretFromRow(row), nil
 }
 
-func (r *SecretRepo) StartRetrievalSession(ctx context.Context, publicID, blobTokenHash, sessionTokenHash string, expiresAt, now time.Time) (*domain.Secret, error) {
+func (r *SecretRepo) StartRetrievalSession(ctx context.Context, publicID, blobTokenHash, deletionTokenHash, sessionTokenHash string, expiresAt, now time.Time) (*domain.Secret, error) {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("begin tx: %w", err)
@@ -89,8 +89,11 @@ func (r *SecretRepo) StartRetrievalSession(ctx context.Context, publicID, blobTo
 	if !tokencrypto.TokensEqual(blobTokenHash, secret.BlobTokenHash) {
 		return nil, domain.ErrForbidden
 	}
+	// The owner opening their own secret is not a recipient getting it.
+	byOwner := deletionTokenHash != "" && tokencrypto.TokensEqual(deletionTokenHash, secret.DeletionTokenHash)
 
-	if secret.BurnAfterRead {
+	switch {
+	case secret.BurnAfterRead:
 		n, err := qtx.ClaimBurnAfterRead(ctx, dbsqlc.ClaimBurnAfterReadParams{
 			NowAt:         timestamptz(now),
 			PublicID:      publicID,
@@ -102,6 +105,20 @@ func (r *SecretRepo) StartRetrievalSession(ctx context.Context, publicID, blobTo
 		if n == 0 {
 			return nil, domain.ErrNotFound
 		}
+		// Opening is what ends a one-time secret, so its tombstone is written
+		// now, while the row stays for the download.
+		if err := qtx.CreateTombstone(ctx, tombstoneParams(secret, domain.TombstoneOpened, now, byOwner)); err != nil {
+			return nil, fmt.Errorf("record one-time secret opened: %w", err)
+		}
+		secret.RetrievedAt = &now
+	case !byOwner && secret.RetrievedAt == nil:
+		if err := qtx.MarkSecretOpened(ctx, dbsqlc.MarkSecretOpenedParams{
+			NowAt:    timestamptz(now),
+			PublicID: publicID,
+		}); err != nil {
+			return nil, fmt.Errorf("mark secret opened: %w", err)
+		}
+		secret.RetrievedAt = &now
 	}
 
 	if err := qtx.CreateRetrievalSession(ctx, dbsqlc.CreateRetrievalSessionParams{
@@ -134,13 +151,27 @@ func (r *SecretRepo) GetByRetrievalSession(ctx context.Context, publicID, sessio
 	return secretFromRow(secret), nil
 }
 
-func (r *SecretRepo) Delete(ctx context.Context, publicID string) error {
-	n, err := r.q.DeleteSecret(ctx, publicID)
+func (r *SecretRepo) Delete(ctx context.Context, publicID string, now time.Time) error {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	qtx := r.q.WithTx(tx)
+
+	row, err := qtx.DeleteSecret(ctx, publicID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return domain.ErrNotFound
+	}
 	if err != nil {
 		return fmt.Errorf("delete secret: %w", err)
 	}
-	if n == 0 {
-		return domain.ErrNotFound
+	// A consumed one-time secret keeps the tombstone of its opening.
+	if err := qtx.CreateTombstone(ctx, tombstoneParams(secretFromRow(row), domain.TombstoneDeleted, now, false)); err != nil {
+		return fmt.Errorf("record secret deleted: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit delete secret: %w", err)
 	}
 	return nil
 }
@@ -175,6 +206,15 @@ func (r *SecretRepo) DeleteExpired(ctx context.Context, now time.Time, limit int
 
 	var removed int64
 	if len(removable) > 0 {
+		// The expired ones leave a tombstone; the consumed one-time ones have
+		// had theirs since they were opened.
+		if err := qtx.CreateTombstonesForExpiredSecrets(ctx, dbsqlc.CreateTombstonesForExpiredSecretsParams{
+			KeepUntil: timestamptz(now.Add(domain.TombstoneRetention)),
+			PublicIds: removable,
+			NowAt:     timestamptz(now),
+		}); err != nil {
+			return domain.CleanupBatch{}, fmt.Errorf("record expired secrets: %w", err)
+		}
 		if removed, err = qtx.DeleteSecretsByPublicIDs(ctx, removable); err != nil {
 			return domain.CleanupBatch{}, fmt.Errorf("delete secrets: %w", err)
 		}
@@ -522,4 +562,99 @@ func isDuplicateKeyError(err error) bool {
 		return err.Code == "23505"
 	}
 	return false
+}
+
+// GetTombstone tells what became of a secret that is gone. An expired secret
+// the cleanup has not reached yet has no tombstone row, so its outcome is
+// read off the secret itself. A live secret, or one nobody remembers any
+// more, is ErrNotFound.
+func (r *SecretRepo) GetTombstone(ctx context.Context, publicID string, now time.Time) (*domain.SecretTombstone, error) {
+	row, err := r.q.GetTombstone(ctx, dbsqlc.GetTombstoneParams{
+		PublicID: publicID,
+		NowAt:    timestamptz(now),
+	})
+	if err == nil {
+		return tombstoneFromRow(row), nil
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return nil, fmt.Errorf("query tombstone: %w", err)
+	}
+
+	secretRow, err := r.q.GetSecretIgnoringExpiry(ctx, publicID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, domain.ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("query expired secret: %w", err)
+	}
+	secret := secretFromRow(secretRow)
+	if secret.ExpiresAt.After(now) {
+		return nil, domain.ErrNotFound
+	}
+	return &domain.SecretTombstone{
+		PublicID:          secret.PublicID,
+		MetadataTokenHash: secret.MetadataTokenHash,
+		DeletionTokenHash: secret.DeletionTokenHash,
+		Outcome:           domain.TombstoneExpired,
+		BurnAfterRead:     secret.BurnAfterRead,
+		EndedAt:           secret.ExpiresAt,
+		FirstOpenedAt:     recipientOpenedAt(secret),
+		KeepUntil:         domain.TombstoneKeepUntil(secret.ExpiresAt, now),
+	}, nil
+}
+
+func (r *SecretRepo) DeleteExpiredTombstones(ctx context.Context, now time.Time) (int64, error) {
+	n, err := r.q.DeleteExpiredTombstones(ctx, timestamptz(now))
+	if err != nil {
+		return 0, fmt.Errorf("delete expired tombstones: %w", err)
+	}
+	return n, nil
+}
+
+// recipientOpenedAt is when a recipient first opened a reusable secret. A
+// one-time secret's opening is its end, recorded on its tombstone instead.
+func recipientOpenedAt(secret *domain.Secret) *time.Time {
+	if secret.BurnAfterRead {
+		return nil
+	}
+	return secret.RetrievedAt
+}
+
+func tombstoneParams(secret *domain.Secret, outcome domain.TombstoneOutcome, now time.Time, byOwner bool) dbsqlc.CreateTombstoneParams {
+	firstOpened := recipientOpenedAt(secret)
+	if outcome == domain.TombstoneOpened && !byOwner {
+		firstOpened = &now
+	}
+	return dbsqlc.CreateTombstoneParams{
+		PublicID:          secret.PublicID,
+		MetadataTokenHash: secret.MetadataTokenHash,
+		DeletionTokenHash: secret.DeletionTokenHash,
+		Outcome:           string(outcome),
+		BurnAfterRead:     secret.BurnAfterRead,
+		EndedAt:           timestamptz(now),
+		FirstOpenedAt:     timestamptzPointer(firstOpened),
+		OpenedByOwner:     byOwner,
+		KeepUntil:         timestamptz(domain.TombstoneKeepUntil(secret.ExpiresAt, now)),
+	}
+}
+
+func tombstoneFromRow(row dbsqlc.SecretTombstone) *domain.SecretTombstone {
+	return &domain.SecretTombstone{
+		PublicID:          row.PublicID,
+		MetadataTokenHash: row.MetadataTokenHash,
+		DeletionTokenHash: row.DeletionTokenHash,
+		Outcome:           domain.TombstoneOutcome(row.Outcome),
+		BurnAfterRead:     row.BurnAfterRead,
+		EndedAt:           row.EndedAt.Time,
+		FirstOpenedAt:     pointerFromTimestamp(row.FirstOpenedAt),
+		OpenedByOwner:     row.OpenedByOwner,
+		KeepUntil:         row.KeepUntil.Time,
+	}
+}
+
+func timestamptzPointer(t *time.Time) pgtype.Timestamptz {
+	if t == nil {
+		return pgtype.Timestamptz{}
+	}
+	return timestamptz(*t)
 }
