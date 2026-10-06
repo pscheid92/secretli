@@ -19,10 +19,10 @@ export function revealLabel(clientMeta: SecretMeta): string {
 function recipientLead(serverMeta: SecretMetadataResponse, isBundle: boolean): string {
   const size = isBundle && serverMeta.blob_size > 0 ? ` (${formatSize(serverMeta.blob_size)})` : "";
   const sent = `${isBundle ? `A set of files${size}, sent` : "Sent"} ${formatRelativeTime(serverMeta.created_at)}.`;
-  const opens = serverMeta.burn_after_read
-    ? "It opens once, then it's gone."
-    : "It can be opened until the link expires.";
-  return `${sent} ${opens} The link expires ${formatExpiry(serverMeta.expires_at)}.`;
+  const expires = formatExpiry(serverMeta.expires_at);
+  return serverMeta.burn_after_read
+    ? `${sent} It opens once, then it's gone. The link expires ${expires}.`
+    : `${sent} The link can be opened again and again until it expires, ${expires}.`;
 }
 
 interface ShareDetailsProps {
@@ -128,9 +128,11 @@ export default function ShareDetails({
         </Button>
       </form>
 
-      <p className="flex items-center gap-2.5 text-[13px] text-faint">
-        <LockIcon />
-        Decrypted here, in your browser. The server never sees what's inside.
+      <p className="flex items-start gap-2.5 text-[13px] text-faint">
+        <span className="mt-0.5 flex">
+          <LockIcon />
+        </span>
+        <span>Decrypted here, in your browser. The server never sees what's inside.</span>
       </p>
 
       {canDelete && (

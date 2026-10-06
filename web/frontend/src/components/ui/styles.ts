@@ -11,14 +11,20 @@ export type ButtonSize = "sm" | "md" | "lg";
 export const FOCUS =
   "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus";
 
-const BUTTON_BASE = `inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-xl font-medium transition-colors duration-150 ${FOCUS} disabled:cursor-not-allowed disabled:opacity-40`;
+const BUTTON_BASE = `inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-xl font-medium transition-colors duration-150 ${FOCUS} disabled:cursor-not-allowed`;
 
-/** quiet: the toolbar kind, text until hovered. */
+/**
+ * quiet: the toolbar kind, text until hovered. Disabled buttons go grey
+ * rather than translucent: a faded accent turns muddy on a dark page.
+ */
 const BUTTON_VARIANTS: Record<ButtonVariant, string> = {
-  primary: "bg-accent text-on-accent hover:bg-accent-hover",
-  secondary: "border border-line bg-surface text-ink hover:bg-hover",
-  quiet: "text-muted hover:bg-hover hover:text-ink",
-  "danger-outline": "border border-danger text-danger hover:bg-danger-soft",
+  primary: "bg-accent text-on-accent hover:bg-accent-hover disabled:bg-hover disabled:text-faint",
+  secondary:
+    "border border-line bg-surface text-ink hover:bg-hover disabled:text-faint disabled:hover:bg-surface",
+  quiet:
+    "text-muted hover:bg-hover hover:text-ink disabled:text-faint disabled:hover:bg-transparent",
+  "danger-outline":
+    "border border-danger text-danger hover:bg-danger-soft disabled:border-line disabled:text-faint disabled:hover:bg-transparent",
 };
 
 const BUTTON_SIZES: Record<ButtonSize, string> = {
@@ -43,7 +49,7 @@ export function buttonClass({
 /** accent: the action next to content, like Copy. muted: secondary actions and links. */
 export type TextTone = "accent" | "muted" | "danger";
 
-const TEXT_BASE = `inline-flex min-h-11 items-center gap-1.5 rounded-md text-sm font-medium transition-colors duration-150 ${FOCUS}`;
+const TEXT_BASE = `inline-flex min-h-11 items-center gap-1.5 rounded-md text-sm font-medium transition-colors duration-150 disabled:cursor-not-allowed disabled:text-faint disabled:no-underline ${FOCUS}`;
 
 const TEXT_TONES: Record<TextTone, string> = {
   accent: "text-ink decoration-accent decoration-2 underline-offset-4 hover:underline",

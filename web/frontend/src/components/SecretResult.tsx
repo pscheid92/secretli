@@ -81,7 +81,7 @@ export default function SecretResult({
   const linkBase = hashAt >= 0 ? url.slice(0, hashAt) : url;
   const linkFragment = hashAt >= 0 ? url.slice(hashAt) : "";
   const summary = [
-    burnAfterRead ? "Opens once" : "Opens until it expires",
+    burnAfterRead ? "Opens once" : "Opens any number of times",
     `expires ${formatExpiry(expiresAt)}`,
     passwordProtected ? "password required" : null,
   ]
