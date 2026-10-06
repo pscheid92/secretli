@@ -1,5 +1,6 @@
 import { BrowserRouter, Navigate, Route, Routes } from "react-router";
 import Layout from "./components/Layout";
+import HowItWorksPage from "./pages/HowItWorksPage";
 import NotFoundPage from "./pages/NotFoundPage";
 import RetrievePage from "./pages/RetrievePage";
 import SharePage from "./pages/SharePage";
@@ -16,6 +17,7 @@ export default function App() {
           {/* Keyed: switching between /s and /c starts the page afresh. */}
           <Route path="s" element={<RetrievePage key="s" />} />
           <Route path="c" element={<RetrievePage key="c" />} />
+          <Route path="how" element={<HowItWorksPage />} />
           <Route path="*" element={<NotFoundPage />} />
         </Route>
       </Routes>

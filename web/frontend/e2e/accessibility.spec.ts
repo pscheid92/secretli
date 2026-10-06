@@ -44,6 +44,10 @@ test.describe("Accessibility", () => {
     await expect(page.locator("h1")).toHaveText("This page doesn't exist");
     await expectAccessible(page);
 
+    await page.goto("/how");
+    await expect(page.locator("h1")).toHaveText("How it works");
+    await expectAccessible(page);
+
     await page.goto(`/s#${"A".repeat(42)}`);
     await expect(page.getByText(/This link is incomplete or damaged/)).toBeVisible();
     await expectAccessible(page);
