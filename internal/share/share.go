@@ -138,7 +138,8 @@ type Params struct {
 	// Reusable keeps the link working until it expires; the default is once.
 	Reusable bool
 	Password string
-	// Progress, if set, is told about uploaded bytes.
+	// Progress, if set, is told about uploaded bytes. It is never called
+	// from two goroutines at once.
 	Progress func(uploaded, total int64)
 }
 
@@ -251,15 +252,16 @@ func upload(ctx context.Context, c *api.Client, session *api.UploadSession, plan
 		mu       sync.Mutex
 		uploaded int64
 	)
+	// Parts finish on their own goroutines; the lock is held through the
+	// callback, so a caller's progress code never runs twice at once.
 	report := func(n int64) {
 		if progress == nil {
 			return
 		}
 		mu.Lock()
+		defer mu.Unlock()
 		uploaded += n
-		done := uploaded
-		mu.Unlock()
-		progress(done, plan.TotalSize)
+		progress(uploaded, plan.TotalSize)
 	}
 	report(0)
 
