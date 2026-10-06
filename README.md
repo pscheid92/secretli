@@ -20,6 +20,23 @@ Live at **[secretli.app](https://secretli.app)**.
 - **Owner status** — the owner link tells you what became of a secret: opened (and when), expired unopened, or deleted
 - **URL fragment security** — encryption keys live in the URL fragment (`#`), which is never sent to the server
 
+## Command line
+
+The `secretli` command does the same from a terminal, with the same encryption and the same links as the web app, so links work in both directions.
+
+```bash
+secretli share                        # type or paste the secret, then Ctrl-D
+pbpaste | secretli share -e 1h        # text from a pipe, gone after an hour
+secretli share deploy.key notes.pdf   # files; -p adds a password, --reusable lets it open more than once
+secretli open <link>                  # text to stdout, files to the current directory
+secretli status <link>                # what a link points to, without opening it
+secretli delete <owner-link>          # remove a secret for everyone
+```
+
+stdout carries only the result, so `secretli share … | pbcopy` copies exactly the link; everything else goes to stderr. `--json` is for scripts, and the exit code tells them what happened: 3 means a password is needed or wrong, 4 the secret is gone, 5 the server did not answer. `--server` (or `SECRETLI_SERVER`) points new secrets at a self-hosted instance.
+
+Install from the [releases](https://github.com/pscheid92/secretli/releases) (macOS, Linux and Windows, checksums signed with cosign), or with `go install github.com/pscheid92/secretli/cmd/secretli@main`.
+
 ## How It Works
 
 1. The browser generates a random share secret and derives separate metadata keys, blob keys, public IDs, and access tokens using HKDF-SHA512
