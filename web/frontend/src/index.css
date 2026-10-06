@@ -35,11 +35,13 @@
 :root.dark {
   color-scheme: dark;
   --bg: #0a0a0b;
-  --surface: #131315;
-  --sunken: #0f0f11;
-  --hover: #1d1d20;
-  --line: #232327;
-  --line-strong: #34343a;
+  /* A step further from the page than in light mode: on a dark page a card
+     needs more than its border to read as a card. */
+  --surface: #17171a;
+  --sunken: #101013;
+  --hover: #202024;
+  --line: #2a2a2f;
+  --line-strong: #3a3a41;
   --ink: #ededef;
   --muted: #a1a1aa;
   --faint: #8a8a93;

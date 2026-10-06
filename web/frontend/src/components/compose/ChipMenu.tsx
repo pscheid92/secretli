@@ -3,7 +3,7 @@ import { ChevronDownIcon } from "../ui/icons";
 import { FOCUS } from "../ui/styles";
 
 /** The composer's toolbar chips: text until hovered, a tint while their panel is open. */
-export const CHIP = `inline-flex min-h-11 items-center gap-1.5 whitespace-nowrap rounded-xl px-3 text-sm font-medium text-muted transition-colors duration-150 hover:bg-hover disabled:cursor-not-allowed disabled:opacity-40 ${FOCUS}`;
+export const CHIP = `inline-flex min-h-11 items-center gap-1.5 whitespace-nowrap rounded-xl px-3 text-sm font-medium text-muted transition-colors duration-150 hover:bg-hover disabled:cursor-not-allowed disabled:text-faint disabled:hover:bg-transparent ${FOCUS}`;
 
 const PANEL_WIDTH = 300;
 

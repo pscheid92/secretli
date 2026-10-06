@@ -141,7 +141,7 @@ export default function EnterCode({ onReceived, onCancel }: EnterCodeProps) {
 
   return (
     <form onSubmit={handleSubmit} className="space-y-8">
-      <fieldset className="m-0 min-w-0 border-0 p-0">
+      <fieldset className="min-w-0 border-0 p-0">
         <legend className="mb-2.5 px-1 text-sm font-medium text-muted">Code</legend>
         <div className="grid grid-cols-[68px_auto_minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-2 max-sm:grid-cols-[56px_auto_minmax(0,1fr)_auto_minmax(0,1fr)] max-sm:gap-1.5">
           <input

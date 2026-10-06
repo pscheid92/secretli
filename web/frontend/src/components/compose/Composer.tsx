@@ -65,7 +65,7 @@ const OPTION = `rounded-[10px] text-left font-medium text-ink transition-colors 
 const SELECTED = "ring-[1.5px] ring-ink ring-inset";
 
 // navigator.platform is deprecated, but still the one value every browser fills in.
-const SHORTCUT = /Mac|iPhone|iPad/.test(navigator.platform) ? "⌘↵" : "Ctrl↵";
+const SHORTCUT = /Mac|iPhone|iPad/.test(navigator.platform) ? "⌘ Enter" : "Ctrl+Enter";
 
 /** Files already in the list are not added twice. */
 function merge(current: File[], added: File[]): File[] {
@@ -283,129 +283,129 @@ export default function Composer({ onSubmit, busy }: ComposerProps) {
           </div>
         )}
 
-        <div className="flex flex-wrap items-center gap-0.5 border-t border-line p-2">
-          <IconButton
-            label="Attach files"
-            disabled={disabled}
-            onClick={() => fileInputRef.current?.click()}
-          >
-            <PaperclipIcon />
-          </IconButton>
-          <input
-            ref={fileInputRef}
-            type="file"
-            multiple
-            className="hidden"
-            onChange={(e) => {
-              addFiles(Array.from(e.target.files ?? []));
-              e.target.value = "";
-            }}
-          />
+        {/* The chips wrap among themselves; the button keeps its place on the
+            right, and on a phone takes a row of its own. */}
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 border-t border-line p-2">
+          <div className="flex min-w-0 flex-1 flex-wrap items-center gap-0.5">
+            <IconButton
+              label="Attach files"
+              disabled={disabled}
+              onClick={() => fileInputRef.current?.click()}
+            >
+              <PaperclipIcon />
+            </IconButton>
+            <input
+              ref={fileInputRef}
+              type="file"
+              multiple
+              className="hidden"
+              onChange={(e) => {
+                addFiles(Array.from(e.target.files ?? []));
+                e.target.value = "";
+              }}
+            />
 
-          <ChipMenu
-            name={`Expires in ${formatExpiration(expiration)}`}
-            label={
-              <>
-                <span className="max-sm:hidden">Expires in</span>
-                <span className="text-ink">{expirationLabel}</span>
-              </>
-            }
-            open={menu === "expires"}
-            disabled={disabled}
-            onToggle={() => setMenu(menu === "expires" ? null : "expires")}
-            onClose={() => setMenu(null)}
-          >
-            <fieldset className="m-0 min-w-0 border-0 p-0">
-              <legend className="px-2 pt-1.5 pb-2 text-xs font-medium text-faint">
-                Expires after
-              </legend>
-              <div className="grid grid-cols-3 gap-1">
-                {EXPIRATIONS.map(([value, label]) => (
-                  <button
-                    key={value}
-                    type="button"
-                    aria-pressed={value === expiration}
-                    aria-label={formatExpiration(value)}
-                    onClick={() => {
-                      setExpiration(value);
-                      setMenu(null);
-                    }}
-                    className={`min-h-11 px-1.5 text-center text-sm ${OPTION} ${
-                      value === expiration ? `font-semibold ${SELECTED}` : "text-muted"
-                    }`}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
-            </fieldset>
-          </ChipMenu>
+            <ChipMenu
+              name={`Expires in ${formatExpiration(expiration)}`}
+              label={
+                <>
+                  <span className="max-sm:hidden">Expires in</span>
+                  <span className="text-ink">{expirationLabel}</span>
+                </>
+              }
+              open={menu === "expires"}
+              disabled={disabled}
+              onToggle={() => setMenu(menu === "expires" ? null : "expires")}
+              onClose={() => setMenu(null)}
+            >
+              <fieldset className="m-0 min-w-0 border-0 p-0">
+                <legend className="px-2 pt-1.5 pb-2 text-xs font-medium text-faint">
+                  Expires after
+                </legend>
+                <div className="grid grid-cols-3 gap-1">
+                  {EXPIRATIONS.map(([value, label]) => (
+                    <button
+                      key={value}
+                      type="button"
+                      aria-pressed={value === expiration}
+                      aria-label={formatExpiration(value)}
+                      onClick={() => {
+                        setExpiration(value);
+                        setMenu(null);
+                      }}
+                      className={`min-h-11 px-1.5 text-center text-sm ${OPTION} ${
+                        value === expiration ? `font-semibold ${SELECTED}` : "text-muted"
+                      }`}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </fieldset>
+            </ChipMenu>
 
-          <ChipMenu
-            name={once ? "Opens once" : "Opens until it expires"}
-            label={
-              <>
-                <span>Opens</span>
-                <span className="text-ink">{once ? "once" : "until it expires"}</span>
-              </>
-            }
-            open={menu === "opens"}
-            disabled={disabled}
-            onToggle={() => setMenu(menu === "opens" ? null : "opens")}
-            onClose={() => setMenu(null)}
-          >
-            <fieldset className="m-0 min-w-0 border-0 p-0">
-              <legend className="px-2 pt-1.5 pb-2 text-xs font-medium text-faint">
-                The link opens
-              </legend>
-              <div className="flex flex-col gap-1">
-                {OPENS.map((option) => (
-                  <button
-                    key={option.label}
-                    type="button"
-                    aria-pressed={option.once === once}
-                    onClick={() => {
-                      setOnce(option.once);
-                      setMenu(null);
-                    }}
-                    className={`flex min-h-13 w-full items-center gap-3 px-3 py-2 ${OPTION} ${
-                      option.once === once ? SELECTED : ""
-                    }`}
-                  >
-                    <span className="flex flex-1 flex-col gap-px">
-                      <span className="text-sm">{option.label}</span>
-                      <span className="text-[13px] font-normal text-muted">{option.detail}</span>
-                    </span>
-                    {option.once === once && <CheckIcon />}
-                  </button>
-                ))}
-              </div>
-            </fieldset>
-          </ChipMenu>
+            <ChipMenu
+              name={once ? "Opens once" : "Opens until it expires"}
+              label={
+                <>
+                  <span>Opens</span>
+                  <span className="text-ink">{once ? "once" : "until it expires"}</span>
+                </>
+              }
+              open={menu === "opens"}
+              disabled={disabled}
+              onToggle={() => setMenu(menu === "opens" ? null : "opens")}
+              onClose={() => setMenu(null)}
+            >
+              <fieldset className="m-0 min-w-0 border-0 p-0">
+                <legend className="px-2 pt-1.5 pb-2 text-xs font-medium text-faint">
+                  The link opens
+                </legend>
+                <div className="flex flex-col gap-1">
+                  {OPENS.map((option) => (
+                    <button
+                      key={option.label}
+                      type="button"
+                      aria-pressed={option.once === once}
+                      onClick={() => {
+                        setOnce(option.once);
+                        setMenu(null);
+                      }}
+                      className={`flex min-h-13 w-full items-center gap-3 px-3 py-2 ${OPTION} ${
+                        option.once === once ? SELECTED : ""
+                      }`}
+                    >
+                      <span className="flex flex-1 flex-col gap-px">
+                        <span className="text-sm">{option.label}</span>
+                        <span className="text-[13px] font-normal text-muted">{option.detail}</span>
+                      </span>
+                      {option.once === once && <CheckIcon />}
+                    </button>
+                  ))}
+                </div>
+              </fieldset>
+            </ChipMenu>
 
-          <button
-            type="button"
-            aria-pressed={passwordOn}
-            disabled={disabled}
-            onClick={togglePassword}
-            className={`${CHIP} pl-2.5${passwordOn ? " bg-sunken text-ink" : ""}`}
-          >
-            {passwordOn ? <CheckIcon /> : <PlusIcon />}
-            Password
-          </button>
+            <button
+              type="button"
+              aria-pressed={passwordOn}
+              disabled={disabled}
+              onClick={togglePassword}
+              className={`${CHIP} pl-2.5${passwordOn ? " bg-hover text-ink" : ""}`}
+            >
+              {passwordOn ? <CheckIcon /> : <PlusIcon />}
+              Password
+            </button>
+          </div>
 
           <Button
             type="submit"
             disabled={disabled || !hasContent}
-            className="ml-auto gap-2.5 max-sm:w-full"
+            title={`Or press ${SHORTCUT}`}
+            className="max-sm:w-full"
           >
             {busy && <Spinner size="sm" />}
             {busy ? "Creating link…" : "Create link"}
-            {!busy && (
-              <kbd className="hidden font-mono text-xs font-medium opacity-75 pointer-fine:inline">
-                {SHORTCUT}
-              </kbd>
-            )}
           </Button>
         </div>
 
@@ -430,7 +430,8 @@ export default function Composer({ onSubmit, busy }: ComposerProps) {
         )}
       </div>
 
-      <p className="px-1 text-[13px] text-faint">
+      {/* Only where there is something to drag with. */}
+      <p className="hidden px-1 text-[13px] text-faint pointer-fine:block">
         {dragging
           ? "Drop to attach."
           : files.length > 0
