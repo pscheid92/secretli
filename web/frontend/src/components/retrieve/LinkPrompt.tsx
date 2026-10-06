@@ -77,7 +77,7 @@ export default function LinkPrompt({ initialMode = "choose" }: LinkPromptProps) 
 
   if (mode === "code") {
     return (
-      <div className="space-y-8">
+      <div key="code" className="space-y-8">
         <PageTitle lead="It's on the other device: a number and two words.">
           Enter the code
         </PageTitle>
@@ -88,7 +88,7 @@ export default function LinkPrompt({ initialMode = "choose" }: LinkPromptProps) 
 
   if (mode === "scan") {
     return (
-      <div className="space-y-8">
+      <div key="scan" className="space-y-8">
         <PageTitle lead="Hold the other screen up to the camera.">Scan the QR code</PageTitle>
         <QRScanner onScan={openShare} onCancel={() => setMode("choose")} />
       </div>
@@ -96,7 +96,7 @@ export default function LinkPrompt({ initialMode = "choose" }: LinkPromptProps) 
   }
 
   return (
-    <div className="space-y-8">
+    <div key="choose" className="space-y-8">
       <PageTitle
         lead={
           scanAvailable

@@ -9,7 +9,7 @@ Secrets are encrypted entirely in the browser — the server never sees plaintex
 - **Zero-knowledge encryption** — XChaCha20-Poly1305 encryption happens client-side; the server stores only opaque blobs
 - **Text and file sharing** — share secrets as text or upload files (up to 1 GiB)
 - **Multi-file support** — select multiple files and store them as an encrypted random-access bundle
-- **Burn after reading** — optionally destroy the secret after the first view
+- **Opens once** — links open once by default; a secret can also stay until it expires
 - **Password protection** — add a password for an extra layer of encryption (scrypt)
 - **Configurable expiration** — from 5 minutes to 7 days
 - **QR codes** — every share link includes a scannable QR code

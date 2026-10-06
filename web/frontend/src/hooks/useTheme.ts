@@ -11,6 +11,10 @@ function getSystemTheme(): "light" | "dark" {
 function applyTheme(theme: Theme) {
   const resolved = theme === "system" ? getSystemTheme() : theme;
   document.documentElement.classList.toggle("dark", resolved === "dark");
+  // The browser chrome on phones follows the page.
+  document
+    .querySelector('meta[name="theme-color"]')
+    ?.setAttribute("content", resolved === "dark" ? "#0a0a0b" : "#fafafa");
 }
 
 export function useTheme() {

@@ -239,7 +239,7 @@ export default function Composer({ onSubmit, busy }: ComposerProps) {
         )}
 
         {passwordOn && (
-          <div className="mx-2.5 border-t border-line pl-3.5">
+          <div className="mx-2.5 border-t border-line pl-3.5 motion-safe:animate-drop">
             <div className="flex items-center gap-3 py-0.5">
               <label htmlFor={passwordId} className="text-sm font-medium text-muted">
                 Password

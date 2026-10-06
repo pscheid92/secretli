@@ -12,7 +12,7 @@ interface FileListProps {
 export default function FileList({ files, disabled, onRemove }: FileListProps) {
   const total = files.reduce((sum, file) => sum + file.size, 0);
   return (
-    <div className="px-2.5 pt-2.5">
+    <div className="px-2.5 pt-2.5 motion-safe:animate-fade">
       <ul className="m-0 list-none p-0">
         {files.map((file, index) => (
           <li

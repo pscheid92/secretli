@@ -163,7 +163,7 @@ export default function SharePage() {
 
   if (view.kind === "result") {
     return (
-      <div className="space-y-7">
+      <div key="result" className="space-y-7">
         <SecretResult
           url={view.result.url}
           expiresAt={view.result.expiresAt}
@@ -180,7 +180,7 @@ export default function SharePage() {
 
   if (view.kind === "deleted") {
     return (
-      <div className="space-y-8">
+      <div key="deleted" className="space-y-8">
         <PageTitle lead="The link doesn't open anything any more.">Secret deleted</PageTitle>
         {startOverLink}
       </div>
@@ -188,7 +188,7 @@ export default function SharePage() {
   }
 
   return (
-    <div className="space-y-8">
+    <div key="compose" className="space-y-8">
       <PageTitle lead="Encrypted in your browser. Gone once it's read.">Share a secret</PageTitle>
       <Composer key={draft} onSubmit={handleSubmit} busy={busy} />
     </div>

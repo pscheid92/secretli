@@ -120,7 +120,11 @@ export default function ShareDetails({
         )}
         <Button type="submit" size="lg" disabled={revealing} className="self-start">
           {revealing && <Spinner size="sm" />}
-          {revealing ? "Decrypting…" : revealLabel(clientMeta)}
+          {revealing
+            ? clientMeta.password_protected
+              ? "Checking the password…"
+              : "Decrypting…"
+            : revealLabel(clientMeta)}
         </Button>
       </form>
 

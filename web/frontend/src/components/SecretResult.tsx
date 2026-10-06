@@ -140,7 +140,7 @@ export default function SecretResult({
         {panel === "qr" && (
           <div
             ref={panelRef}
-            className="flex flex-wrap items-center gap-x-7 gap-y-5 border-t border-line bg-sunken p-6"
+            className="flex flex-wrap items-center gap-x-7 gap-y-5 border-t border-line bg-sunken p-6 motion-safe:animate-drop"
           >
             <div className="rounded-[14px] bg-white p-3.5 ring-1 ring-line">
               <QRCode url={url} className="block h-48 w-48" />
@@ -152,7 +152,7 @@ export default function SecretResult({
           </div>
         )}
         {panel === "code" && (
-          <div ref={panelRef}>
+          <div ref={panelRef} className="motion-safe:animate-drop">
             <SendWithCode url={url} onClose={() => setPanel(null)} />
           </div>
         )}
@@ -179,7 +179,7 @@ export default function SecretResult({
           </button>
         </h2>
         {ownerOpen && (
-          <>
+          <div className="space-y-3.5 motion-safe:animate-drop">
             <p className="-mt-2 max-w-[36em] text-pretty text-sm text-muted">
               See whether it was opened, or delete it before anyone does. Keep this link to
               yourself: it opens the secret, too.
@@ -207,7 +207,7 @@ export default function SecretResult({
             <p className="text-[13px] text-faint">
               Secretli can't show these links again. Copy what you need before you leave.
             </p>
-          </>
+          </div>
         )}
       </section>
     </div>
