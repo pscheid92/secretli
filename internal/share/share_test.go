@@ -10,8 +10,8 @@ import (
 
 	"github.com/pscheid92/secretli/internal/share"
 	"github.com/pscheid92/secretli/internal/share/api"
-	"github.com/pscheid92/secretli/internal/share/bundle"
 	"github.com/pscheid92/secretli/internal/share/sharetest"
+	"github.com/secretli/format/bundle"
 )
 
 // memorySink keeps what Open hands over.

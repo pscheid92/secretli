@@ -79,6 +79,8 @@ From a checkout, `make build-cli` puts the binary at `bin/cli/secretli`. For she
 
 The server only ever sees the public ID, metadata/blob access tokens, deletion token, and encrypted ciphertext in request handling, and persists token hashes rather than raw tokens. It never sees plaintext, passwords, or encryption keys.
 
+The encrypted format is specified and implemented, in Go and TypeScript, in [secretli/format](https://github.com/secretli/format). The command-line client here uses its Go module; the web app will use its npm package.
+
 ## Quickstart
 
 ### Docker Compose

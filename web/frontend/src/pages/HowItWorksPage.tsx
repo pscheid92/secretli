@@ -4,6 +4,7 @@ import { FOCUS } from "../components/ui/styles";
 import { usePageTitle } from "../hooks/usePageTitle";
 
 const SOURCE = "https://github.com/pscheid92/secretli";
+const FORMAT = "https://github.com/secretli/format/blob/main/FORMAT.md";
 
 function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
@@ -122,9 +123,12 @@ export default function HowItWorksPage() {
       <Section title="What you can check yourself">
         <p>
           The <External href={SOURCE}>source code</External> is public, including the page you are
-          reading. The server images are built in the open, carry an SBOM and SLSA provenance, and
-          are signed with cosign. This page allows no scripts, styles or fonts from anywhere but
-          this site, and sends no referrer when you follow a link out.
+          reading. The encrypted format itself is written down in{" "}
+          <External href={FORMAT}>one document</External>, and two independent implementations
+          follow it, this app and the command-line client, each checked against the other's output.
+          The server images are built in the open, carry an SBOM and SLSA provenance, and are signed
+          with cosign. This page allows no scripts, styles or fonts from anywhere but this site, and
+          sends no referrer when you follow a link out.
         </p>
       </Section>
     </div>

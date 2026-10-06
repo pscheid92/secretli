@@ -14,7 +14,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/pscheid92/secretli/internal/share"
-	"github.com/pscheid92/secretli/internal/share/bundle"
+	"github.com/secretli/format/bundle"
 )
 
 type openOptions struct {

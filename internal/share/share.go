@@ -11,8 +11,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
-	"regexp"
 	"slices"
 	"strings"
 	"sync"
@@ -21,8 +19,9 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/pscheid92/secretli/internal/share/api"
-	"github.com/pscheid92/secretli/internal/share/bundle"
-	"github.com/pscheid92/secretli/internal/share/keys"
+	"github.com/secretli/format/bundle"
+	"github.com/secretli/format/keys"
+	"github.com/secretli/format/link"
 )
 
 const (
@@ -48,8 +47,6 @@ func ValidExpiration(s string) bool {
 }
 
 var (
-	// ErrNotALink is text that is not a Secretli link.
-	ErrNotALink = errors.New("not a Secretli link")
 	// ErrNotOwner is an operation that needs the owner link's deletion token.
 	ErrNotOwner = errors.New("this needs the owner link, the one with the part after \"!\"")
 	// ErrPasswordRequired is a secret with a password when none was given.
@@ -80,43 +77,16 @@ func (*NotFoundError) Error() string {
 	return "this secret is gone: it was opened already, or it expired"
 }
 
-var linkFragment = regexp.MustCompile(`^([A-Za-z0-9_-]{43})(?:!([A-Za-z0-9_-]{43}))?$`)
+// Link is a share link; ParseLink reads one as the web app prints it. Both
+// come from the format library.
+type Link = link.Link
 
-// Link is a share link: the server, the share secret and, for the owner
-// link, the deletion token.
-type Link struct {
-	Origin        string
-	Secret        string
-	DeletionToken string
-}
+// ErrNotALink is text that is not a Secretli link.
+var ErrNotALink = link.ErrNotALink
 
 // ParseLink reads a link as the web app prints it: https://host/s#secret or
 // https://host/s#secret!deletionToken.
-func ParseLink(raw string) (Link, error) {
-	u, err := url.Parse(strings.TrimSpace(raw))
-	if err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" || u.Path != "/s" {
-		return Link{}, ErrNotALink
-	}
-	m := linkFragment.FindStringSubmatch(u.Fragment)
-	if m == nil {
-		return Link{}, ErrNotALink
-	}
-	return Link{Origin: u.Scheme + "://" + u.Host, Secret: m[1], DeletionToken: m[2]}, nil
-}
-
-// IsOwner reports whether the link carries the deletion token.
-func (l Link) IsOwner() bool { return l.DeletionToken != "" }
-
-// Recipient is the link without the deletion token, the one to hand out.
-func (l Link) Recipient() Link { return Link{Origin: l.Origin, Secret: l.Secret} }
-
-func (l Link) String() string {
-	s := l.Origin + "/s#" + l.Secret
-	if l.DeletionToken != "" {
-		s += "!" + l.DeletionToken
-	}
-	return s
-}
+func ParseLink(raw string) (Link, error) { return link.Parse(raw) }
 
 // Kind is what a secret holds.
 type Kind string
