@@ -40,8 +40,8 @@ stdout carries only the result, so `secretli share … | pbcopy` copies exactly 
 Prebuilt binaries for macOS, Linux and Windows are on the [releases page](https://github.com/pscheid92/secretli/releases), under the `cli-v…` tags. Pick the archive for your system, check it against the checksums, and put the binary on your PATH:
 
 ```bash
-VERSION=0.1.0; OS=darwin; ARCH=arm64   # OS: darwin or linux; ARCH: arm64 or amd64
-BASE="https://github.com/pscheid92/secretli/releases/download/cli-v${VERSION}"
+VERSION=v0.1.0; OS=darwin; ARCH=arm64   # OS: darwin or linux; ARCH: arm64 or amd64
+BASE="https://github.com/pscheid92/secretli/releases/download/cli-${VERSION}"
 curl -fsSLO "${BASE}/secretli_${VERSION}_${OS}_${ARCH}.tar.gz"
 curl -fsSLO "${BASE}/checksums.txt"
 grep "secretli_${VERSION}_${OS}_${ARCH}.tar.gz" checksums.txt | shasum -a 256 -c -
