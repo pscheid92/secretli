@@ -4,6 +4,8 @@ A zero-knowledge, end-to-end encrypted secret sharing platform. Share text and f
 
 Secrets are encrypted entirely in the browser — the server never sees plaintext data or encryption keys.
 
+Live at **[secretli.app](https://secretli.app)**.
+
 ## Features
 
 - **Zero-knowledge encryption** — XChaCha20-Poly1305 encryption happens client-side; the server stores only opaque blobs
