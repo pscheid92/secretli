@@ -12,3 +12,11 @@ createRoot(document.getElementById("root")!).render(
     <App />
   </StrictMode>,
 );
+
+// The worker keeps text shared into the installed app off the wire; see
+// public/sw.js. It caches nothing, so a failed registration costs nothing.
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("/sw.js").catch(() => {});
+  });
+}

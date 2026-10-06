@@ -42,6 +42,8 @@ export interface ComposeProgress {
 interface ComposerProps {
   onSubmit: (data: ComposeData) => void;
   busy: ComposeProgress | null;
+  /** Text the box starts with, as when something was shared into the app. */
+  initialText?: string;
 }
 
 const EXPIRATIONS = [
@@ -81,8 +83,8 @@ function merge(current: File[], added: File[]): File[] {
  * settings sit in the bar underneath, so nothing has to be visited before
  * the link can be made. Files can be dropped anywhere on the page.
  */
-export default function Composer({ onSubmit, busy }: ComposerProps) {
-  const [text, setText] = useState("");
+export default function Composer({ onSubmit, busy, initialText = "" }: ComposerProps) {
+  const [text, setText] = useState(initialText);
   const [files, setFiles] = useState<File[]>([]);
   const [fileError, setFileError] = useState<string | null>(null);
   const [expiration, setExpiration] = useState("1d");
