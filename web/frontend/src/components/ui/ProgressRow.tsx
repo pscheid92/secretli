@@ -15,7 +15,7 @@ export default function ProgressRow({ label, fraction, action }: ProgressRowProp
   const percent =
     fraction === undefined ? null : Math.round(Math.min(Math.max(fraction, 0), 1) * 100);
   return (
-    <div className="relative border-t border-line">
+    <div className="relative border-t border-line motion-safe:animate-fade">
       {percent !== null && (
         <div
           role="progressbar"

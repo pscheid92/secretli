@@ -91,7 +91,7 @@ export default function ChipMenu({
         <div
           id={panelId}
           style={{ left: shift, width: `min(${PANEL_WIDTH}px, calc(100vw - 2rem))` }}
-          className="absolute bottom-[calc(100%+10px)] z-20 rounded-2xl border border-line bg-surface p-2 shadow-pop"
+          className="absolute bottom-[calc(100%+10px)] z-20 rounded-2xl border border-line bg-surface p-2 shadow-pop motion-safe:animate-rise"
         >
           {children}
         </div>

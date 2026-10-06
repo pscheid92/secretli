@@ -1,3 +1,4 @@
+import type { CSSProperties } from "react";
 import { Link, Outlet, useLocation } from "react-router";
 import { Toaster } from "sonner";
 import { useLeaveWarningActive } from "../hooks/useLeaveWarning";
@@ -24,6 +25,14 @@ function navLinkClass(active: boolean): string {
 
 const FOOTER_LINK = `inline-flex min-h-11 items-center rounded-md transition-colors duration-150 hover:text-ink ${FOCUS}`;
 
+/** Sonner's own variables, pointed at the tokens, so toasts look like the cards. */
+const TOAST_STYLE = {
+  "--normal-bg": "var(--surface)",
+  "--normal-text": "var(--ink)",
+  "--normal-border": "var(--line)",
+  "--border-radius": "16px",
+} as CSSProperties;
+
 export default function Layout() {
   const { theme, cycle } = useTheme();
   const location = useLocation();
@@ -39,6 +48,7 @@ export default function Layout() {
         theme={theme}
         position="bottom-right"
         closeButton
+        style={TOAST_STYLE}
         toastOptions={{ className: "font-sans" }}
       />
       <header className={`${COLUMN} flex items-center justify-between gap-4 pt-6`}>

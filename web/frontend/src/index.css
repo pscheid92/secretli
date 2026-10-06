@@ -81,6 +81,36 @@
   --text-lead: 1.0625rem;
   --text-lead--line-height: 1.5;
 
+  /* Things that appear come from where they were summoned: a menu rises from
+     its chip, a panel drops from its button. Always under motion-safe:. */
+  --ease-out-soft: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --animate-rise: rise 160ms var(--ease-out-soft) both;
+  --animate-drop: drop 160ms var(--ease-out-soft) both;
+  --animate-fade: fade 160ms ease-out both;
+  @keyframes rise {
+    from {
+      opacity: 0;
+      transform: translateY(4px);
+    }
+  }
+  @keyframes drop {
+    from {
+      opacity: 0;
+      transform: translateY(-4px);
+    }
+  }
+  @keyframes fade {
+    from {
+      opacity: 0;
+    }
+  }
+  @keyframes screen {
+    from {
+      opacity: 0;
+      transform: translateY(6px);
+    }
+  }
+
   /* Screens not yet moved to the tokens still say amber-400: paint it the accent. */
   --color-amber-400: var(--accent);
   /* Tailwind's own zinc-50, written in sRGB. Chrome reports the default as
@@ -96,5 +126,12 @@
     font-family: var(--font-sans);
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+  }
+
+  /* Every screen is one element under <main>; a new one settles into place. */
+  @media (prefers-reduced-motion: no-preference) {
+    main > * {
+      animation: screen 240ms var(--ease-out-soft) both;
+    }
   }
 }

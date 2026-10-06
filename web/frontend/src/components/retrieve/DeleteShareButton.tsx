@@ -31,7 +31,7 @@ export default function DeleteShareButton({
     <div
       role="group"
       aria-label="Delete it now"
-      className="flex flex-wrap items-center gap-x-4 gap-y-2"
+      className="flex flex-wrap items-center gap-x-4 gap-y-2 motion-safe:animate-fade"
     >
       <p className="min-w-60 flex-1 text-sm text-ink">
         Delete it for good? The link stops working right away.
