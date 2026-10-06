@@ -155,10 +155,15 @@ func TestMetaEnvelopeRoundTrip(t *testing.T) {
 	if _, err := other.DecryptMeta(envelope); !errors.Is(err, ErrDecrypt) {
 		t.Errorf("another key set: err = %v, want ErrDecrypt", err)
 	}
-	tampered := envelope[:len(envelope)-1] + "A"
-	if tampered == envelope {
-		tampered = envelope[:len(envelope)-1] + "B"
+	// Flip a bit of the ciphertext itself. Changing the last base64url
+	// character would not do: unpadded base64 leaves it a few bits that
+	// decoders ignore, so that change may decode to the same bytes.
+	ciphertext, err := base64.RawURLEncoding.DecodeString(parts[2])
+	if err != nil {
+		t.Fatal(err)
 	}
+	ciphertext[0] ^= 1
+	tampered := parts[0] + "$" + parts[1] + "$" + base64.RawURLEncoding.EncodeToString(ciphertext)
 	if _, err := ks.DecryptMeta(tampered); !errors.Is(err, ErrDecrypt) {
 		t.Errorf("tampered ciphertext: err = %v, want ErrDecrypt", err)
 	}
