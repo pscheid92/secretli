@@ -35,7 +35,38 @@ secretli delete <owner-link>          # remove a secret for everyone
 
 stdout carries only the result, so `secretli share … | pbcopy` copies exactly the link; everything else goes to stderr. `--json` is for scripts, and the exit code tells them what happened: 3 means a password is needed or wrong, 4 the secret is gone, 5 the server did not answer. `--server` (or `SECRETLI_SERVER`) points new secrets at a self-hosted instance.
 
-Install from the [releases](https://github.com/pscheid92/secretli/releases) (macOS, Linux and Windows, checksums signed with cosign), or with `go install github.com/pscheid92/secretli/cmd/secretli@main`.
+### Installing the CLI
+
+Prebuilt binaries for macOS, Linux and Windows are on the [releases page](https://github.com/pscheid92/secretli/releases), under the `cli-v…` tags. Pick the archive for your system, check it against the checksums, and put the binary on your PATH:
+
+```bash
+VERSION=0.1.0; OS=darwin; ARCH=arm64   # OS: darwin or linux; ARCH: arm64 or amd64
+BASE="https://github.com/pscheid92/secretli/releases/download/cli-v${VERSION}"
+curl -fsSLO "${BASE}/secretli_${VERSION}_${OS}_${ARCH}.tar.gz"
+curl -fsSLO "${BASE}/checksums.txt"
+grep "secretli_${VERSION}_${OS}_${ARCH}.tar.gz" checksums.txt | shasum -a 256 -c -
+tar -xzf "secretli_${VERSION}_${OS}_${ARCH}.tar.gz" secretli
+sudo install secretli /usr/local/bin/secretli
+```
+
+The checksums are signed in the release workflow with [cosign](https://docs.sigstore.dev/cosign/), keyless, so the signature is tied to this repository's GitHub identity rather than to a key anyone could lose:
+
+```bash
+curl -fsSLO "${BASE}/checksums.txt.sigstore.json"
+cosign verify-blob --bundle checksums.txt.sigstore.json \
+  --certificate-identity-regexp 'https://github.com/pscheid92/secretli/' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com checksums.txt
+```
+
+On Windows, download the `.zip`, unpack it, and add the folder containing `secretli.exe` to your PATH.
+
+With a Go toolchain you can build and install the current `main` instead:
+
+```bash
+go install github.com/pscheid92/secretli/cmd/secretli@main
+```
+
+From a checkout, `make build-cli` puts the binary at `bin/cli/secretli`. For shell completion, `secretli completion zsh --help` (or `bash`, `fish`, `powershell`) shows the one line to add to your shell's startup file.
 
 ## How It Works
 
