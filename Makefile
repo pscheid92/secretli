@@ -1,4 +1,4 @@
-.PHONY: dev dev-api dev-frontend build build-frontend build-go test test-short test-coverage e2e e2e-large clean lint lint-go lint-frontend vuln
+.PHONY: dev dev-api dev-frontend build build-frontend build-go build-cli test test-short test-coverage e2e e2e-large clean lint lint-go lint-frontend vuln
 
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS := -s -w -X github.com/pscheid92/secretli/cmd.Version=$(VERSION)
@@ -25,6 +25,10 @@ build-frontend:
 # Build Go binary (requires frontend to be built first)
 build-go:
 	CGO_ENABLED=0 go build -trimpath -ldflags="$(LDFLAGS)" -o bin/secretli .
+
+# Build the command-line client
+build-cli:
+	CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -X github.com/pscheid92/secretli/internal/cli.Version=$(VERSION)" -o bin/cli/secretli ./cmd/secretli
 
 # Fast unit tests only (no containers)
 test-short:

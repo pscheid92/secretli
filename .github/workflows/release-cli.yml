@@ -1,0 +1,104 @@
+name: Release CLI
+
+# The command-line client is released from tags like cli/v0.1.0. The server
+# is not versioned this way: it deploys from main (see ci.yml), and these
+# tags do nothing to it.
+on:
+  push:
+    tags: ["cli/v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      matrix:
+        include:
+          - { goos: linux, goarch: amd64 }
+          - { goos: linux, goarch: arm64 }
+          - { goos: darwin, goarch: amd64 }
+          - { goos: darwin, goarch: arm64 }
+          - { goos: windows, goarch: amd64 }
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+
+      - name: Create frontend dist stub
+        run: mkdir -p web/frontend/dist && touch web/frontend/dist/.gitkeep
+
+      - name: Build
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: "0"
+        run: |
+          version="${GITHUB_REF_NAME#cli/}"
+          name="secretli_${version}_${GOOS}_${GOARCH}"
+          mkdir -p "build/${name}" dist
+          ext=""
+          if [ "$GOOS" = "windows" ]; then ext=".exe"; fi
+          go build -trimpath \
+            -ldflags="-s -w -X github.com/pscheid92/secretli/internal/cli.Version=${version}" \
+            -o "build/${name}/secretli${ext}" ./cmd/secretli
+          cp LICENSE "build/${name}/" 2>/dev/null || true
+          if [ "$GOOS" = "windows" ]; then
+            (cd "build/${name}" && zip -q "../../dist/${name}.zip" ./*)
+          else
+            tar -C "build/${name}" -czf "dist/${name}.tar.gz" .
+          fi
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: cli-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: dist/*
+          if-no-files-found: error
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write # create the release
+      id-token: write # keyless cosign signature
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Checksums
+        working-directory: dist
+        run: sha256sum ./* > checksums.txt
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+
+      - name: Sign the checksums
+        working-directory: dist
+        run: cosign sign-blob --yes --bundle checksums.txt.sigstore.json checksums.txt
+
+      - name: Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="${GITHUB_REF_NAME#cli/}"
+          cat > notes.md <<EOF
+          The \`secretli\` command-line client, ${version}. It shares and opens secrets with the same encryption and the same links as the web app.
+
+          Download the archive for your system, unpack it, and put \`secretli\` on your PATH. To check the download:
+
+          \`\`\`
+          cosign verify-blob --bundle checksums.txt.sigstore.json \\
+            --certificate-identity-regexp 'https://github.com/pscheid92/secretli/' \\
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com checksums.txt
+          sha256sum --check --ignore-missing checksums.txt
+          \`\`\`
+          EOF
+          gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" \
+            --title "secretli CLI ${version}" --notes-file notes.md --generate-notes dist/*
