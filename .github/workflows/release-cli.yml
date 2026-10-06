@@ -1,11 +1,11 @@
 name: Release CLI
 
-# The command-line client is released from tags like cli/v0.1.0. The server
+# The command-line client is released from tags like cli-v0.1.0. The server
 # is not versioned this way: it deploys from main (see ci.yml), and these
 # tags do nothing to it.
 on:
   push:
-    tags: ["cli/v*"]
+    tags: ["cli-v*"]
 
 permissions:
   contents: read
@@ -38,7 +38,7 @@ jobs:
           GOARCH: ${{ matrix.goarch }}
           CGO_ENABLED: "0"
         run: |
-          version="${GITHUB_REF_NAME#cli/}"
+          version="${GITHUB_REF_NAME#cli-}"
           name="secretli_${version}_${GOOS}_${GOARCH}"
           mkdir -p "build/${name}" dist
           ext=""
@@ -87,7 +87,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          version="${GITHUB_REF_NAME#cli/}"
+          version="${GITHUB_REF_NAME#cli-}"
           cat > notes.md <<EOF
           The \`secretli\` command-line client, ${version}. It shares and opens secrets with the same encryption and the same links as the web app.
 
