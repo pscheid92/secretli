@@ -56,7 +56,7 @@ describe("QRScanner", () => {
     await waitFor(() => expect(onScan).toHaveBeenCalledWith(SECRET));
     expect(onScan).toHaveBeenCalledTimes(1);
     expect(stopTrack).toHaveBeenCalled();
-    expect(screen.getByText("Opening the share…")).toBeTruthy();
+    expect(screen.getByText("Opening the secret…")).toBeTruthy();
   });
 
   it("keeps scanning and names the host of a share link for another site", async () => {

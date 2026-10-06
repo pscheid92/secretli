@@ -1,4 +1,5 @@
 import {
+  completeWord,
   formatCode,
   parseCode,
   randomWords,
@@ -66,5 +67,18 @@ describe("parseCode", () => {
 describe("transferPassword", () => {
   it("uses only the words, joined by a dash", () => {
     expect(new TextDecoder().decode(transferPassword(["acid", "rocket"]))).toBe("acid-rocket");
+  });
+});
+
+describe("completeWord", () => {
+  it("completes a word from its first three letters, and leaves shorter input alone", () => {
+    expect(completeWord("aci")).toBe("acid");
+    expect(completeWord("acid")).toBe("acid");
+    expect(completeWord("ac")).toBeNull();
+  });
+
+  it("does not complete letters that are not a word", () => {
+    expect(completeWord("acix")).toBeNull();
+    expect(completeWord("zzz")).toBeNull();
   });
 });

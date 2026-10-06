@@ -71,7 +71,7 @@ test.describe("QR code scanning", () => {
           await receiver.goto("/s");
           // Chromium has the built-in detector only on macOS, ChromeOS and Android.
           if (decoder === "jsQR" || (await receiver.evaluate(() => "BarcodeDetector" in window))) {
-            await receiver.getByRole("button", { name: "Scan QR code" }).click();
+            await receiver.getByRole("button", { name: "Scan a QR code" }).click();
             // The share details decrypt only with the scanned key.
             await expect(receiver.locator("h1")).toHaveText("Someone sent you a secret", {
               timeout: 15000,

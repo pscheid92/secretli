@@ -38,12 +38,13 @@ test.describe("Short-code transfer", () => {
       const receiver = await receiverContext.newPage();
       // The address the sender's panel names: code entry, ready to type.
       await receiver.goto("/c");
-      const codeField = receiver.getByLabel(/Type the code/);
+      // A whole code typed into the number field spreads over all three fields.
+      const codeField = receiver.getByLabel("Number");
       await expect(codeField).toBeFocused();
 
       await test.step("a wrong code", async () => {
         await codeField.fill(wrongCode(firstCode));
-        await receiver.getByRole("button", { name: "Receive share" }).click();
+        await receiver.getByRole("button", { name: "Receive", exact: true }).click();
         await expect(receiver.getByText("The code didn't match. Ask for a new code.")).toBeVisible({
           timeout: 15000,
         });
@@ -58,7 +59,7 @@ test.describe("Short-code transfer", () => {
         expect(code).not.toBe(firstCode);
 
         await codeField.fill(code);
-        await receiver.getByRole("button", { name: "Receive share" }).click();
+        await receiver.getByRole("button", { name: "Receive", exact: true }).click();
 
         await expect(receiver.locator("h1")).toHaveText("Someone sent you a secret", {
           timeout: 15000,
